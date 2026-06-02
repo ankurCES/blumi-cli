@@ -8,9 +8,23 @@ type Props = {
   onPersona: (name: string) => void
   yolo: boolean
   onYolo: (on: boolean) => void
+  busy: boolean
+  onCompact: () => void
+  onUndo: () => void
 }
 
-export function Header({ config, connected, personas, persona, onPersona, yolo, onYolo }: Props) {
+export function Header({
+  config,
+  connected,
+  personas,
+  persona,
+  onPersona,
+  yolo,
+  onYolo,
+  busy,
+  onCompact,
+  onUndo,
+}: Props) {
   return (
     <header className="header">
       <div className="brand">
@@ -41,6 +55,12 @@ export function Header({ config, connected, personas, persona, onPersona, yolo, 
           title="Auto-approve tool calls without prompting"
         >
           {yolo ? '● auto-approve' : '○ auto-approve'}
+        </button>
+        <button className="hbtn" onClick={onCompact} disabled={busy} title="Compact the context now">
+          compact
+        </button>
+        <button className="hbtn" onClick={onUndo} disabled={busy} title="Undo the last file change">
+          undo
         </button>
         {config && (
           <span className="cwd" title={config.working_dir}>

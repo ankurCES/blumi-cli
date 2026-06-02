@@ -1,9 +1,75 @@
-//! `blumi web` — the embedded web UI + HTTP/SSE server over a live session.
+//! `blumi web` — the embedded web UI + HTTP/SSE server with live session
+//! switch/resume.
 
 use crate::engine::build_session;
+use async_trait::async_trait;
 use blumi_config::BlumiConfig;
+use blumi_core::{SessionHandle, SessionState};
+use blumi_persist::Store;
+use blumi_protocol::SessionId;
 use std::net::SocketAddr;
 use std::sync::Arc;
+
+/// Creates / resumes / lists / saves sessions for the web server.
+struct WebSessionProvider {
+    config: BlumiConfig,
+    store: Option<Arc<Store>>,
+}
+
+#[async_trait]
+impl blumi_web::SessionProvider for WebSessionProvider {
+    async fn create(&self) -> anyhow::Result<SessionHandle> {
+        // Approvals are handled by the UI's cards, so no yolo.
+        build_session(&self.config, false, None).await
+    }
+
+    async fn resume(&self, id: &str) -> anyhow::Result<SessionHandle> {
+        let store = self
+            .store
+            .as_ref()
+            .ok_or_else(|| anyhow::anyhow!("session history is unavailable"))?;
+        let stored = store
+            .load_session(id)
+            .await?
+            .ok_or_else(|| anyhow::anyhow!("session {id} not found"))?;
+        let model = if stored.meta.model.is_empty() {
+            self.config.llm.model.clone()
+        } else {
+            stored.meta.model.clone()
+        };
+        let mut state = SessionState::new(SessionId::from(stored.meta.id.clone()), model);
+        state.messages = stored.messages;
+        state.total_input_tokens = stored.meta.input_tokens.max(0) as u32;
+        state.total_output_tokens = stored.meta.output_tokens.max(0) as u32;
+        build_session(&self.config, false, Some(state)).await
+    }
+
+    async fn list(&self) -> Vec<blumi_web::SessionInfo> {
+        match &self.store {
+            Some(store) => store
+                .list_sessions(50)
+                .await
+                .unwrap_or_default()
+                .into_iter()
+                .map(|m| blumi_web::SessionInfo {
+                    id: m.id,
+                    title: m.title,
+                    model: m.model,
+                    message_count: m.message_count,
+                })
+                .collect(),
+            None => Vec::new(),
+        }
+    }
+
+    async fn save(&self, handle: &SessionHandle) {
+        if let Some(store) = &self.store {
+            if let Err(e) = store.save_snapshot(&handle.snapshot().await).await {
+                tracing::warn!("could not save session: {e}");
+            }
+        }
+    }
+}
 
 pub async fn run(config: BlumiConfig) -> anyhow::Result<()> {
     config.paths.ensure_dirs().ok();
@@ -15,12 +81,7 @@ pub async fn run(config: BlumiConfig) -> anyhow::Result<()> {
     let addr: SocketAddr = ([127, 0, 0, 1], port).into();
     let url = format!("http://{addr}");
 
-    // Approvals are handled by the UI's cards, so the server runs without yolo.
-    let session = build_session(&config, false, None).await?;
-    let store = blumi_persist::Store::open(&config.paths.db)
-        .await
-        .ok()
-        .map(Arc::new);
+    let store = Store::open(&config.paths.db).await.ok().map(Arc::new);
 
     let personas = crate::engine::resolve_personas(&config)
         .into_iter()
@@ -34,11 +95,14 @@ pub async fn run(config: BlumiConfig) -> anyhow::Result<()> {
         version: env!("CARGO_PKG_VERSION").to_string(),
         personas,
         persona: crate::engine::active_persona_name(&config),
+        context_size: config.llm.context_size,
     };
+
+    let provider = Arc::new(WebSessionProvider { config, store });
 
     // Discovery lock file (analog of OpenMono's ACP lock writer) so other tools
     // can find the running server.
-    let lock = config.paths.home.join("web.lock");
+    let lock = provider.config.paths.home.join("web.lock");
     let _ = std::fs::write(
         &lock,
         format!("{{\"url\":\"{url}\",\"pid\":{}}}", std::process::id()),
@@ -50,7 +114,7 @@ pub async fn run(config: BlumiConfig) -> anyhow::Result<()> {
         open_browser(&url);
     }
 
-    let result = blumi_web::serve(session, store, web, addr).await;
+    let result = blumi_web::serve(provider, web, addr).await;
     let _ = std::fs::remove_file(&lock);
     result
 }

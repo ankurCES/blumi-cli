@@ -2,15 +2,16 @@
 //!
 //! Client→server actions are discrete POSTs; the agent stream is server→client
 //! SSE. Every SSE event carries the monotonic `seq` as its id, so a reconnecting
-//! client sends `Last-Event-ID` and we replay the gap before attaching live —
-//! the same gap-free attach the TUI gets from the broadcast log.
+//! client sends `Last-Event-ID` and we replay the gap before attaching live.
+//! Handlers act on the *current* session, so live session switch/resume just
+//! re-points `AppState` and clients re-subscribe.
 
 use crate::AppState;
 use axum::extract::State;
 use axum::http::HeaderMap;
 use axum::response::sse::{Event as SseEvent, KeepAlive, Sse};
 use axum::Json;
-use blumi_protocol::{ApprovalScope, Command, Decision, Envelope, RequestId};
+use blumi_protocol::{ApprovalScope, Command, Decision, Envelope, RequestId, Role};
 use futures::Stream;
 use serde::Deserialize;
 use serde_json::{json, Value};
@@ -28,6 +29,7 @@ pub async fn config(State(state): State<AppState>) -> Json<Value> {
         "working_dir": state.config.working_dir,
         "version": state.config.version,
         "persona": state.config.persona,
+        "context_size": state.config.context_size,
     }))
 }
 
@@ -55,7 +57,8 @@ pub async fn set_persona(
     Json(body): Json<PersonaBody>,
 ) -> Json<Value> {
     let ok = state
-        .session
+        .current()
+        .await
         .send(Command::SetPersona { name: body.name })
         .await
         .is_ok();
@@ -63,25 +66,74 @@ pub async fn set_persona(
 }
 
 pub async fn sessions(State(state): State<AppState>) -> Json<Value> {
-    let list = match &state.store {
-        Some(store) => store.list_sessions(50).await.unwrap_or_default(),
-        None => Vec::new(),
-    };
-    let arr: Vec<Value> = list
+    let arr: Vec<Value> = state
+        .provider()
+        .list()
+        .await
         .iter()
-        .map(|m| {
+        .map(|s| {
             json!({
-                "id": m.id,
-                "title": m.title,
-                "model": m.model,
-                "updated_at": m.updated_at,
-                "message_count": m.message_count,
-                "input_tokens": m.input_tokens,
-                "output_tokens": m.output_tokens,
+                "id": s.id,
+                "title": s.title,
+                "model": s.model,
+                "message_count": s.message_count,
             })
         })
         .collect();
     Json(json!({ "sessions": arr }))
+}
+
+pub async fn session_new(State(state): State<AppState>) -> Json<Value> {
+    match state.provider().create().await {
+        Ok(handle) => {
+            state.swap(handle).await;
+            Json(json!({ "ok": true }))
+        }
+        Err(e) => Json(json!({ "ok": false, "error": e.to_string() })),
+    }
+}
+
+#[derive(Deserialize)]
+pub struct ResumeBody {
+    pub id: String,
+}
+
+pub async fn session_resume(
+    State(state): State<AppState>,
+    Json(body): Json<ResumeBody>,
+) -> Json<Value> {
+    match state.provider().resume(&body.id).await {
+        Ok(handle) => {
+            state.swap(handle).await;
+            Json(json!({ "ok": true }))
+        }
+        Err(e) => Json(json!({ "ok": false, "error": e.to_string() })),
+    }
+}
+
+/// The current session's transcript (for restore-on-load and after a switch).
+pub async fn messages(State(state): State<AppState>) -> Json<Value> {
+    let snap = state.current().await.snapshot().await;
+    let arr: Vec<Value> = snap
+        .messages
+        .iter()
+        .filter_map(|m| {
+            let role = match m.role {
+                Role::User => "user",
+                Role::Assistant => "assistant",
+                Role::Tool => "tool",
+                Role::System => return None,
+            };
+            Some(json!({ "role": role, "text": m.text(), "tool_name": m.tool_name }))
+        })
+        .collect();
+    Json(json!({
+        "messages": arr,
+        "model": snap.model,
+        "input_tokens": snap.total_input_tokens,
+        "output_tokens": snap.total_output_tokens,
+        "turn_count": snap.turn_count,
+    }))
 }
 
 #[derive(Deserialize)]
@@ -91,7 +143,8 @@ pub struct SendBody {
 
 pub async fn chat_send(State(state): State<AppState>, Json(body): Json<SendBody>) -> Json<Value> {
     let ok = state
-        .session
+        .current()
+        .await
         .send(Command::UserMessage {
             text: body.text,
             attachments: vec![],
@@ -103,7 +156,17 @@ pub async fn chat_send(State(state): State<AppState>, Json(body): Json<SendBody>
 }
 
 pub async fn chat_cancel(State(state): State<AppState>) -> Json<Value> {
-    let ok = state.session.send(Command::Cancel).await.is_ok();
+    let ok = state.current().await.send(Command::Cancel).await.is_ok();
+    Json(json!({ "ok": ok }))
+}
+
+pub async fn compact(State(state): State<AppState>) -> Json<Value> {
+    let ok = state.current().await.send(Command::Compact).await.is_ok();
+    Json(json!({ "ok": ok }))
+}
+
+pub async fn undo(State(state): State<AppState>) -> Json<Value> {
+    let ok = state.current().await.send(Command::Undo).await.is_ok();
     Json(json!({ "ok": ok }))
 }
 
@@ -114,7 +177,8 @@ pub struct YoloBody {
 
 pub async fn set_yolo(State(state): State<AppState>, Json(body): Json<YoloBody>) -> Json<Value> {
     let ok = state
-        .session
+        .current()
+        .await
         .send(Command::SetYolo { on: body.on })
         .await
         .is_ok();
@@ -128,7 +192,8 @@ pub struct ModelBody {
 
 pub async fn set_model(State(state): State<AppState>, Json(body): Json<ModelBody>) -> Json<Value> {
     let ok = state
-        .session
+        .current()
+        .await
         .send(Command::SetModel { model: body.model })
         .await
         .is_ok();
@@ -148,7 +213,8 @@ pub async fn approval_respond(
     Json(body): Json<ApprovalBody>,
 ) -> Json<Value> {
     let ok = state
-        .session
+        .current()
+        .await
         .send(Command::ApproveTool {
             request_id: body.request_id,
             decision: body.decision,
@@ -170,7 +236,8 @@ pub async fn clarify_respond(
     Json(body): Json<ClarifyBody>,
 ) -> Json<Value> {
     let ok = state
-        .session
+        .current()
+        .await
         .send(Command::AnswerClarify {
             request_id: body.request_id,
             value: body.value,
@@ -191,9 +258,10 @@ pub async fn chat_stream(
         .and_then(|s| s.parse::<u64>().ok())
         .unwrap_or(0);
 
+    let session = state.current().await;
     // Subscribe before reading the backlog so nothing slips through the gap.
-    let mut rx = state.session.subscribe();
-    let backlog = state.session.events_since(last);
+    let mut rx = session.subscribe();
+    let backlog = session.events_since(last);
 
     let stream = async_stream::stream! {
         let mut high = last;
