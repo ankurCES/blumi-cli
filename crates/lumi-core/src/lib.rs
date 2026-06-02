@@ -22,7 +22,7 @@ pub use emit::{
 pub use error::{ExecError, LlmError, ToolError};
 pub use eventlog::EventLog;
 pub use exec::{ExecOutput, ExecRequest, Executor};
-pub use llm::{LlmClient, LlmOptions, ProviderCaps};
+pub use llm::{LlmClient, LlmOptions, ProviderCaps, ToolSpec};
 pub use runner::{TurnContext, TurnRunner};
 pub use session::{SessionSnapshot, SessionState};
 pub use tool::{parse_input, schema_for, Tool, ToolContext, Typed, TypedTool};

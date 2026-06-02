@@ -7,3 +7,25 @@ rust-version.workspace = true
 license.workspace = true
 
 [dependencies]
+lumi-core.workspace = true
+lumi-config.workspace = true
+lumi-protocol.workspace = true
+
+tokio = { workspace = true }
+tokio-util.workspace = true
+futures.workspace = true
+async-trait.workspace = true
+async-stream = "0.3"
+
+reqwest.workspace = true
+eventsource-stream.workspace = true
+
+serde.workspace = true
+serde_json.workspace = true
+
+anyhow.workspace = true
+thiserror.workspace = true
+tracing.workspace = true
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }

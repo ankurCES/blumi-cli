@@ -42,19 +42,29 @@ pub struct ProviderCaps {
     pub vision: bool,
 }
 
+/// A provider-neutral tool definition. The loop builds these from the registry;
+/// each provider client formats them into its own wire shape.
+#[derive(Debug, Clone)]
+pub struct ToolSpec {
+    pub name: String,
+    pub description: String,
+    /// JSON Schema for the tool's parameters.
+    pub parameters: serde_json::Value,
+}
+
 /// A streaming chat completion client. One per provider implementation; the
 /// agent loop only ever sees this trait.
 #[async_trait]
 pub trait LlmClient: Send + Sync {
-    /// Start a streaming completion. `tools` is the JSON-Schema tool array (in
-    /// the provider's expected shape) or `None` to disable tool calling.
+    /// Start a streaming completion. `tools` is the provider-neutral tool list
+    /// (empty to disable tool calling); the client formats it for its wire API.
     ///
     /// The returned stream yields [`StreamChunk`]s until a terminal
     /// `StreamChunk::Done` (or an error). Cancelling `ct` aborts the request.
     async fn stream_chat(
         &self,
         messages: &[Message],
-        tools: Option<&serde_json::Value>,
+        tools: &[ToolSpec],
         options: &LlmOptions,
         ct: CancellationToken,
     ) -> Result<BoxStream<'static, Result<StreamChunk, LlmError>>, LlmError>;
