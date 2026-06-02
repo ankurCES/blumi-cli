@@ -7,6 +7,7 @@ mod prompt;
 mod run;
 mod session;
 mod tui;
+mod web;
 
 use clap::{Parser, Subcommand};
 use std::path::PathBuf;
@@ -44,7 +45,7 @@ enum Commands {
     Tui,
     /// Run the setup wizard (pick provider, enter key/endpoint, choose model).
     Login,
-    /// Web UI + server (Phase 4).
+    /// Launch the embedded web UI + HTTP/SSE server.
     Web,
     /// List, search, and show stored sessions.
     Session {
@@ -121,11 +122,7 @@ async fn main() -> anyhow::Result<()> {
             };
             tui::run(config).await
         }
-        Some(Commands::Web) => {
-            branding::banner();
-            eprintln!("  the web UI lands in Phase 4. For now: blumi run \"<prompt>\"");
-            Ok(())
-        }
+        Some(Commands::Web) => web::run(config).await,
         Some(Commands::Session { action }) => match action {
             SessionCmd::List => session::list(config).await,
             SessionCmd::Search { query } => session::search(config, query.join(" ")).await,

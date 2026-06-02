@@ -7,3 +7,22 @@ rust-version.workspace = true
 license.workspace = true
 
 [dependencies]
+blumi-core.workspace = true
+blumi-protocol.workspace = true
+blumi-config.workspace = true
+blumi-persist.workspace = true
+
+tokio = { workspace = true }
+tokio-stream.workspace = true
+futures.workspace = true
+
+serde.workspace = true
+serde_json.workspace = true
+
+axum.workspace = true
+rust-embed.workspace = true
+async-stream.workspace = true
+mime_guess.workspace = true
+
+anyhow.workspace = true
+tracing.workspace = true

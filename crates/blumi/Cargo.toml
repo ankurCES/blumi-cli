@@ -22,6 +22,7 @@ blumi-skills.workspace = true
 blumi-mcp.workspace = true
 blumi-persist.workspace = true
 blumi-tui.workspace = true
+blumi-web.workspace = true
 
 tokio = { workspace = true }
 clap.workspace = true

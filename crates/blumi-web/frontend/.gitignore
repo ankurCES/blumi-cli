@@ -1,0 +1,9 @@
+node_modules
+.vite
+*.local
+.DS_Store
+# NOTE: dist/ is intentionally committed — rust-embed bakes it into the binary,
+# so `cargo build` works without running `npm run build` first.
+
+# TS build cache
+*.tsbuildinfo

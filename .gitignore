@@ -7,9 +7,9 @@
 blumi.db
 blumi.db-*
 
-# Frontend (blumi-web)
+# Frontend (blumi-web). dist/ is intentionally committed so rust-embed bakes the
+# built UI into the binary — `cargo build` then works without running `npm`.
 crates/blumi-web/frontend/node_modules/
-crates/blumi-web/frontend/dist/
 crates/blumi-web/frontend/.vite/
 
 # Editor / OS
