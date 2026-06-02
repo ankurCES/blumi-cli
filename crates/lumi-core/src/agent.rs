@@ -128,7 +128,9 @@ impl TurnRunner for AgentTurnRunner {
             };
 
             let msg_id = MessageId::new();
-            ctx.events.emit(Event::AssistantStarted { message_id: msg_id.clone() });
+            ctx.events.emit(Event::AssistantStarted {
+                message_id: msg_id.clone(),
+            });
 
             let mut text = String::new();
             let mut accum: BTreeMap<u32, ToolAccum> = BTreeMap::new();
@@ -166,7 +168,10 @@ impl TurnRunner for AgentTurnRunner {
                 }
             }
 
-            ctx.events.emit(Event::AssistantFinished { message_id: msg_id, finish });
+            ctx.events.emit(Event::AssistantFinished {
+                message_id: msg_id,
+                finish,
+            });
             if usage.total() > 0 {
                 let mut st = state.lock().await;
                 st.record_usage(&usage);
@@ -197,10 +202,14 @@ impl TurnRunner for AgentTurnRunner {
             }
 
             // Record the assistant message (with its tool calls) before results.
-            state.lock().await.messages.push(Message::assistant_tool_calls(
-                (!text.is_empty()).then_some(text),
-                tool_calls.clone(),
-            ));
+            state
+                .lock()
+                .await
+                .messages
+                .push(Message::assistant_tool_calls(
+                    (!text.is_empty()).then_some(text),
+                    tool_calls.clone(),
+                ));
 
             // Execute: read-only + concurrency-safe in parallel, the rest serial.
             let results = self.execute_calls(&tool_calls, &tool_ctx, &ct).await;
@@ -224,7 +233,10 @@ impl TurnRunner for AgentTurnRunner {
             }
         }
 
-        emit_error(&ctx, "reached the maximum number of tool iterations for this turn");
+        emit_error(
+            &ctx,
+            "reached the maximum number of tool iterations for this turn",
+        );
         DoneReason::MaxIterations
     }
 }
@@ -256,7 +268,13 @@ impl AgentTurnRunner {
         let mut out = std::collections::HashMap::new();
 
         let parallel_results = join_all(parallel.iter().map(|call| {
-            execute_tool_call(&self.registry, &self.perms, tool_ctx, call, ct.child_token())
+            execute_tool_call(
+                &self.registry,
+                &self.perms,
+                tool_ctx,
+                call,
+                ct.child_token(),
+            )
         }))
         .await;
         for (call, result) in parallel.iter().zip(parallel_results) {
@@ -264,9 +282,14 @@ impl AgentTurnRunner {
         }
 
         for call in serial {
-            let result =
-                execute_tool_call(&self.registry, &self.perms, tool_ctx, call, ct.child_token())
-                    .await;
+            let result = execute_tool_call(
+                &self.registry,
+                &self.perms,
+                tool_ctx,
+                call,
+                ct.child_token(),
+            )
+            .await;
             out.insert(call.id.0.clone(), result);
         }
 
@@ -292,14 +315,20 @@ fn finalize_tool_calls(accum: BTreeMap<u32, ToolAccum>) -> Vec<ToolCall> {
                 serde_json::from_str(&a.args).unwrap_or(serde_json::json!({}))
             };
             let id = a.id.map(ToolCallId::from).unwrap_or_default();
-            Some(ToolCall { id, name, arguments })
+            Some(ToolCall {
+                id,
+                name,
+                arguments,
+            })
         })
         .collect()
 }
 
 fn signature_of(calls: &[ToolCall]) -> String {
-    let mut parts: Vec<String> =
-        calls.iter().map(|c| format!("{}:{}", c.name, c.arguments)).collect();
+    let mut parts: Vec<String> = calls
+        .iter()
+        .map(|c| format!("{}:{}", c.name, c.arguments))
+        .collect();
     parts.sort();
     parts.join("|")
 }
@@ -309,7 +338,11 @@ fn is_doom_loop(signatures: &[String]) -> bool {
         return false;
     }
     let last = &signatures[signatures.len() - 1];
-    signatures.iter().rev().take(DOOM_REPEATS).all(|s| s == last)
+    signatures
+        .iter()
+        .rev()
+        .take(DOOM_REPEATS)
+        .all(|s| s == last)
 }
 
 fn add_usage(total: &mut Usage, u: &Usage) {
@@ -390,7 +423,11 @@ mod tests {
     struct NoopExec;
     #[async_trait]
     impl Executor for NoopExec {
-        async fn exec(&self, _r: ExecRequest, _ct: CancellationToken) -> Result<ExecOutput, ExecError> {
+        async fn exec(
+            &self,
+            _r: ExecRequest,
+            _ct: CancellationToken,
+        ) -> Result<ExecOutput, ExecError> {
             Err(ExecError::Unavailable("noop".into()))
         }
         async fn read_file(&self, _p: &Path) -> Result<Vec<u8>, ExecError> {
@@ -441,12 +478,18 @@ mod tests {
                     // iteration 1: call the Flag tool
                     vec![
                         tool_call_chunk("c1", "Flag", "{}"),
-                        StreamChunk::Done { reason: FinishReason::ToolCalls },
+                        StreamChunk::Done {
+                            reason: FinishReason::ToolCalls,
+                        },
                     ],
                     // iteration 2: final answer
                     vec![
-                        StreamChunk::Text { text: "all done".into() },
-                        StreamChunk::Done { reason: FinishReason::Stop },
+                        StreamChunk::Text {
+                            text: "all done".into(),
+                        },
+                        StreamChunk::Done {
+                            reason: FinishReason::Stop,
+                        },
                     ],
                 ]
                 .into(),
@@ -455,7 +498,10 @@ mod tests {
 
         let mut reg = ToolRegistry::new();
         reg.register(Arc::new(FlagTool(flag.clone())));
-        let perms = Arc::new(PermissionEngine::new(PermissionConfig { yolo: true, ..Default::default() }));
+        let perms = Arc::new(PermissionEngine::new(PermissionConfig {
+            yolo: true,
+            ..Default::default()
+        }));
 
         let runner = Arc::new(AgentTurnRunner::new(
             llm,
@@ -471,16 +517,29 @@ mod tests {
 
         let h = spawn_session(SessionId::from("s"), "m", runner);
         let mut rx = h.subscribe();
-        h.send(Command::UserMessage { text: "do it".into(), attachments: vec![], stream_id: None })
-            .await
-            .unwrap();
+        h.send(Command::UserMessage {
+            text: "do it".into(),
+            attachments: vec![],
+            stream_id: None,
+        })
+        .await
+        .unwrap();
 
         let events = drain_until_done(&mut rx).await;
 
         assert!(flag.load(Ordering::SeqCst), "tool should have run");
-        assert!(events.iter().any(|e| matches!(e, Event::ToolStart { name, .. } if name == "Flag")));
-        assert!(events.iter().any(|e| matches!(e, Event::ToolResult { ok: true, .. })));
-        assert!(matches!(events.last().unwrap(), Event::TurnDone { reason: DoneReason::Completed }));
+        assert!(events
+            .iter()
+            .any(|e| matches!(e, Event::ToolStart { name, .. } if name == "Flag")));
+        assert!(events
+            .iter()
+            .any(|e| matches!(e, Event::ToolResult { ok: true, .. })));
+        assert!(matches!(
+            events.last().unwrap(),
+            Event::TurnDone {
+                reason: DoneReason::Completed
+            }
+        ));
 
         let snap = h.snapshot().await;
         // user, assistant(tool_calls), tool result, assistant("all done")
@@ -501,7 +560,11 @@ mod tests {
         let mut accum = BTreeMap::new();
         accum.insert(
             0u32,
-            ToolAccum { id: Some("c1".into()), name: Some("Bash".into()), args: "{\"command\":\"ls\"}".into() },
+            ToolAccum {
+                id: Some("c1".into()),
+                name: Some("Bash".into()),
+                args: "{\"command\":\"ls\"}".into(),
+            },
         );
         let calls = finalize_tool_calls(accum);
         assert_eq!(calls.len(), 1);

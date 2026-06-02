@@ -45,7 +45,10 @@ pub enum Command {
         scope: ApprovalScope,
     },
     /// Resolve a pending [`crate::Event::ClarifyRequest`].
-    AnswerClarify { request_id: RequestId, value: String },
+    AnswerClarify {
+        request_id: RequestId,
+        value: String,
+    },
     /// Switch the active model mid-session.
     SetModel { model: String },
 }
@@ -68,11 +71,14 @@ mod tests {
 
     #[test]
     fn approve_defaults_scope_once() {
-        let c: Command =
-            serde_json::from_str(r#"{"type":"approve_tool","request_id":"req_1","decision":"allow"}"#)
-                .unwrap();
+        let c: Command = serde_json::from_str(
+            r#"{"type":"approve_tool","request_id":"req_1","decision":"allow"}"#,
+        )
+        .unwrap();
         match c {
-            Command::ApproveTool { scope, decision, .. } => {
+            Command::ApproveTool {
+                scope, decision, ..
+            } => {
                 assert_eq!(scope, ApprovalScope::Once);
                 assert_eq!(decision, Decision::Allow);
             }

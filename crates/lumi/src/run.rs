@@ -7,7 +7,9 @@ use lumi_core::{
 };
 use lumi_exec::LocalExecutor;
 use lumi_llm::{build_client, MockLlmClient};
-use lumi_protocol::{ApprovalScope, Command, Decision, Event, FinishReason, SessionId, StreamChunk};
+use lumi_protocol::{
+    ApprovalScope, Command, Decision, Event, FinishReason, SessionId, StreamChunk,
+};
 use lumi_skills::MemorySnapshot;
 use std::io::Write;
 use std::sync::Arc;
@@ -17,20 +19,24 @@ pub async fn run(config: LumiConfig, prompt: String, yolo: bool) -> anyhow::Resu
     config.paths.ensure_dirs().ok();
 
     // Build the LLM client (special-case the offline "mock" provider).
-    let llm: Arc<dyn LlmClient> = if config.llm.provider == "mock" {
-        Arc::new(MockLlmClient::new(vec![
+    let llm: Arc<dyn LlmClient> =
+        if config.llm.provider == "mock" {
+            Arc::new(MockLlmClient::new(vec![
             StreamChunk::Text {
                 text: "Hello from lumi (mock provider). Configure a real provider to do real work."
                     .into(),
             },
             StreamChunk::Done { reason: FinishReason::Stop },
         ]))
-    } else {
-        let provider = config.active_provider().ok_or_else(|| {
-            anyhow::anyhow!("unknown provider '{}' (check ~/.lumi/settings.json)", config.llm.provider)
-        })?;
-        build_client(provider)?
-    };
+        } else {
+            let provider = config.active_provider().ok_or_else(|| {
+                anyhow::anyhow!(
+                    "unknown provider '{}' (check ~/.lumi/settings.json)",
+                    config.llm.provider
+                )
+            })?;
+            build_client(provider)?
+        };
 
     // Tools, permissions, executor.
     let mut registry = ToolRegistry::new();
@@ -71,7 +77,11 @@ pub async fn run(config: LumiConfig, prompt: String, yolo: bool) -> anyhow::Resu
     let session = spawn_session(SessionId::new(), config.llm.model.clone(), runner);
     let mut events = session.subscribe();
     session
-        .send(Command::UserMessage { text: prompt, attachments: vec![], stream_id: None })
+        .send(Command::UserMessage {
+            text: prompt,
+            attachments: vec![],
+            stream_id: None,
+        })
         .await?;
 
     let mut stdout = std::io::stdout();
@@ -85,24 +95,44 @@ pub async fn run(config: LumiConfig, prompt: String, yolo: bool) -> anyhow::Resu
             Event::ToolStart { name, summary, .. } => {
                 eprintln!("\x1b[2m  ⚙ {name}: {}\x1b[0m", first_line(&summary));
             }
-            Event::ToolResult { name, ok, preview, .. } => {
+            Event::ToolResult {
+                name, ok, preview, ..
+            } => {
                 let mark = if ok { "✓" } else { "✗" };
                 eprintln!("\x1b[2m  {mark} {name}: {}\x1b[0m", first_line(&preview));
             }
-            Event::ApprovalRequest { request_id, tool, summary, .. } => {
+            Event::ApprovalRequest {
+                request_id,
+                tool,
+                summary,
+                ..
+            } => {
                 // Headless: auto-allow with --yolo, otherwise deny (never hang).
-                let decision = if yolo { Decision::Allow } else { Decision::Deny };
+                let decision = if yolo {
+                    Decision::Allow
+                } else {
+                    Decision::Deny
+                };
                 eprintln!(
                     "\x1b[33m  permission: {tool} {} → {decision:?}\x1b[0m",
                     first_line(&summary)
                 );
                 session
-                    .send(Command::ApproveTool { request_id, decision, scope: ApprovalScope::Once })
+                    .send(Command::ApproveTool {
+                        request_id,
+                        decision,
+                        scope: ApprovalScope::Once,
+                    })
                     .await?;
             }
             Event::ClarifyRequest { request_id, .. } => {
                 // No interactive prompt in headless mode; answer empty.
-                session.send(Command::AnswerClarify { request_id, value: String::new() }).await?;
+                session
+                    .send(Command::AnswerClarify {
+                        request_id,
+                        value: String::new(),
+                    })
+                    .await?;
             }
             Event::Error { message, .. } => {
                 eprintln!("\x1b[31m  error: {message}\x1b[0m");
@@ -146,7 +176,15 @@ fn resolve_prompt(prompt: String) -> anyhow::Result<String> {
 fn first_line(s: &str) -> String {
     let line = s.lines().next().unwrap_or("");
     if line.len() > 120 {
-        format!("{}…", &line[..line.char_indices().take(120).last().map(|(i, _)| i).unwrap_or(0)])
+        format!(
+            "{}…",
+            &line[..line
+                .char_indices()
+                .take(120)
+                .last()
+                .map(|(i, _)| i)
+                .unwrap_or(0)]
+        )
     } else {
         line.to_string()
     }

@@ -31,14 +31,25 @@ impl EventEmitter {
 /// What the user is being asked.
 #[derive(Debug)]
 pub enum InteractionKind {
-    Approval { tool: String, summary: String, dangerous: bool, diff: Option<String> },
-    Clarify { question: String, choices: Vec<ClarifyChoice> },
+    Approval {
+        tool: String,
+        summary: String,
+        dangerous: bool,
+        diff: Option<String>,
+    },
+    Clarify {
+        question: String,
+        choices: Vec<ClarifyChoice>,
+    },
 }
 
 /// The user's reply to an interaction.
 #[derive(Debug)]
 pub enum InteractionReply {
-    Approval { decision: Decision, scope: ApprovalScope },
+    Approval {
+        decision: Decision,
+        scope: ApprovalScope,
+    },
     Clarify(String),
 }
 
@@ -99,7 +110,10 @@ impl Interactor {
         let (respond, rx) = oneshot::channel();
         let req = InteractionRequest {
             id: RequestId::new(),
-            kind: InteractionKind::Clarify { question: question.into(), choices },
+            kind: InteractionKind::Clarify {
+                question: question.into(),
+                choices,
+            },
             respond,
         };
         if self.tx.send(req).is_err() {

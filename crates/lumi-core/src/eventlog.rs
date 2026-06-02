@@ -31,13 +31,23 @@ impl EventLog {
 
     pub fn with_capacity(session: SessionId, cap: usize) -> Self {
         let (tx, _rx) = broadcast::channel(BROADCAST_CAP);
-        EventLog { session, next_seq: 1, ring: VecDeque::with_capacity(cap.min(256)), cap, tx }
+        EventLog {
+            session,
+            next_seq: 1,
+            ring: VecDeque::with_capacity(cap.min(256)),
+            cap,
+            tx,
+        }
     }
 
     /// Assign a sequence number, retain for replay, and broadcast. Returns the
     /// sequenced envelope.
     pub fn publish(&mut self, event: Event) -> Envelope {
-        let env = Envelope { seq: self.next_seq, session: self.session.clone(), event };
+        let env = Envelope {
+            seq: self.next_seq,
+            session: self.session.clone(),
+            event,
+        };
         self.next_seq += 1;
         self.ring.push_back(env.clone());
         while self.ring.len() > self.cap {
@@ -57,7 +67,11 @@ impl EventLog {
     /// All retained events with `seq > after_seq` (use `0` for "everything
     /// still buffered").
     pub fn since(&self, after_seq: u64) -> Vec<Envelope> {
-        self.ring.iter().filter(|e| e.seq > after_seq).cloned().collect()
+        self.ring
+            .iter()
+            .filter(|e| e.seq > after_seq)
+            .cloned()
+            .collect()
     }
 
     /// The seq that the next published event will get.
@@ -72,7 +86,9 @@ mod tests {
     use lumi_protocol::DoneReason;
 
     fn ev(n: u32) -> Event {
-        Event::Token { text: n.to_string() }
+        Event::Token {
+            text: n.to_string(),
+        }
     }
 
     #[test]
@@ -110,7 +126,9 @@ mod tests {
     async fn subscribers_receive_live_events() {
         let mut log = EventLog::new(SessionId::from("s"));
         let mut rx = log.subscribe();
-        log.publish(Event::TurnDone { reason: DoneReason::Completed });
+        log.publish(Event::TurnDone {
+            reason: DoneReason::Completed,
+        });
         let got = rx.recv().await.unwrap();
         assert_eq!(got.seq, 1);
         assert!(matches!(got.event, Event::TurnDone { .. }));

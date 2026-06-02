@@ -13,10 +13,7 @@ pub async fn list(config: LumiConfig) -> anyhow::Result<()> {
     for s in sessions {
         println!(
             "{}  {:>3} msgs  {}  {}",
-            &s.id,
-            s.message_count,
-            &s.updated_at,
-            s.title
+            &s.id, s.message_count, &s.updated_at, s.title
         );
     }
     Ok(())

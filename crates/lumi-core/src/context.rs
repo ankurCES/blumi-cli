@@ -25,7 +25,11 @@ pub struct ContextManager {
 
 impl ContextManager {
     pub fn new(context_size: u32) -> Self {
-        ContextManager { context_size, compact_threshold: 0.8, keep_messages: 8 }
+        ContextManager {
+            context_size,
+            compact_threshold: 0.8,
+            keep_messages: 8,
+        }
     }
 
     /// Estimated token count of a set of messages.
@@ -79,7 +83,10 @@ impl ContextManager {
             cutoff
         };
 
-        events.emit(Event::Compaction { messages_compressed: compressed as u32, checkpoint: 0 });
+        events.emit(Event::Compaction {
+            messages_compressed: compressed as u32,
+            checkpoint: 0,
+        });
         true
     }
 
@@ -101,11 +108,13 @@ impl ContextManager {
             Message::user(transcript),
         ];
 
-        let mut stream =
-            match llm.stream_chat(&prompt, &[], options, ct.child_token()).await {
-                Ok(s) => s,
-                Err(_) => return None,
-            };
+        let mut stream = match llm
+            .stream_chat(&prompt, &[], options, ct.child_token())
+            .await
+        {
+            Ok(s) => s,
+            Err(_) => return None,
+        };
 
         let mut summary = String::new();
         while let Some(chunk) = stream.next().await {
@@ -152,8 +161,12 @@ mod tests {
             _ct: CancellationToken,
         ) -> Result<BoxStream<'static, Result<StreamChunk, LlmError>>, LlmError> {
             Ok(Box::pin(futures::stream::iter(vec![
-                Ok(StreamChunk::Text { text: "SUMMARY".into() }),
-                Ok(StreamChunk::Done { reason: FinishReason::Stop }),
+                Ok(StreamChunk::Text {
+                    text: "SUMMARY".into(),
+                }),
+                Ok(StreamChunk::Done {
+                    reason: FinishReason::Stop,
+                }),
             ])))
         }
         fn caps(&self) -> ProviderCaps {
@@ -176,7 +189,8 @@ mod tests {
         {
             let mut st = state.lock().await;
             for i in 0..20 {
-                st.messages.push(Message::user("word ".repeat(20) + &i.to_string()));
+                st.messages
+                    .push(Message::user("word ".repeat(20) + &i.to_string()));
             }
         }
         let (etx, _erx) = tokio::sync::mpsc::unbounded_channel();
@@ -184,7 +198,13 @@ mod tests {
         let llm: Arc<dyn LlmClient> = Arc::new(SummaryLlm);
 
         let compacted = cm
-            .maybe_compact(&llm, &state, &LlmOptions::default(), &events, &CancellationToken::new())
+            .maybe_compact(
+                &llm,
+                &state,
+                &LlmOptions::default(),
+                &events,
+                &CancellationToken::new(),
+            )
             .await;
         assert!(compacted);
 
@@ -203,7 +223,13 @@ mod tests {
         let events = EventEmitter::new(etx);
         let llm: Arc<dyn LlmClient> = Arc::new(SummaryLlm);
         let compacted = cm
-            .maybe_compact(&llm, &state, &LlmOptions::default(), &events, &CancellationToken::new())
+            .maybe_compact(
+                &llm,
+                &state,
+                &LlmOptions::default(),
+                &events,
+                &CancellationToken::new(),
+            )
             .await;
         assert!(!compacted);
     }

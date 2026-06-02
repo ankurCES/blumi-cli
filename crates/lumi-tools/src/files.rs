@@ -54,11 +54,10 @@ impl TypedTool for FileRead {
         _ct: CancellationToken,
     ) -> Result<ToolResult, ToolError> {
         let path = resolve(&ctx.working_dir, &input.path);
-        let bytes = ctx
-            .executor
-            .read_file(&path)
-            .await
-            .map_err(|e| ToolError::Execution(format!("could not read {}: {e}", path.display())))?;
+        let bytes =
+            ctx.executor.read_file(&path).await.map_err(|e| {
+                ToolError::Execution(format!("could not read {}: {e}", path.display()))
+            })?;
         let text = String::from_utf8_lossy(&bytes);
         let lines: Vec<&str> = text.lines().collect();
         if lines.is_empty() {
@@ -66,9 +65,15 @@ impl TypedTool for FileRead {
         }
         let start = input.offset.unwrap_or(1).max(1) - 1;
         if start >= lines.len() {
-            return Ok(ToolResult::empty(format!("(offset {} past end of file)", start + 1)));
+            return Ok(ToolResult::empty(format!(
+                "(offset {} past end of file)",
+                start + 1
+            )));
         }
-        let end = input.limit.map(|l| (start + l).min(lines.len())).unwrap_or(lines.len());
+        let end = input
+            .limit
+            .map(|l| (start + l).min(lines.len()))
+            .unwrap_or(lines.len());
 
         let mut out = String::new();
         for (i, line) in lines[start..end].iter().enumerate() {
@@ -114,12 +119,13 @@ impl TypedTool for FileWrite {
     ) -> Result<ToolResult, ToolError> {
         let path = resolve(&ctx.working_dir, &input.path);
         let bytes = input.content.as_bytes();
-        ctx.executor
-            .write_file(&path, bytes)
-            .await
-            .map_err(|e| ToolError::Execution(format!("could not write {}: {e}", path.display())))?;
-        Ok(ToolResult::success(format!("Wrote {} bytes to {}", bytes.len(), input.path))
-            .with_side_effects(vec![SideEffect::file_write(input.path, bytes.len() as u64)]))
+        ctx.executor.write_file(&path, bytes).await.map_err(|e| {
+            ToolError::Execution(format!("could not write {}: {e}", path.display()))
+        })?;
+        Ok(
+            ToolResult::success(format!("Wrote {} bytes to {}", bytes.len(), input.path))
+                .with_side_effects(vec![SideEffect::file_write(input.path, bytes.len() as u64)]),
+        )
     }
 }
 
@@ -163,11 +169,10 @@ impl TypedTool for FileEdit {
         _ct: CancellationToken,
     ) -> Result<ToolResult, ToolError> {
         let path = resolve(&ctx.working_dir, &input.path);
-        let bytes = ctx
-            .executor
-            .read_file(&path)
-            .await
-            .map_err(|e| ToolError::Execution(format!("could not read {}: {e}", path.display())))?;
+        let bytes =
+            ctx.executor.read_file(&path).await.map_err(|e| {
+                ToolError::Execution(format!("could not read {}: {e}", path.display()))
+            })?;
         let original = String::from_utf8_lossy(&bytes).into_owned();
 
         let count = original.matches(&input.old_string).count();
@@ -193,7 +198,9 @@ impl TypedTool for FileEdit {
         ctx.executor
             .write_file(&path, updated.as_bytes())
             .await
-            .map_err(|e| ToolError::Execution(format!("could not write {}: {e}", path.display())))?;
+            .map_err(|e| {
+                ToolError::Execution(format!("could not write {}: {e}", path.display()))
+            })?;
 
         let diff = TextDiff::from_lines(&original, &updated)
             .unified_diff()
@@ -201,9 +208,14 @@ impl TypedTool for FileEdit {
             .header(&input.path, &input.path)
             .to_string();
 
-        Ok(ToolResult::success(format!("Edited {} ({count} replacement(s))", input.path))
-            .with_diff(diff)
-            .with_side_effects(vec![SideEffect::file_write(input.path, updated.len() as u64)]))
+        Ok(
+            ToolResult::success(format!("Edited {} ({count} replacement(s))", input.path))
+                .with_diff(diff)
+                .with_side_effects(vec![SideEffect::file_write(
+                    input.path,
+                    updated.len() as u64,
+                )]),
+        )
     }
 }
 
@@ -230,9 +242,10 @@ mod tests {
         assert!(!res.is_error());
 
         let r = lumi_core::Typed(FileRead);
-        let res = lumi_core::Tool::execute(&r, json!({ "path": "a.txt" }), &c, CancellationToken::new())
-            .await
-            .unwrap();
+        let res =
+            lumi_core::Tool::execute(&r, json!({ "path": "a.txt" }), &c, CancellationToken::new())
+                .await
+                .unwrap();
         assert!(res.model_preview.contains("1\tline1"));
         assert!(res.model_preview.contains("2\tline2"));
     }
@@ -254,7 +267,10 @@ mod tests {
         .unwrap();
         assert!(!res.is_error());
         assert!(res.diff.is_some());
-        assert_eq!(std::fs::read_to_string(dir.path().join("a.txt")).unwrap(), "hello lumi\n");
+        assert_eq!(
+            std::fs::read_to_string(dir.path().join("a.txt")).unwrap(),
+            "hello lumi\n"
+        );
     }
 
     #[tokio::test]

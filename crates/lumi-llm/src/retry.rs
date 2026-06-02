@@ -9,8 +9,11 @@ use std::time::Duration;
 use tokio_util::sync::CancellationToken;
 
 /// Backoff schedule between attempts (so up to 4 total tries).
-const BACKOFF: [Duration; 3] =
-    [Duration::from_secs(1), Duration::from_secs(4), Duration::from_secs(16)];
+const BACKOFF: [Duration; 3] = [
+    Duration::from_secs(1),
+    Duration::from_secs(4),
+    Duration::from_secs(16),
+];
 
 /// Send `request` (cloned per attempt), retrying transient failures. Cancels
 /// promptly if `ct` fires. Returns the successful response or a classified

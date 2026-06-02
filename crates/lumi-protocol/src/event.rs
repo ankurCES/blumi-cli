@@ -66,10 +66,18 @@ pub enum Event {
     /// Reasoning / extended-thinking delta.
     Thinking { text: String },
     /// The assistant message finished streaming.
-    AssistantFinished { message_id: MessageId, finish: FinishReason },
+    AssistantFinished {
+        message_id: MessageId,
+        finish: FinishReason,
+    },
 
     /// A tool call started executing.
-    ToolStart { id: ToolCallId, name: String, summary: String, input: serde_json::Value },
+    ToolStart {
+        id: ToolCallId,
+        name: String,
+        summary: String,
+        input: serde_json::Value,
+    },
     /// Incremental output from a long-running tool (e.g. streaming bash).
     ToolProgress { id: ToolCallId, chunk: String },
     /// A tool call finished. (Lean projection of the full `ToolResult`.)
@@ -83,7 +91,13 @@ pub enum Event {
         artifacts: Vec<ArtifactRef>,
     },
     /// A file diff produced by a tool, for rendering.
-    Diff { id: ToolCallId, path: String, unified: String, additions: u32, deletions: u32 },
+    Diff {
+        id: ToolCallId,
+        path: String,
+        unified: String,
+        additions: u32,
+        deletions: u32,
+    },
 
     /// The agent needs the user to approve a capability before proceeding.
     ApprovalRequest {
@@ -95,7 +109,11 @@ pub enum Event {
         diff: Option<String>,
     },
     /// The agent needs disambiguation from the user.
-    ClarifyRequest { request_id: RequestId, question: String, choices: Vec<ClarifyChoice> },
+    ClarifyRequest {
+        request_id: RequestId,
+        question: String,
+        choices: Vec<ClarifyChoice>,
+    },
 
     /// The todo/plan list changed.
     TodoUpdate { items: Vec<Todo> },
@@ -108,7 +126,10 @@ pub enum Event {
         cost_usd: Option<f64>,
     },
     /// Context was compacted/checkpointed.
-    Compaction { messages_compressed: u32, checkpoint: u32 },
+    Compaction {
+        messages_compressed: u32,
+        checkpoint: u32,
+    },
 
     /// The turn is complete.
     #[serde(rename = "done")]
@@ -149,7 +170,10 @@ impl Event {
     /// dropped under backpressure (the ring buffer + replay heals gaps), whereas
     /// lifecycle events must be delivered.
     pub fn is_lossy(&self) -> bool {
-        matches!(self, Event::Token { .. } | Event::Thinking { .. } | Event::ToolProgress { .. })
+        matches!(
+            self,
+            Event::Token { .. } | Event::Thinking { .. } | Event::ToolProgress { .. }
+        )
     }
 }
 
@@ -168,7 +192,9 @@ mod tests {
 
     #[test]
     fn done_serializes_as_done() {
-        let e = Event::TurnDone { reason: DoneReason::Completed };
+        let e = Event::TurnDone {
+            reason: DoneReason::Completed,
+        };
         assert_eq!(e.name(), "done");
         let v = serde_json::to_value(&e).unwrap();
         assert_eq!(v["type"], "done"); // serde tag matches SSE name
@@ -180,7 +206,12 @@ mod tests {
         let env = Envelope {
             seq: 7,
             session: SessionId::from("sess_1"),
-            event: Event::Usage { input: 1, output: 2, total: 3, cost_usd: None },
+            event: Event::Usage {
+                input: 1,
+                output: 2,
+                total: 3,
+                cost_usd: None,
+            },
         };
         let json = serde_json::to_string(&env).unwrap();
         let back: Envelope = serde_json::from_str(&json).unwrap();
@@ -190,6 +221,9 @@ mod tests {
     #[test]
     fn lossy_classification() {
         assert!(Event::Token { text: "x".into() }.is_lossy());
-        assert!(!Event::TurnDone { reason: DoneReason::Completed }.is_lossy());
+        assert!(!Event::TurnDone {
+            reason: DoneReason::Completed
+        }
+        .is_lossy());
     }
 }

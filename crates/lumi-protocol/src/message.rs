@@ -163,7 +163,9 @@ mod tests {
     fn image_ref_flattens() {
         let img = ImageRef {
             media_type: "image/png".into(),
-            data: ImageData::Base64 { data: "AAAA".into() },
+            data: ImageData::Base64 {
+                data: "AAAA".into(),
+            },
         };
         let v = serde_json::to_value(&img).unwrap();
         assert_eq!(v["media_type"], "image/png");

@@ -34,7 +34,9 @@ impl TypedTool for ListDirectory {
         true
     }
     fn required_capabilities(&self, input: &Self::Input) -> Vec<Capability> {
-        vec![Capability::file_read(input.path.clone().unwrap_or_else(|| ".".into()))]
+        vec![Capability::file_read(
+            input.path.clone().unwrap_or_else(|| ".".into()),
+        )]
     }
 
     async fn run(
@@ -45,11 +47,10 @@ impl TypedTool for ListDirectory {
     ) -> Result<ToolResult, ToolError> {
         let rel = input.path.unwrap_or_else(|| ".".into());
         let path = resolve(&ctx.working_dir, &rel);
-        let entries = ctx
-            .executor
-            .list_dir(&path)
-            .await
-            .map_err(|e| ToolError::Execution(format!("could not list {}: {e}", path.display())))?;
+        let entries =
+            ctx.executor.list_dir(&path).await.map_err(|e| {
+                ToolError::Execution(format!("could not list {}: {e}", path.display()))
+            })?;
 
         if entries.is_empty() {
             return Ok(ToolResult::empty(format!("{rel} is empty")));

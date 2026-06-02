@@ -85,7 +85,11 @@ impl LlmClient for AnthropicClient {
     }
 
     fn caps(&self) -> ProviderCaps {
-        ProviderCaps { prompt_caching: true, thinking: true, vision: true }
+        ProviderCaps {
+            prompt_caching: true,
+            thinking: true,
+            vision: true,
+        }
     }
 }
 
@@ -147,7 +151,11 @@ fn build_messages(messages: &[Message], cache: bool) -> Value {
     let mut out: Vec<Value> = Vec::new();
 
     for m in messages.iter().filter(|m| m.role != Role::System) {
-        let role = if m.role == Role::Assistant { "assistant" } else { "user" };
+        let role = if m.role == Role::Assistant {
+            "assistant"
+        } else {
+            "user"
+        };
         let blocks = blocks_for(m);
         if blocks.is_empty() {
             continue;
@@ -251,11 +259,19 @@ fn map_event(event: &str, data: &Value) -> Vec<StreamChunk> {
             match delta["type"].as_str() {
                 Some("text_delta") => delta["text"]
                     .as_str()
-                    .map(|t| vec![StreamChunk::Text { text: t.to_string() }])
+                    .map(|t| {
+                        vec![StreamChunk::Text {
+                            text: t.to_string(),
+                        }]
+                    })
                     .unwrap_or_default(),
                 Some("thinking_delta") => delta["thinking"]
                     .as_str()
-                    .map(|t| vec![StreamChunk::Thinking { text: t.to_string() }])
+                    .map(|t| {
+                        vec![StreamChunk::Thinking {
+                            text: t.to_string(),
+                        }]
+                    })
                     .unwrap_or_default(),
                 Some("input_json_delta") => delta["partial_json"]
                     .as_str()
@@ -282,15 +298,24 @@ fn map_event(event: &str, data: &Value) -> Vec<StreamChunk> {
                 }));
             }
             if let Some(reason) = data["delta"]["stop_reason"].as_str() {
-                out.push(StreamChunk::Done { reason: map_stop(reason) });
+                out.push(StreamChunk::Done {
+                    reason: map_stop(reason),
+                });
             }
             out
         }
         "error" => {
-            let msg = data["error"]["message"].as_str().unwrap_or("anthropic error");
-            vec![StreamChunk::Text { text: format!("\n[error: {msg}]") }, StreamChunk::Done {
-                reason: FinishReason::Error,
-            }]
+            let msg = data["error"]["message"]
+                .as_str()
+                .unwrap_or("anthropic error");
+            vec![
+                StreamChunk::Text {
+                    text: format!("\n[error: {msg}]"),
+                },
+                StreamChunk::Done {
+                    reason: FinishReason::Error,
+                },
+            ]
         }
         _ => vec![],
     }
@@ -323,7 +348,11 @@ mod tests {
             Message::user("run it"),
             Message::assistant_tool_calls(
                 None,
-                vec![ToolCall { id: "t1".into(), name: "Bash".into(), arguments: json!({}) }],
+                vec![ToolCall {
+                    id: "t1".into(),
+                    name: "Bash".into(),
+                    arguments: json!({}),
+                }],
             ),
             Message::tool_result(lumi_protocol::ToolCallId::from("t1"), "Bash", "done"),
         ];
@@ -349,12 +378,16 @@ mod tests {
 
         let delta = json!({ "index": 1, "delta": { "type": "input_json_delta", "partial_json": "{\"x\":1}" } });
         match &map_event("content_block_delta", &delta)[0] {
-            StreamChunk::ToolCall(d) => assert_eq!(d.arguments_fragment.as_deref(), Some("{\"x\":1}")),
+            StreamChunk::ToolCall(d) => {
+                assert_eq!(d.arguments_fragment.as_deref(), Some("{\"x\":1}"))
+            }
             _ => panic!("expected fragment"),
         }
 
         let text = json!({ "index": 0, "delta": { "type": "text_delta", "text": "hello" } });
-        assert!(matches!(&map_event("content_block_delta", &text)[0], StreamChunk::Text { text } if text == "hello"));
+        assert!(
+            matches!(&map_event("content_block_delta", &text)[0], StreamChunk::Text { text } if text == "hello")
+        );
     }
 
     #[test]
@@ -362,6 +395,11 @@ mod tests {
         let md = json!({ "delta": { "stop_reason": "tool_use" }, "usage": { "output_tokens": 7 } });
         let chunks = map_event("message_delta", &md);
         assert!(matches!(chunks[0], StreamChunk::Usage(u) if u.output_tokens == 7));
-        assert!(matches!(chunks[1], StreamChunk::Done { reason: FinishReason::ToolCalls }));
+        assert!(matches!(
+            chunks[1],
+            StreamChunk::Done {
+                reason: FinishReason::ToolCalls
+            }
+        ));
     }
 }

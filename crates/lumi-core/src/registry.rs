@@ -56,8 +56,7 @@ impl ToolRegistry {
         self.by_name
             .values()
             .filter(|t| {
-                t.name().to_lowercase().contains(&q)
-                    || t.description().to_lowercase().contains(&q)
+                t.name().to_lowercase().contains(&q) || t.description().to_lowercase().contains(&q)
             })
             .map(|t| ToolSpec {
                 name: t.name().to_string(),

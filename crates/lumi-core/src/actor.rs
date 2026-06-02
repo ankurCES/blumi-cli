@@ -6,7 +6,9 @@
 //! or snapshot current state. This is the single seam that replaces OpenMono's
 //! dual TUI/ACP notification plumbing.
 
-use crate::emit::{EventEmitter, InteractionKind, InteractionReply, InteractionRequest, Interactor};
+use crate::emit::{
+    EventEmitter, InteractionKind, InteractionReply, InteractionRequest, Interactor,
+};
 use crate::eventlog::EventLog;
 use crate::runner::{TurnContext, TurnRunner};
 use crate::session::{SessionSnapshot, SessionState};
@@ -53,7 +55,10 @@ impl SessionHandle {
 
     /// Replay retained events with `seq > after_seq`.
     pub fn events_since(&self, after_seq: u64) -> Vec<Envelope> {
-        self.log.lock().expect("event log poisoned").since(after_seq)
+        self.log
+            .lock()
+            .expect("event log poisoned")
+            .since(after_seq)
     }
 
     /// A point-in-time copy of session state (for late-attaching UIs).
@@ -154,7 +159,9 @@ impl SessionActor {
 
     async fn handle_command(&mut self, cmd: Command) {
         match cmd {
-            Command::UserMessage { text, stream_id, .. } => {
+            Command::UserMessage {
+                text, stream_id, ..
+            } => {
                 if self.turn_token.is_some() {
                     self.queued.push_back((text, stream_id));
                 } else {
@@ -166,7 +173,11 @@ impl SessionActor {
                     tok.cancel();
                 }
             }
-            Command::ApproveTool { request_id, decision, scope } => {
+            Command::ApproveTool {
+                request_id,
+                decision,
+                scope,
+            } => {
                 if let Some(resp) = self.pending.remove(&request_id) {
                     let _ = resp.send(InteractionReply::Approval { decision, scope });
                 }
@@ -187,7 +198,9 @@ impl SessionActor {
 
         let token = CancellationToken::new();
         self.turn_token = Some(token.clone());
-        self.publish(Event::TurnStarted { stream_id: stream_id.map(|s| s.0) });
+        self.publish(Event::TurnStarted {
+            stream_id: stream_id.map(|s| s.0),
+        });
 
         let ctx = TurnContext {
             session_id: self.id.clone(),
@@ -220,7 +233,12 @@ impl SessionActor {
 
     fn handle_interaction(&mut self, ir: InteractionRequest) {
         let event = match &ir.kind {
-            InteractionKind::Approval { tool, summary, dangerous, diff } => Event::ApprovalRequest {
+            InteractionKind::Approval {
+                tool,
+                summary,
+                dangerous,
+                diff,
+            } => Event::ApprovalRequest {
                 request_id: ir.id.clone(),
                 tool: tool.clone(),
                 summary: summary.clone(),
@@ -256,12 +274,20 @@ mod tests {
             ctx: TurnContext,
             ct: CancellationToken,
         ) -> DoneReason {
-            ctx.events.emit(Event::Token { text: "hello ".into() });
+            ctx.events.emit(Event::Token {
+                text: "hello ".into(),
+            });
             if ct.is_cancelled() {
                 return DoneReason::Cancelled;
             }
-            ctx.events.emit(Event::Token { text: "world".into() });
-            state.lock().await.messages.push(Message::assistant("hello world"));
+            ctx.events.emit(Event::Token {
+                text: "world".into(),
+            });
+            state
+                .lock()
+                .await
+                .messages
+                .push(Message::assistant("hello world"));
             DoneReason::Completed
         }
     }
@@ -284,9 +310,7 @@ mod tests {
         }
     }
 
-    async fn collect_until_done(
-        rx: &mut broadcast::Receiver<Envelope>,
-    ) -> Vec<Event> {
+    async fn collect_until_done(rx: &mut broadcast::Receiver<Envelope>) -> Vec<Event> {
         let mut events = Vec::new();
         loop {
             let env = rx.recv().await.unwrap();
@@ -303,15 +327,24 @@ mod tests {
     async fn runs_a_turn_and_broadcasts_in_order() {
         let h = spawn_session(SessionId::from("s1"), "m", Arc::new(MockRunner));
         let mut rx = h.subscribe();
-        h.send(Command::UserMessage { text: "hi".into(), attachments: vec![], stream_id: None })
-            .await
-            .unwrap();
+        h.send(Command::UserMessage {
+            text: "hi".into(),
+            attachments: vec![],
+            stream_id: None,
+        })
+        .await
+        .unwrap();
 
         let events = collect_until_done(&mut rx).await;
         // turn_started, token, token, done
         assert!(matches!(events[0], Event::TurnStarted { .. }));
         assert!(matches!(events[1], Event::Token { .. }));
-        assert!(matches!(events.last().unwrap(), Event::TurnDone { reason: DoneReason::Completed }));
+        assert!(matches!(
+            events.last().unwrap(),
+            Event::TurnDone {
+                reason: DoneReason::Completed
+            }
+        ));
 
         let snap = h.snapshot().await;
         assert_eq!(snap.turn_count, 1);
@@ -323,30 +356,46 @@ mod tests {
     async fn replay_via_events_since_is_gap_free() {
         let h = spawn_session(SessionId::from("s2"), "m", Arc::new(MockRunner));
         let mut rx = h.subscribe();
-        h.send(Command::UserMessage { text: "hi".into(), attachments: vec![], stream_id: None })
-            .await
-            .unwrap();
+        h.send(Command::UserMessage {
+            text: "hi".into(),
+            attachments: vec![],
+            stream_id: None,
+        })
+        .await
+        .unwrap();
         let _ = collect_until_done(&mut rx).await;
 
         // A late subscriber can replay everything from seq 0.
         let replay = h.events_since(0);
         assert!(replay.len() >= 4);
         assert_eq!(replay[0].seq, 1);
-        assert!(matches!(replay.last().unwrap().event, Event::TurnDone { .. }));
+        assert!(matches!(
+            replay.last().unwrap().event,
+            Event::TurnDone { .. }
+        ));
     }
 
     #[tokio::test]
     async fn approval_round_trips_through_commands() {
         let h = spawn_session(SessionId::from("s3"), "m", Arc::new(ApprovalRunner));
         let mut rx = h.subscribe();
-        h.send(Command::UserMessage { text: "go".into(), attachments: vec![], stream_id: None })
-            .await
-            .unwrap();
+        h.send(Command::UserMessage {
+            text: "go".into(),
+            attachments: vec![],
+            stream_id: None,
+        })
+        .await
+        .unwrap();
 
         // Wait for the approval request, capture its id.
         let req_id = loop {
             let env = rx.recv().await.unwrap();
-            if let Event::ApprovalRequest { request_id, dangerous, .. } = env.event {
+            if let Event::ApprovalRequest {
+                request_id,
+                dangerous,
+                ..
+            } = env.event
+            {
                 assert!(dangerous);
                 break request_id;
             }

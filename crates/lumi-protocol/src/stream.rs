@@ -81,7 +81,9 @@ mod tests {
     fn chunk_round_trips() {
         let chunks = vec![
             StreamChunk::Thinking { text: "hm".into() },
-            StreamChunk::Text { text: "hello".into() },
+            StreamChunk::Text {
+                text: "hello".into(),
+            },
             StreamChunk::ToolCall(ToolCallDelta {
                 index: 0,
                 id: Some("call_1".into()),
@@ -94,7 +96,9 @@ mod tests {
                 cache_read_tokens: 0,
                 cache_write_tokens: 0,
             }),
-            StreamChunk::Done { reason: FinishReason::ToolCalls },
+            StreamChunk::Done {
+                reason: FinishReason::ToolCalls,
+            },
         ];
         for c in chunks {
             let json = serde_json::to_string(&c).unwrap();
@@ -105,7 +109,11 @@ mod tests {
 
     #[test]
     fn usage_total() {
-        let u = Usage { input_tokens: 100, output_tokens: 40, ..Default::default() };
+        let u = Usage {
+            input_tokens: 100,
+            output_tokens: 40,
+            ..Default::default()
+        };
         assert_eq!(u.total(), 140);
     }
 }

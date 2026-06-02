@@ -17,9 +17,9 @@ pub fn build_client(provider: &ProviderConfig) -> Result<Arc<dyn LlmClient>, Llm
     match provider.kind {
         ProviderKind::OpenaiCompat => Ok(Arc::new(OpenAiCompatClient::new(base_url, api_key))),
         ProviderKind::Anthropic => Ok(Arc::new(AnthropicClient::new(base_url, api_key))),
-        ProviderKind::Gemini => {
-            Err(LlmError::Other(anyhow::anyhow!("the Gemini client lands in Phase 3")))
-        }
+        ProviderKind::Gemini => Err(LlmError::Other(anyhow::anyhow!(
+            "the Gemini client lands in Phase 3"
+        ))),
     }
 }
 

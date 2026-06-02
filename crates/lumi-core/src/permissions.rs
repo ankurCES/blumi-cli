@@ -35,7 +35,10 @@ pub struct PermissionEngine {
 
 impl PermissionEngine {
     pub fn new(config: PermissionConfig) -> Self {
-        PermissionEngine { config, remembered: Mutex::new(HashSet::new()) }
+        PermissionEngine {
+            config,
+            remembered: Mutex::new(HashSet::new()),
+        }
     }
 
     /// Check a tool call, prompting the user if policy is inconclusive.
@@ -53,14 +56,21 @@ impl PermissionEngine {
                 if self.remembered.lock().unwrap().contains(tool_name) {
                     return PermissionOutcome::Allow;
                 }
-                let summary =
-                    if subject.is_empty() { tool_name.to_string() } else { format!("{tool_name}: {subject}") };
-                let (decision, scope) =
-                    interactor.approve(tool_name, summary, dangerous, None).await;
+                let summary = if subject.is_empty() {
+                    tool_name.to_string()
+                } else {
+                    format!("{tool_name}: {subject}")
+                };
+                let (decision, scope) = interactor
+                    .approve(tool_name, summary, dangerous, None)
+                    .await;
                 match decision {
                     Decision::Allow => {
                         if scope == ApprovalScope::Session {
-                            self.remembered.lock().unwrap().insert(tool_name.to_string());
+                            self.remembered
+                                .lock()
+                                .unwrap()
+                                .insert(tool_name.to_string());
                         }
                         PermissionOutcome::Allow
                     }
@@ -92,7 +102,10 @@ impl PermissionEngine {
         // Destructive shell commands always prompt (flagged dangerous), even if
         // an allow rule would otherwise match.
         if tool_name == "Bash" && is_destructive(&subject) {
-            return Class::Ask { dangerous: true, subject };
+            return Class::Ask {
+                dangerous: true,
+                subject,
+            };
         }
 
         // Explicit allow.
@@ -107,7 +120,10 @@ impl PermissionEngine {
             return Class::Allow;
         }
 
-        Class::Ask { dangerous: false, subject }
+        Class::Ask {
+            dangerous: false,
+            subject,
+        }
     }
 }
 
@@ -118,12 +134,19 @@ fn subject_of(tool_name: &str, input: &Value) -> String {
         "FileWrite" | "FileEdit" | "FileRead" | "ApplyPatch" | "ListDirectory" => "path",
         _ => return String::new(),
     };
-    input.get(field).and_then(Value::as_str).unwrap_or("").to_string()
+    input
+        .get(field)
+        .and_then(Value::as_str)
+        .unwrap_or("")
+        .to_string()
 }
 
 fn matches_any(patterns: &[String], subject: &str) -> bool {
     patterns.iter().any(|p| {
-        p == subject || glob::Pattern::new(p).map(|pat| pat.matches(subject)).unwrap_or(false)
+        p == subject
+            || glob::Pattern::new(p)
+                .map(|pat| pat.matches(subject))
+                .unwrap_or(false)
     })
 }
 
@@ -165,8 +188,8 @@ fn is_safe_command(cmd: &str) -> bool {
         return false;
     }
     const SAFE: &[&str] = &[
-        "ls", "cat", "pwd", "echo", "head", "tail", "grep", "rg", "find", "wc", "which",
-        "whoami", "date", "stat", "file", "tree", "env", "sort", "uniq", "basename", "dirname",
+        "ls", "cat", "pwd", "echo", "head", "tail", "grep", "rg", "find", "wc", "which", "whoami",
+        "date", "stat", "file", "tree", "env", "sort", "uniq", "basename", "dirname",
     ];
     let first = cmd.split_whitespace().next().unwrap_or("");
     SAFE.contains(&first)
@@ -186,7 +209,10 @@ mod tests {
 
     #[test]
     fn yolo_allows_everything() {
-        let e = PermissionEngine::new(PermissionConfig { yolo: true, ..Default::default() });
+        let e = PermissionEngine::new(PermissionConfig {
+            yolo: true,
+            ..Default::default()
+        });
         assert!(matches!(
             e.classify("Bash", false, &json!({ "command": "rm -rf /" })),
             Class::Allow
@@ -195,7 +221,10 @@ mod tests {
 
     #[test]
     fn read_only_is_allowed() {
-        assert!(matches!(engine().classify("FileRead", true, &json!({})), Class::Allow));
+        assert!(matches!(
+            engine().classify("FileRead", true, &json!({})),
+            Class::Allow
+        ));
     }
 
     #[test]
@@ -224,7 +253,10 @@ mod tests {
         let mut cfg = PermissionConfig::default();
         cfg.tools.insert(
             "FileWrite".into(),
-            ToolPermissionRules { deny: vec!["**/.env".into()], ..Default::default() },
+            ToolPermissionRules {
+                deny: vec!["**/.env".into()],
+                ..Default::default()
+            },
         );
         let e = PermissionEngine::new(cfg);
         assert!(matches!(
@@ -237,7 +269,10 @@ mod tests {
     fn unknown_write_defaults_to_ask() {
         assert!(matches!(
             engine().classify("FileWrite", false, &json!({ "path": "src/main.rs" })),
-            Class::Ask { dangerous: false, .. }
+            Class::Ask {
+                dangerous: false,
+                ..
+            }
         ));
     }
 
@@ -262,9 +297,15 @@ mod tests {
         });
 
         let input = json!({ "command": "make build" });
-        assert!(matches!(e.check("Bash", false, &input, &interactor).await, PermissionOutcome::Allow));
+        assert!(matches!(
+            e.check("Bash", false, &input, &interactor).await,
+            PermissionOutcome::Allow
+        ));
         // Second check should be auto-allowed without prompting.
-        assert!(matches!(e.check("Bash", false, &input, &interactor).await, PermissionOutcome::Allow));
+        assert!(matches!(
+            e.check("Bash", false, &input, &interactor).await,
+            PermissionOutcome::Allow
+        ));
 
         drop(interactor); // closes the channel so the fake actor's final recv returns None
         actor.await.unwrap();

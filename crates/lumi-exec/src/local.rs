@@ -15,7 +15,9 @@ pub struct LocalExecutor {
 
 impl LocalExecutor {
     pub fn new(working_dir: impl Into<PathBuf>) -> Self {
-        LocalExecutor { working_dir: working_dir.into() }
+        LocalExecutor {
+            working_dir: working_dir.into(),
+        }
     }
 
     fn shell() -> (&'static str, &'static str) {
@@ -99,9 +101,7 @@ impl Executor for LocalExecutor {
                 let _ = child.wait().await;
                 return Err(ExecError::Cancelled);
             }
-            Outcome::Finished(Some(status), false) => {
-                (status.code().unwrap_or(-1), false)
-            }
+            Outcome::Finished(Some(status), false) => (status.code().unwrap_or(-1), false),
             Outcome::Finished(_, _timed_out) => {
                 // timed out: ensure the process is gone
                 let _ = child.start_kill();
@@ -112,7 +112,12 @@ impl Executor for LocalExecutor {
 
         let stdout = String::from_utf8_lossy(&out_task.await.unwrap_or_default()).into_owned();
         let stderr = String::from_utf8_lossy(&err_task.await.unwrap_or_default()).into_owned();
-        Ok(ExecOutput { stdout, stderr, exit_code, timed_out })
+        Ok(ExecOutput {
+            stdout,
+            stderr,
+            exit_code,
+            timed_out,
+        })
     }
 
     async fn read_file(&self, path: &Path) -> Result<Vec<u8>, ExecError> {
@@ -121,9 +126,13 @@ impl Executor for LocalExecutor {
 
     async fn write_file(&self, path: &Path, contents: &[u8]) -> Result<(), ExecError> {
         if let Some(parent) = path.parent() {
-            tokio::fs::create_dir_all(parent).await.map_err(ExecError::from)?;
+            tokio::fs::create_dir_all(parent)
+                .await
+                .map_err(ExecError::from)?;
         }
-        tokio::fs::write(path, contents).await.map_err(ExecError::from)
+        tokio::fs::write(path, contents)
+            .await
+            .map_err(ExecError::from)
     }
 
     async fn exists(&self, path: &Path) -> Result<bool, ExecError> {

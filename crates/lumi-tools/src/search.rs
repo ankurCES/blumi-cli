@@ -83,7 +83,10 @@ impl TypedTool for Glob {
         .map_err(ToolError::InvalidInput)?;
 
         if matches.is_empty() {
-            return Ok(ToolResult::empty(format!("no files match `{}`", input.pattern)));
+            return Ok(ToolResult::empty(format!(
+                "no files match `{}`",
+                input.pattern
+            )));
         }
         Ok(ToolResult::success(matches.join("\n")))
     }
@@ -144,7 +147,10 @@ impl TypedTool for Grep {
         .map_err(|e| ToolError::Execution(e.to_string()))?;
 
         if matches.is_empty() {
-            return Ok(ToolResult::empty(format!("no matches for `{}`", input.pattern)));
+            return Ok(ToolResult::empty(format!(
+                "no matches for `{}`",
+                input.pattern
+            )));
         }
         let truncated = matches.len() >= MAX_GREP_MATCHES;
         let mut body = matches.join("\n");
@@ -205,9 +211,14 @@ mod tests {
         std::fs::write(dir.path().join("b.txt"), "x").unwrap();
         let c = ctx(dir.path());
         let g = lumi_core::Typed(Glob);
-        let res = lumi_core::Tool::execute(&g, json!({ "pattern": "*.rs" }), &c, CancellationToken::new())
-            .await
-            .unwrap();
+        let res = lumi_core::Tool::execute(
+            &g,
+            json!({ "pattern": "*.rs" }),
+            &c,
+            CancellationToken::new(),
+        )
+        .await
+        .unwrap();
         assert!(res.model_preview.contains("a.rs"));
         assert!(!res.model_preview.contains("b.txt"));
     }
@@ -218,10 +229,14 @@ mod tests {
         std::fs::write(dir.path().join("a.rs"), "let x = 1;\nlet y = 2;\n").unwrap();
         let c = ctx(dir.path());
         let g = lumi_core::Typed(Grep);
-        let res =
-            lumi_core::Tool::execute(&g, json!({ "pattern": "let y" }), &c, CancellationToken::new())
-                .await
-                .unwrap();
+        let res = lumi_core::Tool::execute(
+            &g,
+            json!({ "pattern": "let y" }),
+            &c,
+            CancellationToken::new(),
+        )
+        .await
+        .unwrap();
         assert!(res.model_preview.contains("a.rs:2:"));
         assert!(res.model_preview.contains("let y = 2;"));
     }

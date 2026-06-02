@@ -23,9 +23,7 @@ mod tool;
 pub use actor::{spawn_session, SessionClosed, SessionHandle};
 pub use agent::AgentTurnRunner;
 pub use context::ContextManager;
-pub use emit::{
-    EventEmitter, InteractionKind, InteractionReply, InteractionRequest, Interactor,
-};
+pub use emit::{EventEmitter, InteractionKind, InteractionReply, InteractionRequest, Interactor};
 pub use error::{ExecError, LlmError, ToolError};
 pub use eventlog::EventLog;
 pub use exec::{DirEntry, ExecOutput, ExecRequest, Executor};

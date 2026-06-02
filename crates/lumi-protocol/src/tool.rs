@@ -60,14 +60,22 @@ impl SideEffect {
         }
     }
     pub fn file_delete(path: impl Into<String>) -> Self {
-        SideEffect { kind: "file_delete".into(), target: path.into(), meta: BTreeMap::new() }
+        SideEffect {
+            kind: "file_delete".into(),
+            target: path.into(),
+            meta: BTreeMap::new(),
+        }
     }
     pub fn process_spawn(command: impl Into<String>, pid: Option<u32>) -> Self {
         let mut meta = BTreeMap::new();
         if let Some(pid) = pid {
             meta.insert("pid".to_string(), pid.to_string());
         }
-        SideEffect { kind: "process_spawn".into(), target: command.into(), meta }
+        SideEffect {
+            kind: "process_spawn".into(),
+            target: command.into(),
+            meta,
+        }
     }
 }
 

@@ -19,13 +19,19 @@ impl MockLlmClient {
     pub fn new(chunks: Vec<StreamChunk>) -> Self {
         let mut q = std::collections::VecDeque::new();
         q.push_back(chunks);
-        MockLlmClient { scripts: Mutex::new(q), caps: ProviderCaps::default() }
+        MockLlmClient {
+            scripts: Mutex::new(q),
+            caps: ProviderCaps::default(),
+        }
     }
 
     /// A queue of scripts; call N returns script N (last repeats once exhausted
     /// it returns just a Done).
     pub fn scripted(scripts: Vec<Vec<StreamChunk>>) -> Self {
-        MockLlmClient { scripts: Mutex::new(scripts.into()), caps: ProviderCaps::default() }
+        MockLlmClient {
+            scripts: Mutex::new(scripts.into()),
+            caps: ProviderCaps::default(),
+        }
     }
 
     fn next_script(&self) -> Vec<StreamChunk> {
@@ -34,7 +40,9 @@ impl MockLlmClient {
             q.pop_front().unwrap()
         } else {
             q.front().cloned().unwrap_or_else(|| {
-                vec![StreamChunk::Done { reason: lumi_protocol::FinishReason::Stop }]
+                vec![StreamChunk::Done {
+                    reason: lumi_protocol::FinishReason::Stop,
+                }]
             })
         }
     }
@@ -69,7 +77,9 @@ mod tests {
     async fn replays_script() {
         let client = MockLlmClient::new(vec![
             StreamChunk::Text { text: "hi".into() },
-            StreamChunk::Done { reason: FinishReason::Stop },
+            StreamChunk::Done {
+                reason: FinishReason::Stop,
+            },
         ]);
         let mut s = client
             .stream_chat(&[], &[], &LlmOptions::default(), CancellationToken::new())

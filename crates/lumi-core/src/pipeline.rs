@@ -33,8 +33,14 @@ pub async fn execute_tool_call(
     };
 
     // Permission gate.
-    if let PermissionOutcome::Deny(reason) =
-        perms.check(tool.name(), tool.is_read_only(), &call.arguments, &ctx.interactor).await
+    if let PermissionOutcome::Deny(reason) = perms
+        .check(
+            tool.name(),
+            tool.is_read_only(),
+            &call.arguments,
+            &ctx.interactor,
+        )
+        .await
     {
         let result = ToolResult::permission_denied(format!("permission denied: {reason}"));
         emit_result(ctx, call, &result, 0);
@@ -63,7 +69,12 @@ pub async fn execute_tool_call(
         let (additions, deletions) = count_diff(diff);
         ctx.events.emit(Event::Diff {
             id: call.id.clone(),
-            path: call.arguments.get("path").and_then(|p| p.as_str()).unwrap_or("").to_string(),
+            path: call
+                .arguments
+                .get("path")
+                .and_then(|p| p.as_str())
+                .unwrap_or("")
+                .to_string(),
             unified: diff.clone(),
             additions,
             deletions,
@@ -88,11 +99,21 @@ fn emit_result(ctx: &ToolContext, call: &ToolCall, result: &ToolResult, duration
 /// A short, human-readable summary of a call for the UI card header.
 fn summarize(tool: &str, args: &serde_json::Value) -> String {
     match tool {
-        "Bash" => args.get("command").and_then(|c| c.as_str()).unwrap_or("").to_string(),
-        "FileRead" | "FileWrite" | "FileEdit" | "ListDirectory" | "ApplyPatch" => {
-            args.get("path").and_then(|p| p.as_str()).unwrap_or(tool).to_string()
-        }
-        "Glob" | "Grep" => args.get("pattern").and_then(|p| p.as_str()).unwrap_or(tool).to_string(),
+        "Bash" => args
+            .get("command")
+            .and_then(|c| c.as_str())
+            .unwrap_or("")
+            .to_string(),
+        "FileRead" | "FileWrite" | "FileEdit" | "ListDirectory" | "ApplyPatch" => args
+            .get("path")
+            .and_then(|p| p.as_str())
+            .unwrap_or(tool)
+            .to_string(),
+        "Glob" | "Grep" => args
+            .get("pattern")
+            .and_then(|p| p.as_str())
+            .unwrap_or(tool)
+            .to_string(),
         _ => tool.to_string(),
     }
 }
@@ -132,7 +153,10 @@ mod tests {
 
     #[test]
     fn summarize_picks_relevant_field() {
-        assert_eq!(summarize("Bash", &serde_json::json!({ "command": "ls" })), "ls");
+        assert_eq!(
+            summarize("Bash", &serde_json::json!({ "command": "ls" })),
+            "ls"
+        );
         assert_eq!(
             summarize("FileWrite", &serde_json::json!({ "path": "a.txt" })),
             "a.txt"

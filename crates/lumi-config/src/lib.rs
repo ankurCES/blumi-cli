@@ -124,8 +124,9 @@ impl LumiConfig {
             .merge(Json::file(working_dir.join(".lumi").join("settings.json")))
             .merge(Env::prefixed("LUMI_").split("__"));
 
-        let mut cfg: LumiConfig =
-            fig.extract().map_err(|e| ConfigError::Figment(Box::new(e)))?;
+        let mut cfg: LumiConfig = fig
+            .extract()
+            .map_err(|e| ConfigError::Figment(Box::new(e)))?;
         cfg.paths = Paths::resolve(home_override, working_dir);
         Ok(cfg)
     }
@@ -146,7 +147,10 @@ mod tests {
         let cfg = LumiConfig::default();
         assert_eq!(cfg.llm.provider, "local");
         assert_eq!(cfg.llm.max_iterations, 25);
-        assert_eq!(cfg.active_provider().unwrap().kind, ProviderKind::OpenaiCompat);
+        assert_eq!(
+            cfg.active_provider().unwrap().kind,
+            ProviderKind::OpenaiCompat
+        );
     }
 
     #[test]

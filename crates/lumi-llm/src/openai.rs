@@ -87,7 +87,11 @@ impl LlmClient for OpenAiCompatClient {
     }
 
     fn caps(&self) -> ProviderCaps {
-        ProviderCaps { prompt_caching: false, thinking: true, vision: true }
+        ProviderCaps {
+            prompt_caching: false,
+            thinking: true,
+            vision: true,
+        }
     }
 }
 
@@ -210,17 +214,25 @@ fn map_content(parts: &[ContentPart]) -> Value {
 fn map_openai_chunk(v: &Value) -> Vec<StreamChunk> {
     let mut out = Vec::new();
 
-    if let Some(choice) = v.get("choices").and_then(|c| c.as_array()).and_then(|a| a.first()) {
+    if let Some(choice) = v
+        .get("choices")
+        .and_then(|c| c.as_array())
+        .and_then(|a| a.first())
+    {
         if let Some(delta) = choice.get("delta") {
             // DeepSeek-style reasoning.
             if let Some(r) = delta.get("reasoning_content").and_then(Value::as_str) {
                 if !r.is_empty() {
-                    out.push(StreamChunk::Thinking { text: r.to_string() });
+                    out.push(StreamChunk::Thinking {
+                        text: r.to_string(),
+                    });
                 }
             }
             if let Some(c) = delta.get("content").and_then(Value::as_str) {
                 if !c.is_empty() {
-                    out.push(StreamChunk::Text { text: c.to_string() });
+                    out.push(StreamChunk::Text {
+                        text: c.to_string(),
+                    });
                 }
             }
             if let Some(tcs) = delta.get("tool_calls").and_then(Value::as_array) {
@@ -243,7 +255,9 @@ fn map_openai_chunk(v: &Value) -> Vec<StreamChunk> {
             }
         }
         if let Some(fr) = choice.get("finish_reason").and_then(Value::as_str) {
-            out.push(StreamChunk::Done { reason: map_finish(fr) });
+            out.push(StreamChunk::Done {
+                reason: map_finish(fr),
+            });
         }
     }
 
@@ -254,9 +268,14 @@ fn map_openai_chunk(v: &Value) -> Vec<StreamChunk> {
             .and_then(Value::as_u64)
             .unwrap_or(0) as u32;
         out.push(StreamChunk::Usage(Usage {
-            input_tokens: usage.get("prompt_tokens").and_then(Value::as_u64).unwrap_or(0) as u32,
-            output_tokens: usage.get("completion_tokens").and_then(Value::as_u64).unwrap_or(0)
-                as u32,
+            input_tokens: usage
+                .get("prompt_tokens")
+                .and_then(Value::as_u64)
+                .unwrap_or(0) as u32,
+            output_tokens: usage
+                .get("completion_tokens")
+                .and_then(Value::as_u64)
+                .unwrap_or(0) as u32,
             cache_read_tokens: cache_read,
             cache_write_tokens: 0,
         }));
@@ -312,7 +331,12 @@ mod tests {
                        "prompt_tokens_details": { "cached_tokens": 8 } }
         });
         let chunks = map_openai_chunk(&v);
-        assert!(matches!(chunks[0], StreamChunk::Done { reason: FinishReason::ToolCalls }));
+        assert!(matches!(
+            chunks[0],
+            StreamChunk::Done {
+                reason: FinishReason::ToolCalls
+            }
+        ));
         match chunks[1] {
             StreamChunk::Usage(u) => {
                 assert_eq!(u.input_tokens, 12);
@@ -337,7 +361,10 @@ mod tests {
         assert_eq!(v["role"], "assistant");
         assert_eq!(v["tool_calls"][0]["function"]["name"], "Bash");
         // arguments are serialized as a JSON string
-        assert_eq!(v["tool_calls"][0]["function"]["arguments"], "{\"cmd\":\"ls\"}");
+        assert_eq!(
+            v["tool_calls"][0]["function"]["arguments"],
+            "{\"cmd\":\"ls\"}"
+        );
     }
 
     #[test]
@@ -346,13 +373,18 @@ mod tests {
             ContentPart::text("look:"),
             ContentPart::Image(lumi_protocol::ImageRef {
                 media_type: "image/png".into(),
-                data: ImageData::Base64 { data: "AAAA".into() },
+                data: ImageData::Base64 {
+                    data: "AAAA".into(),
+                },
             }),
         ];
         let v = map_content(&parts);
         assert!(v.is_array());
         assert_eq!(v[0]["type"], "text");
         assert_eq!(v[1]["type"], "image_url");
-        assert!(v[1]["image_url"]["url"].as_str().unwrap().starts_with("data:image/png;base64,"));
+        assert!(v[1]["image_url"]["url"]
+            .as_str()
+            .unwrap()
+            .starts_with("data:image/png;base64,"));
     }
 }

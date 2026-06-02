@@ -73,9 +73,21 @@ mod tests {
     #[test]
     fn retryable_classification() {
         assert!(LlmError::Transport("reset".into()).is_retryable());
-        assert!(LlmError::Provider { status: 503, message: "x".into() }.is_retryable());
-        assert!(LlmError::Provider { status: 429, message: "x".into() }.is_retryable());
-        assert!(!LlmError::Provider { status: 400, message: "x".into() }.is_retryable());
+        assert!(LlmError::Provider {
+            status: 503,
+            message: "x".into()
+        }
+        .is_retryable());
+        assert!(LlmError::Provider {
+            status: 429,
+            message: "x".into()
+        }
+        .is_retryable());
+        assert!(!LlmError::Provider {
+            status: 400,
+            message: "x".into()
+        }
+        .is_retryable());
         assert!(!LlmError::Cancelled.is_retryable());
     }
 }

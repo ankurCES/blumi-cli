@@ -42,7 +42,9 @@ impl ProviderConfig {
         if let Some(k) = &self.api_key {
             return Some(k.clone());
         }
-        self.api_key_env.as_ref().and_then(|var| std::env::var(var).ok())
+        self.api_key_env
+            .as_ref()
+            .and_then(|var| std::env::var(var).ok())
     }
 
     fn openai_compat(base_url: &str, key_env: Option<&str>) -> Self {
@@ -60,17 +62,35 @@ pub fn default_providers() -> BTreeMap<String, ProviderConfig> {
     use ProviderConfig as P;
     BTreeMap::from([
         // Local-first defaults (no key needed).
-        ("local".into(), P::openai_compat("http://localhost:7474/v1", None)),
-        ("ollama".into(), P::openai_compat("http://localhost:11434/v1", None)),
+        (
+            "local".into(),
+            P::openai_compat("http://localhost:7474/v1", None),
+        ),
+        (
+            "ollama".into(),
+            P::openai_compat("http://localhost:11434/v1", None),
+        ),
         // Hosted, OpenAI-compatible.
-        ("openai".into(), P::openai_compat("https://api.openai.com/v1", Some("OPENAI_API_KEY"))),
+        (
+            "openai".into(),
+            P::openai_compat("https://api.openai.com/v1", Some("OPENAI_API_KEY")),
+        ),
         (
             "openrouter".into(),
             P::openai_compat("https://openrouter.ai/api/v1", Some("OPENROUTER_API_KEY")),
         ),
-        ("deepseek".into(), P::openai_compat("https://api.deepseek.com/v1", Some("DEEPSEEK_API_KEY"))),
-        ("minimax".into(), P::openai_compat("https://api.minimaxi.chat/v1", Some("MINIMAX_API_KEY"))),
-        ("groq".into(), P::openai_compat("https://api.groq.com/openai/v1", Some("GROQ_API_KEY"))),
+        (
+            "deepseek".into(),
+            P::openai_compat("https://api.deepseek.com/v1", Some("DEEPSEEK_API_KEY")),
+        ),
+        (
+            "minimax".into(),
+            P::openai_compat("https://api.minimaxi.chat/v1", Some("MINIMAX_API_KEY")),
+        ),
+        (
+            "groq".into(),
+            P::openai_compat("https://api.groq.com/openai/v1", Some("GROQ_API_KEY")),
+        ),
         // Native clients.
         (
             "anthropic".into(),

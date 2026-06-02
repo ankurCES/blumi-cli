@@ -30,7 +30,9 @@ impl Capability {
         Capability::FileWrite { path: path.into() }
     }
     pub fn process_exec(command: impl Into<String>) -> Self {
-        Capability::ProcessExec { command: command.into() }
+        Capability::ProcessExec {
+            command: command.into(),
+        }
     }
 
     /// A short human label used in approval prompts.

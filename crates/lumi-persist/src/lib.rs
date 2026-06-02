@@ -68,7 +68,10 @@ impl Store {
             .create_if_missing(true)
             .journal_mode(SqliteJournalMode::Wal)
             .foreign_keys(true);
-        let pool = SqlitePoolOptions::new().max_connections(5).connect_with(opts).await?;
+        let pool = SqlitePoolOptions::new()
+            .max_connections(5)
+            .connect_with(opts)
+            .await?;
         Self::migrate(&pool).await?;
         Ok(Store { pool })
     }
@@ -76,7 +79,10 @@ impl Store {
     /// An in-memory store (single connection) for tests.
     pub async fn open_in_memory() -> Result<Self, StoreError> {
         let opts = SqliteConnectOptions::from_str("sqlite::memory:")?.foreign_keys(true);
-        let pool = SqlitePoolOptions::new().max_connections(1).connect_with(opts).await?;
+        let pool = SqlitePoolOptions::new()
+            .max_connections(1)
+            .connect_with(opts)
+            .await?;
         Self::migrate(&pool).await?;
         Ok(Store { pool })
     }
@@ -88,7 +94,9 @@ impl Store {
 
     /// Insert or replace a session and all its messages.
     pub async fn save_snapshot(&self, snap: &SessionSnapshot) -> Result<(), StoreError> {
-        let now = OffsetDateTime::now_utc().format(&Rfc3339).unwrap_or_default();
+        let now = OffsetDateTime::now_utc()
+            .format(&Rfc3339)
+            .unwrap_or_default();
         let title = derive_title(&snap.messages);
         let mut tx = self.pool.begin().await?;
 
@@ -203,7 +211,11 @@ impl Store {
         for r in &rows {
             let sid: String = r.get("sid");
             if seen.insert(sid.clone()) {
-                hits.push(SearchHit { session_id: sid, title: r.get("title"), snippet: r.get("snip") });
+                hits.push(SearchHit {
+                    session_id: sid,
+                    title: r.get("title"),
+                    snippet: r.get("snip"),
+                });
                 if hits.len() as i64 >= limit {
                     break;
                 }
@@ -291,7 +303,10 @@ mod tests {
         let store = Store::open_in_memory().await.unwrap();
         let snap = snapshot(
             "s1",
-            vec![Message::user("how do I parse JSON in Rust?"), Message::assistant("use serde_json")],
+            vec![
+                Message::user("how do I parse JSON in Rust?"),
+                Message::assistant("use serde_json"),
+            ],
         );
         store.save_snapshot(&snap).await.unwrap();
 
@@ -326,7 +341,10 @@ mod tests {
             .await
             .unwrap();
         store
-            .save_snapshot(&snapshot("s2", vec![Message::user("rust ownership and borrowing")]))
+            .save_snapshot(&snapshot(
+                "s2",
+                vec![Message::user("rust ownership and borrowing")],
+            ))
             .await
             .unwrap();
 
@@ -344,7 +362,10 @@ mod tests {
     #[tokio::test]
     async fn delete_removes_session_and_fts() {
         let store = Store::open_in_memory().await.unwrap();
-        store.save_snapshot(&snapshot("s1", vec![Message::user("findme please")])).await.unwrap();
+        store
+            .save_snapshot(&snapshot("s1", vec![Message::user("findme please")]))
+            .await
+            .unwrap();
         store.delete_session("s1").await.unwrap();
         assert!(store.load_session("s1").await.unwrap().is_none());
         assert!(store.search("findme", 10).await.unwrap().is_empty());
