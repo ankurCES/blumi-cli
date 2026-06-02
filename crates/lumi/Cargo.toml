@@ -19,6 +19,7 @@ lumi-llm.workspace = true
 lumi-tools.workspace = true
 lumi-exec.workspace = true
 lumi-skills.workspace = true
+lumi-persist.workspace = true
 
 tokio = { workspace = true }
 clap.workspace = true

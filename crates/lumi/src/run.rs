@@ -115,6 +115,17 @@ pub async fn run(config: LumiConfig, prompt: String, yolo: bool) -> anyhow::Resu
         }
     }
 
+    // Persist the session (best-effort; never fail the run on a save error).
+    match lumi_persist::Store::open(&config.paths.db).await {
+        Ok(store) => {
+            let snapshot = session.snapshot().await;
+            if let Err(e) = store.save_snapshot(&snapshot).await {
+                tracing::warn!("could not save session: {e}");
+            }
+        }
+        Err(e) => tracing::warn!("could not open session store: {e}"),
+    }
+
     Ok(())
 }
 

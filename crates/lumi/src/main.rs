@@ -2,6 +2,7 @@
 
 mod prompt;
 mod run;
+mod session;
 
 use clap::{Parser, Subcommand};
 use std::path::PathBuf;
@@ -39,6 +40,21 @@ enum Commands {
     Tui,
     /// Web UI + server (Phase 4).
     Web,
+    /// List, search, and show stored sessions.
+    Session {
+        #[command(subcommand)]
+        action: SessionCmd,
+    },
+}
+
+#[derive(Subcommand)]
+enum SessionCmd {
+    /// List recent sessions.
+    List,
+    /// Full-text search across sessions.
+    Search { query: Vec<String> },
+    /// Print a session's transcript.
+    Show { id: String },
 }
 
 #[tokio::main]
@@ -73,5 +89,10 @@ async fn main() -> anyhow::Result<()> {
             eprintln!("The web UI lands in Phase 4. For now: lumi run \"<prompt>\"");
             Ok(())
         }
+        Some(Commands::Session { action }) => match action {
+            SessionCmd::List => session::list(config).await,
+            SessionCmd::Search { query } => session::search(config, query.join(" ")).await,
+            SessionCmd::Show { id } => session::show(config, id).await,
+        },
     }
 }
