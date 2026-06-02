@@ -270,6 +270,7 @@ dependencies = [
  "blumi-core",
  "blumi-cron",
  "blumi-exec",
+ "blumi-gateway",
  "blumi-llm",
  "blumi-lsp",
  "blumi-mcp",
@@ -346,6 +347,18 @@ dependencies = [
 [[package]]
 name = "blumi-gateway"
 version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "async-trait",
+ "blumi-core",
+ "blumi-protocol",
+ "reqwest",
+ "serde",
+ "serde_json",
+ "tokio",
+ "tokio-util",
+ "tracing",
+]
 
 [[package]]
 name = "blumi-llm"

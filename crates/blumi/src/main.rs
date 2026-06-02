@@ -3,6 +3,7 @@
 mod branding;
 mod cron;
 mod engine;
+mod gateway;
 mod onboarding;
 mod playbook;
 mod prompt;
@@ -71,6 +72,21 @@ enum Commands {
     Playbook {
         #[command(subcommand)]
         action: PlaybookCmd,
+    },
+    /// Run blumi as a messaging bot (Telegram/Discord/Slack/WhatsApp).
+    Gateway {
+        #[command(subcommand)]
+        action: GatewayCmd,
+    },
+}
+
+#[derive(Subcommand)]
+enum GatewayCmd {
+    /// Telegram bot (long-poll; needs a @BotFather token).
+    Telegram {
+        /// Bot token (overrides gateway.telegram.token in settings.json).
+        #[arg(long)]
+        token: Option<String>,
     },
 }
 
@@ -210,6 +226,9 @@ async fn main() -> anyhow::Result<()> {
         Some(Commands::Playbook { action }) => match action {
             PlaybookCmd::Run { file, restart } => playbook::run(config, file, restart).await,
             PlaybookCmd::List => playbook::list(config),
+        },
+        Some(Commands::Gateway { action }) => match action {
+            GatewayCmd::Telegram { token } => gateway::run_telegram(config, token).await,
         },
     }
 }
