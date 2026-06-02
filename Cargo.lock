@@ -398,6 +398,15 @@ version = "0.1.0"
 [[package]]
 name = "lumi-exec"
 version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "async-trait",
+ "lumi-core",
+ "tempfile",
+ "tokio",
+ "tokio-util",
+ "tracing",
+]
 
 [[package]]
 name = "lumi-gateway"
