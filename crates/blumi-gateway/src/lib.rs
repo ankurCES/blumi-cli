@@ -7,8 +7,10 @@
 //! event/command core the TUI and web use. Each platform is just a *transport*
 //! that feeds the core inbound text and delivers its reply.
 
+mod discord;
 mod telegram;
 
+pub use discord::{run_discord, DiscordOptions};
 pub use telegram::{run_telegram, TelegramOptions};
 
 use blumi_core::SessionHandle;

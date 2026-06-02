@@ -88,6 +88,12 @@ enum GatewayCmd {
         #[arg(long)]
         token: Option<String>,
     },
+    /// Discord bot (Gateway WebSocket; needs the MESSAGE CONTENT intent on).
+    Discord {
+        /// Bot token (overrides gateway.discord.token in settings.json).
+        #[arg(long)]
+        token: Option<String>,
+    },
 }
 
 #[derive(Subcommand)]
@@ -229,6 +235,7 @@ async fn main() -> anyhow::Result<()> {
         },
         Some(Commands::Gateway { action }) => match action {
             GatewayCmd::Telegram { token } => gateway::run_telegram(config, token).await,
+            GatewayCmd::Discord { token } => gateway::run_discord(config, token).await,
         },
     }
 }

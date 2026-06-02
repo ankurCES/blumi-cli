@@ -5,7 +5,7 @@ use crate::engine::build_session;
 use async_trait::async_trait;
 use blumi_config::BlumiConfig;
 use blumi_core::SessionHandle;
-use blumi_gateway::{GatewayCore, SessionSpawner, TelegramOptions};
+use blumi_gateway::{DiscordOptions, GatewayCore, SessionSpawner, TelegramOptions};
 use std::sync::Arc;
 
 /// Spawns headless sessions for the gateway over `build_session`.
@@ -52,6 +52,34 @@ pub async fn run_telegram(config: BlumiConfig, token: Option<String>) -> anyhow:
         TelegramOptions {
             token,
             allowed_chats,
+        },
+    )
+    .await
+}
+
+pub async fn run_discord(config: BlumiConfig, token: Option<String>) -> anyhow::Result<()> {
+    config.paths.ensure_dirs().ok();
+    let token = resolve_token(token, &config.gateway.discord.token, "discord token")?;
+    let allowed_channels = config.gateway.discord.allowed_channels.clone();
+    let yolo = config.gateway.yolo;
+
+    crate::branding::banner();
+    eprintln!(
+        "  blumi discord gateway — {} mode  (Ctrl+C to stop)",
+        if yolo {
+            "auto-approve"
+        } else {
+            "safe (read-only tools)"
+        }
+    );
+
+    let spawner = Arc::new(GatewaySpawner { config, yolo });
+    let core = Arc::new(GatewayCore::new(spawner, yolo));
+    blumi_gateway::run_discord(
+        core,
+        DiscordOptions {
+            token,
+            allowed_channels,
         },
     )
     .await
