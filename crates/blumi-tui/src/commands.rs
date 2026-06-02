@@ -69,6 +69,10 @@ pub const COMMANDS: &[CommandDef] = &[
         desc: "toggle auto-approve (yolo)",
     },
     CommandDef {
+        name: "/persona",
+        desc: "switch persona: /persona [name]",
+    },
+    CommandDef {
         name: "/model",
         desc: "switch model: /model <id>",
     },
@@ -217,6 +221,34 @@ pub async fn run(model: &mut Model, session: &SessionHandle, line: &str) {
                 .into(),
             ));
         }
+        "/persona" => {
+            if arg.is_empty() {
+                if model.personas.is_empty() {
+                    model
+                        .entries
+                        .push(Entry::Notice("no personas configured".into()));
+                } else {
+                    let mut s = String::from("personas:");
+                    for (n, d) in &model.personas {
+                        let marker = if *n == model.persona {
+                            "  ← active"
+                        } else {
+                            ""
+                        };
+                        s.push_str(&format!("\n- {n}: {d}{marker}"));
+                    }
+                    model.entries.push(Entry::Notice(s));
+                }
+            } else if model.personas.iter().any(|(n, _)| n == &arg) {
+                model.persona = arg.clone();
+                let _ = session.send(Command::SetPersona { name: arg }).await;
+                // The core replies with a Notice confirming the switch.
+            } else {
+                model.entries.push(Entry::Notice(format!(
+                    "unknown persona '{arg}' (try /persona to list)"
+                )));
+            }
+        }
         "/model" => {
             if arg.is_empty() {
                 model
@@ -266,7 +298,8 @@ fn help_text() -> String {
 
 fn status_text(model: &Model) -> String {
     format!(
-        "session — model: {} · turns: {} · tokens ↑{} ↓{} · tasks: {} · approve: {} · dashboard: {}",
+        "session — persona: {} · model: {} · turns: {} · tokens ↑{} ↓{} · tasks: {} · approve: {} · dashboard: {}",
+        model.persona,
         if model.model_name.is_empty() {
             "default"
         } else {

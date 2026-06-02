@@ -233,6 +233,26 @@ impl SessionActor {
                     self.publish(Event::Notice { message: msg });
                 }
             }
+            Command::SetPersona { name } => match self.runner.set_persona(&name) {
+                Some(p) => {
+                    if let Some(model) = p.model.filter(|m| !m.is_empty()) {
+                        self.state.lock().await.model = model;
+                    }
+                    let suffix = if p.description.is_empty() {
+                        String::new()
+                    } else {
+                        format!(" — {}", p.description)
+                    };
+                    self.publish(Event::Notice {
+                        message: format!("persona → {}{suffix}", p.name),
+                    });
+                }
+                None => {
+                    self.publish(Event::Notice {
+                        message: format!("unknown persona '{name}'"),
+                    });
+                }
+            },
         }
     }
 

@@ -1,6 +1,7 @@
 //! blumi — the CLI entry point.
 
 mod branding;
+mod cron;
 mod engine;
 mod onboarding;
 mod prompt;
@@ -29,6 +30,10 @@ struct Cli {
     /// Override the model id.
     #[arg(long, global = true)]
     model: Option<String>,
+
+    /// Start with a named agent persona (e.g. architect, pair, reviewer).
+    #[arg(long, global = true)]
+    persona: Option<String>,
 }
 
 #[derive(Subcommand)]
@@ -51,6 +56,39 @@ enum Commands {
     Session {
         #[command(subcommand)]
         action: SessionCmd,
+    },
+    /// Schedule prompts to run on a timer (cron automations).
+    Cron {
+        #[command(subcommand)]
+        action: CronCmd,
+    },
+}
+
+#[derive(Subcommand)]
+enum CronCmd {
+    /// Add a scheduled job.
+    Add {
+        /// A short name for the job.
+        #[arg(long)]
+        name: String,
+        /// Schedule: "every 1h", "hourly:15", "daily 09:00", or an RFC3339 time.
+        #[arg(long)]
+        schedule: String,
+        /// The prompt to run.
+        #[arg(long)]
+        prompt: String,
+        /// Where to deliver output: "log" (default) or "file:<path>".
+        #[arg(long)]
+        deliver: Option<String>,
+    },
+    /// List scheduled jobs.
+    List,
+    /// Remove a job by id or name.
+    Rm { id: String },
+    /// Run due jobs now; pass --watch to keep running.
+    Run {
+        #[arg(long)]
+        watch: bool,
     },
 }
 
@@ -86,6 +124,9 @@ async fn main() -> anyhow::Result<()> {
     }
     if let Some(m) = cli.model {
         config.llm.model = m;
+    }
+    if let Some(p) = cli.persona {
+        config.persona = p;
     }
 
     match cli.command {
@@ -127,6 +168,17 @@ async fn main() -> anyhow::Result<()> {
             SessionCmd::List => session::list(config).await,
             SessionCmd::Search { query } => session::search(config, query.join(" ")).await,
             SessionCmd::Show { id } => session::show(config, id).await,
+        },
+        Some(Commands::Cron { action }) => match action {
+            CronCmd::Add {
+                name,
+                schedule,
+                prompt,
+                deliver,
+            } => cron::add(config, name, schedule, prompt, deliver),
+            CronCmd::List => cron::list(config),
+            CronCmd::Rm { id } => cron::remove(config, id),
+            CronCmd::Run { watch } => cron::run(config, watch).await,
         },
     }
 }

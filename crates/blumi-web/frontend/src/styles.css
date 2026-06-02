@@ -350,6 +350,148 @@ pre.code {
   }
 }
 
+/* ── Thinking mascot (animated flower) ──────────────────── */
+.thinking-mascot {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding-left: 38px;
+}
+.tflower {
+  font-size: 18px;
+  display: inline-block;
+  animation: bloom 1.6s ease-in-out infinite, hue 6s linear infinite;
+}
+.tlabel {
+  color: var(--fg-subtle);
+  font-size: 13px;
+}
+.tdots {
+  display: inline-flex;
+  gap: 3px;
+}
+.tdots i {
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: var(--cyan);
+  display: inline-block;
+  animation: dot 1.2s ease-in-out infinite;
+}
+.tdots i:nth-child(2) {
+  animation-delay: 0.2s;
+}
+.tdots i:nth-child(3) {
+  animation-delay: 0.4s;
+}
+@keyframes bloom {
+  0%,
+  100% {
+    transform: rotate(-8deg) scale(1);
+  }
+  50% {
+    transform: rotate(8deg) scale(1.18);
+  }
+}
+@keyframes hue {
+  0% {
+    color: #ff4f87;
+  }
+  33% {
+    color: #9b86ff;
+  }
+  66% {
+    color: #68ffd6;
+  }
+  100% {
+    color: #ff4f87;
+  }
+}
+@keyframes dot {
+  0%,
+  100% {
+    opacity: 0.3;
+    transform: translateY(0);
+  }
+  50% {
+    opacity: 1;
+    transform: translateY(-3px);
+  }
+}
+
+/* ── Header pickers / controls ──────────────────────────── */
+.picker {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.picker-label {
+  color: var(--fg-dim);
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+.picker select {
+  background: var(--surface-2);
+  color: var(--fg);
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  padding: 3px 6px;
+  font-size: 12px;
+  cursor: pointer;
+}
+.picker select:focus {
+  outline: none;
+  border-color: var(--rose);
+}
+.yolo {
+  background: transparent;
+  border: 1px solid var(--border);
+  color: var(--fg-subtle);
+  border-radius: 7px;
+  padding: 3px 9px;
+  font-size: 12px;
+  cursor: pointer;
+}
+.yolo.on {
+  border-color: var(--rose);
+  color: var(--rose);
+}
+
+/* ── Task progress ──────────────────────────────────────── */
+.progress {
+  height: 6px;
+  background: var(--surface-2);
+  border-radius: 4px;
+  overflow: hidden;
+  margin: 4px 0 6px;
+}
+.progress-fill {
+  height: 100%;
+  background: linear-gradient(90deg, var(--rose), var(--cyan));
+  transition: width 0.3s ease;
+}
+.task-counts {
+  display: flex;
+  gap: 10px;
+  font-size: 11px;
+  margin-bottom: 8px;
+}
+.tc.done {
+  color: var(--success);
+}
+.tc.active {
+  color: var(--cyan);
+}
+.tc.pending {
+  color: var(--fg-dim);
+}
+.task-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
 /* ── Approval / clarify cards ───────────────────────────── */
 .approval,
 .clarify {

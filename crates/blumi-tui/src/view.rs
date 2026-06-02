@@ -97,6 +97,11 @@ fn render_dashboard(model: &Model, f: &mut Frame, area: Rect, theme: &Theme) {
         &model.model_name
     };
     lines.push(kv(
+        "persona",
+        &truncate(&model.persona, w.saturating_sub(9)),
+        theme,
+    ));
+    lines.push(kv(
         "model",
         &truncate(model_name, w.saturating_sub(8)),
         theme,

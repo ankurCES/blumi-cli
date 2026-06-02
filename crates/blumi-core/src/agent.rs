@@ -9,6 +9,7 @@
 use crate::context::ContextManager;
 use crate::llm::{LlmClient, LlmOptions};
 use crate::permissions::PermissionEngine;
+use crate::persona::Persona;
 use crate::pipeline::execute_tool_call;
 use crate::registry::ToolRegistry;
 use crate::runner::{TurnContext, TurnRunner};
@@ -43,6 +44,10 @@ pub struct AgentTurnRunner {
     context: ContextManager,
     spawner: Option<Arc<dyn SubAgentSpawner>>,
     journal: Arc<ChangeJournal>,
+    /// Available top-level personas (empty = personas disabled).
+    personas: Vec<Persona>,
+    /// The currently-active persona (layered onto the system prompt).
+    active: std::sync::Mutex<Persona>,
 }
 
 impl AgentTurnRunner {
@@ -70,12 +75,23 @@ impl AgentTurnRunner {
             context: ContextManager::new(context_size),
             spawner: None,
             journal: Arc::new(ChangeJournal::new()),
+            personas: Vec::new(),
+            active: std::sync::Mutex::new(Persona::default()),
         }
     }
 
     /// Enable sub-agent delegation (the `delegate` tool's backend).
     pub fn with_spawner(mut self, spawner: Arc<dyn SubAgentSpawner>) -> Self {
         self.spawner = Some(spawner);
+        self
+    }
+
+    /// Configure top-level personas and select the active one by name.
+    pub fn with_personas(mut self, personas: Vec<Persona>, active: &str) -> Self {
+        if let Some(p) = personas.iter().find(|p| p.name == active) {
+            self.active = std::sync::Mutex::new(p.clone());
+        }
+        self.personas = personas;
         self
     }
 
@@ -104,6 +120,18 @@ impl TurnRunner for AgentTurnRunner {
         let tool_ctx = self.tool_ctx(&ctx);
         let mut recent_signatures: Vec<String> = Vec::new();
 
+        // Snapshot the active persona for this turn: it layers extra
+        // instructions onto the system prompt and may override the temperature.
+        let persona = self.active.lock().expect("persona poisoned").clone();
+        let effective_prompt = match (
+            self.system_prompt.is_empty(),
+            persona.instructions.is_empty(),
+        ) {
+            (_, true) => self.system_prompt.clone(),
+            (true, false) => persona.instructions.clone(),
+            (false, false) => format!("{}\n\n{}", self.system_prompt, persona.instructions),
+        };
+
         for _iteration in 0..self.max_iterations {
             if ct.is_cancelled() {
                 return DoneReason::Cancelled;
@@ -118,18 +146,21 @@ impl TurnRunner for AgentTurnRunner {
             let (window, current_model) = {
                 let st = state.lock().await;
                 let mut msgs = Vec::with_capacity(st.messages.len() + 1);
-                if !self.system_prompt.is_empty() {
-                    msgs.push(Message::system(self.system_prompt.clone()));
+                if !effective_prompt.is_empty() {
+                    msgs.push(Message::system(effective_prompt.clone()));
                 }
                 msgs.extend(st.messages.iter().cloned());
                 (msgs, st.model.clone())
             };
 
             // Honor mid-session model switches (Command::SetModel) within the
-            // active provider/client.
+            // active provider/client; the persona may override the temperature.
             let mut options = self.options.clone();
             if !current_model.is_empty() {
                 options.model = current_model;
+            }
+            if let Some(t) = persona.temperature {
+                options.temperature = t;
             }
 
             // Stream the model.
@@ -293,6 +324,12 @@ impl TurnRunner for AgentTurnRunner {
             ),
             Err(e) => format!("undo failed for {display}: {e}"),
         })
+    }
+
+    fn set_persona(&self, name: &str) -> Option<Persona> {
+        let found = self.personas.iter().find(|p| p.name == name).cloned()?;
+        *self.active.lock().expect("persona poisoned") = found.clone();
+        Some(found)
     }
 }
 

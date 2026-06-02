@@ -27,11 +27,39 @@ pub async fn config(State(state): State<AppState>) -> Json<Value> {
         "models": state.config.models,
         "working_dir": state.config.working_dir,
         "version": state.config.version,
+        "persona": state.config.persona,
     }))
 }
 
 pub async fn models(State(state): State<AppState>) -> Json<Value> {
     Json(json!({ "model": state.config.model, "models": state.config.models }))
+}
+
+pub async fn personas(State(state): State<AppState>) -> Json<Value> {
+    let list: Vec<Value> = state
+        .config
+        .personas
+        .iter()
+        .map(|(name, desc)| json!({ "name": name, "description": desc }))
+        .collect();
+    Json(json!({ "personas": list, "active": state.config.persona }))
+}
+
+#[derive(Deserialize)]
+pub struct PersonaBody {
+    pub name: String,
+}
+
+pub async fn set_persona(
+    State(state): State<AppState>,
+    Json(body): Json<PersonaBody>,
+) -> Json<Value> {
+    let ok = state
+        .session
+        .send(Command::SetPersona { name: body.name })
+        .await
+        .is_ok();
+    Json(json!({ "ok": ok }))
 }
 
 pub async fn sessions(State(state): State<AppState>) -> Json<Value> {
@@ -76,6 +104,20 @@ pub async fn chat_send(State(state): State<AppState>, Json(body): Json<SendBody>
 
 pub async fn chat_cancel(State(state): State<AppState>) -> Json<Value> {
     let ok = state.session.send(Command::Cancel).await.is_ok();
+    Json(json!({ "ok": ok }))
+}
+
+#[derive(Deserialize)]
+pub struct YoloBody {
+    pub on: bool,
+}
+
+pub async fn set_yolo(State(state): State<AppState>, Json(body): Json<YoloBody>) -> Json<Value> {
+    let ok = state
+        .session
+        .send(Command::SetYolo { on: body.on })
+        .await
+        .is_ok();
     Json(json!({ "ok": ok }))
 }
 

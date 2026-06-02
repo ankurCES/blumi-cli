@@ -267,6 +267,7 @@ dependencies = [
  "anyhow",
  "blumi-config",
  "blumi-core",
+ "blumi-cron",
  "blumi-exec",
  "blumi-llm",
  "blumi-mcp",
@@ -277,6 +278,7 @@ dependencies = [
  "blumi-tui",
  "blumi-web",
  "clap",
+ "time",
  "tokio",
  "tracing",
  "tracing-subscriber",
@@ -317,6 +319,12 @@ dependencies = [
 [[package]]
 name = "blumi-cron"
 version = "0.1.0"
+dependencies = [
+ "serde",
+ "serde_json",
+ "thiserror 2.0.18",
+ "time",
+]
 
 [[package]]
 name = "blumi-exec"

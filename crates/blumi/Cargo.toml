@@ -23,9 +23,11 @@ blumi-mcp.workspace = true
 blumi-persist.workspace = true
 blumi-tui.workspace = true
 blumi-web.workspace = true
+blumi-cron.workspace = true
 
 tokio = { workspace = true }
 clap.workspace = true
 anyhow.workspace = true
 tracing.workspace = true
 tracing-subscriber.workspace = true
+time.workspace = true

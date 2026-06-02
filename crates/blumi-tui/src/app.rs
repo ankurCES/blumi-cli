@@ -30,6 +30,10 @@ pub struct TuiConfig {
     pub skills: Vec<(String, String)>,
     /// Recent sessions (id, title) for the dashboard + `/sessions`.
     pub recent_sessions: Vec<(String, String)>,
+    /// Available personas (name, description) for `/persona`.
+    pub personas: Vec<(String, String)>,
+    /// The active persona name.
+    pub persona: String,
     /// Directory `/export` writes transcripts into.
     pub export_dir: PathBuf,
 }
@@ -76,6 +80,8 @@ async fn run_loop(
     model.user_md = cfg.user_md;
     model.skills = cfg.skills;
     model.recent_sessions = cfg.recent_sessions;
+    model.personas = cfg.personas;
+    model.persona = cfg.persona;
     model.export_dir = cfg.export_dir;
     let mut events = session.subscribe();
     let mut input = EventStream::new();

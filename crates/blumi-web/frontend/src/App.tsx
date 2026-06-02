@@ -1,6 +1,6 @@
 import { useEffect, useReducer, useRef, useState } from 'react'
 import { api, SSE_EVENTS } from './api'
-import type { Approval, Clarify, Config, Entry, SessionMeta, Todo } from './types'
+import type { Approval, Clarify, Config, Entry, Persona, SessionMeta, Todo } from './types'
 import { Header } from './components/Header'
 import { Sidebar } from './components/Sidebar'
 import { RunPanel } from './components/RunPanel'
@@ -8,6 +8,7 @@ import { Message } from './components/Message'
 import { Composer } from './components/Composer'
 import { ApprovalCard } from './components/ApprovalCard'
 import { ClarifyCard } from './components/ClarifyCard'
+import { Thinking } from './components/Thinking'
 
 type State = {
   entries: Entry[]
@@ -135,12 +136,28 @@ export function App() {
   const [state, dispatch] = useReducer(reducer, initial)
   const [config, setConfig] = useState<Config | null>(null)
   const [sessions, setSessions] = useState<SessionMeta[]>([])
+  const [personas, setPersonas] = useState<Persona[]>([])
+  const [persona, setPersona] = useState('default')
+  const [yolo, setYolo] = useState(false)
   const [connected, setConnected] = useState(false)
   const scrollRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
-    api.config().then(setConfig).catch(() => {})
+    api
+      .config()
+      .then((c) => {
+        setConfig(c)
+        if (c.persona) setPersona(c.persona)
+      })
+      .catch(() => {})
     api.sessions().then(setSessions).catch(() => {})
+    api
+      .personas()
+      .then((p) => {
+        setPersonas(p.personas)
+        if (p.active) setPersona(p.active)
+      })
+      .catch(() => {})
   }, [])
 
   useEffect(() => {
@@ -183,12 +200,30 @@ export function App() {
     api.clarify(state.clarify.request_id, value)
     dispatch({ type: 'clearClarify' })
   }
+  function changePersona(name: string) {
+    setPersona(name)
+    api.setPersona(name)
+  }
+  function toggleYolo(on: boolean) {
+    setYolo(on)
+    api.setYolo(on)
+  }
 
   const empty = state.entries.length === 0 && !state.streaming
+  // Show the thinking mascot while working with nothing streaming yet.
+  const showThinking = state.busy && !state.streaming
 
   return (
     <div className="app">
-      <Header config={config} connected={connected} />
+      <Header
+        config={config}
+        connected={connected}
+        personas={personas}
+        persona={persona}
+        onPersona={changePersona}
+        yolo={yolo}
+        onYolo={toggleYolo}
+      />
       <div className="main">
         <Sidebar sessions={sessions} onNew={() => dispatch({ type: 'reset' })} />
         <section className="chat">
@@ -197,14 +232,20 @@ export function App() {
             {state.entries.map((e, i) => (
               <Message entry={e} key={i} />
             ))}
-            {state.thinking && <div className="thinking">✿ thinking…</div>}
             {state.streaming && <Message entry={{ kind: 'assistant', text: state.streaming }} />}
+            {showThinking && <Thinking text={state.thinking ?? undefined} />}
             {state.clarify && <ClarifyCard clarify={state.clarify} onRespond={respondClarify} />}
             {state.approval && <ApprovalCard approval={state.approval} onRespond={respondApproval} />}
           </div>
           <Composer busy={state.busy} onSend={send} onCancel={() => api.cancel()} />
         </section>
-        <RunPanel todos={state.todos} usage={state.usage} model={config?.model ?? ''} busy={state.busy} />
+        <RunPanel
+          todos={state.todos}
+          usage={state.usage}
+          model={config?.model ?? ''}
+          persona={persona}
+          busy={state.busy}
+        />
       </div>
     </div>
   )
