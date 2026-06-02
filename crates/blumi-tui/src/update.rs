@@ -1,8 +1,8 @@
 //! Message handling: keys, terminal events, and core events.
 
+use crate::commands;
 use crate::dialog::{Action, Picker};
 use crate::model::{Entry, Focus, Model, Msg, PendingApproval};
-use crate::theme::Theme;
 use blumi_core::SessionHandle;
 use blumi_protocol::{ApprovalScope, Command, Decision, Event};
 use crossterm::event::{Event as TermEvent, KeyCode, KeyEventKind, KeyModifiers};
@@ -40,6 +40,13 @@ async fn handle_term(model: &mut Model, ev: TermEvent, session: &SessionHandle) 
                 return;
             }
 
+            // The memory overlay closes on any key.
+            if model.memory_view.is_some() {
+                model.memory_view = None;
+                model.mark_dirty();
+                return;
+            }
+
             // A dialog (command palette) captures all keys.
             if model.dialog.is_some() {
                 handle_dialog_key(model, key.code);
@@ -61,6 +68,12 @@ async fn handle_term(model: &mut Model, ev: TermEvent, session: &SessionHandle) 
                 return;
             }
 
+            // Slash-command popup navigation (while typing a "/..." command).
+            if model.slash_active() && handle_slash_key(model, key, session).await {
+                model.mark_dirty();
+                return;
+            }
+
             match key.code {
                 KeyCode::Esc => {
                     if model.busy {
@@ -75,7 +88,6 @@ async fn handle_term(model: &mut Model, ev: TermEvent, session: &SessionHandle) 
                         Focus::Chat => Focus::Editor,
                     };
                 }
-                // Ctrl+J or Shift/Alt+Enter inserts a newline; plain Enter sends.
                 KeyCode::Char('j') if ctrl => model.input.insert_newline(),
                 KeyCode::Enter
                     if key
@@ -90,7 +102,7 @@ async fn handle_term(model: &mut Model, ev: TermEvent, session: &SessionHandle) 
                     if trimmed.is_empty() {
                         // nothing to do
                     } else if trimmed.starts_with('/') {
-                        handle_slash(model, session, &trimmed).await;
+                        commands::run(model, session, &trimmed).await;
                     } else if !model.busy {
                         send_message(model, session, text).await;
                     }
@@ -102,8 +114,10 @@ async fn handle_term(model: &mut Model, ev: TermEvent, session: &SessionHandle) 
                 _ => {
                     if model.focus == Focus::Editor {
                         model.input.input(key);
+                        if model.slash_active() {
+                            model.slash_sel = 0;
+                        }
                     } else {
-                        // chat-focused scrolling
                         match key.code {
                             KeyCode::Char('k') | KeyCode::Up => {
                                 model.scrollback = model.scrollback.saturating_add(1)
@@ -119,6 +133,59 @@ async fn handle_term(model: &mut Model, ev: TermEvent, session: &SessionHandle) 
             model.mark_dirty();
         }
         _ => {}
+    }
+}
+
+/// Handle a key while the slash-command popup is open. Returns true if it was
+/// consumed (navigation / run / cancel); false to let normal editing proceed.
+async fn handle_slash_key(
+    model: &mut Model,
+    key: crossterm::event::KeyEvent,
+    session: &SessionHandle,
+) -> bool {
+    match key.code {
+        KeyCode::Up => {
+            model.slash_sel = model.slash_sel.saturating_sub(1);
+            true
+        }
+        KeyCode::Down => {
+            let n = commands::matching(&model.input_text()).len();
+            if n > 0 && model.slash_sel + 1 < n {
+                model.slash_sel += 1;
+            }
+            true
+        }
+        KeyCode::Tab => {
+            let typed = model.input_text();
+            let matches = commands::matching(&typed);
+            if let Some(c) = matches.get(model.slash_sel).or_else(|| matches.first()) {
+                model.set_input(&format!("{} ", c.name));
+            }
+            true
+        }
+        KeyCode::Enter
+            if !key
+                .modifiers
+                .intersects(KeyModifiers::SHIFT | KeyModifiers::ALT) =>
+        {
+            let typed = model.input_text();
+            // A bare command word → run the highlighted match; with args → run as typed.
+            let line = if typed.split_whitespace().count() <= 1 {
+                commands::matching(&typed)
+                    .get(model.slash_sel)
+                    .map(|c| c.name.to_string())
+                    .unwrap_or(typed)
+            } else {
+                typed
+            };
+            commands::run(model, session, &line).await;
+            true
+        }
+        KeyCode::Esc => {
+            model.clear_input();
+            true
+        }
+        _ => false,
     }
 }
 
@@ -163,9 +230,7 @@ async fn handle_approval_key(model: &mut Model, code: KeyCode, session: &Session
 
 async fn handle_core(model: &mut Model, event: Event, session: &SessionHandle) {
     match event {
-        Event::AssistantStarted { .. } => {
-            model.streaming = Some(String::new());
-        }
+        Event::AssistantStarted { .. } => model.streaming = Some(String::new()),
         Event::Token { text } => {
             model
                 .streaming
@@ -179,9 +244,7 @@ async fn handle_core(model: &mut Model, event: Event, session: &SessionHandle) {
                 .get_or_insert_with(String::new)
                 .push_str(&text);
         }
-        Event::AssistantFinished { .. } => {
-            commit_streaming(model);
-        }
+        Event::AssistantFinished { .. } => commit_streaming(model),
         Event::ToolStart {
             id, name, summary, ..
         } => {
@@ -241,7 +304,6 @@ async fn handle_core(model: &mut Model, event: Event, session: &SessionHandle) {
             question,
             ..
         } => {
-            // MVP: surface the question and answer empty so the turn proceeds.
             model
                 .entries
                 .push(Entry::Notice(format!("clarify: {question}")));
@@ -252,6 +314,7 @@ async fn handle_core(model: &mut Model, event: Event, session: &SessionHandle) {
                 })
                 .await;
         }
+        Event::TodoUpdate { items } => model.todos = items,
         Event::Usage { input, output, .. } => {
             model.input_tokens += input;
             model.output_tokens += output;
@@ -268,6 +331,7 @@ async fn handle_core(model: &mut Model, event: Event, session: &SessionHandle) {
             commit_streaming(model);
             model.thinking = None;
             model.busy = false;
+            model.turn_count += 1;
         }
         Event::Error { message, .. } => {
             model
@@ -364,75 +428,8 @@ fn handle_dialog_key(model: &mut Model, code: KeyCode) {
 fn perform_action(model: &mut Model, action: Action) {
     match action {
         Action::Quit => model.should_quit = true,
-        Action::ClearTranscript => clear_transcript(model),
-        Action::CycleTheme => cycle_theme(model),
-    }
-}
-
-fn clear_transcript(model: &mut Model) {
-    model.entries.clear();
-    model.streaming = None;
-    model.thinking = None;
-    model.scrollback = 0;
-}
-
-fn cycle_theme(model: &mut Model) {
-    model.theme_idx = (model.theme_idx + 1) % crate::theme::THEMES.len();
-    model.theme = Theme::by_index(model.theme_idx);
-    model
-        .entries
-        .push(Entry::Notice(format!("theme: {}", model.theme.name)));
-}
-
-async fn handle_slash(model: &mut Model, session: &SessionHandle, input: &str) {
-    model.clear_input();
-    let mut parts = input.splitn(2, char::is_whitespace);
-    let cmd = parts.next().unwrap_or("");
-    let arg = parts.next().unwrap_or("").trim();
-    match cmd {
-        "/help" => model.entries.push(Entry::Notice(
-            "commands: /help · /clear · /theme [name] · /model <id> · /login · /quit   \
-             (ctrl+p palette · tab focus · esc cancel)"
-                .into(),
-        )),
-        "/clear" => clear_transcript(model),
-        "/quit" => model.should_quit = true,
-        "/theme" => {
-            if arg.is_empty() {
-                cycle_theme(model);
-            } else if let Some(i) =
-                (0..crate::theme::THEMES.len()).find(|&i| Theme::by_index(i).name == arg)
-            {
-                model.theme_idx = i;
-                model.theme = Theme::by_index(i);
-                model.entries.push(Entry::Notice(format!("theme: {arg}")));
-            } else {
-                model
-                    .entries
-                    .push(Entry::Notice(format!("unknown theme '{arg}'")));
-            }
-        }
-        "/model" => {
-            if arg.is_empty() {
-                model
-                    .entries
-                    .push(Entry::Notice("usage: /model <id>".into()));
-            } else {
-                model.model_name = arg.to_string();
-                let _ = session
-                    .send(Command::SetModel {
-                        model: arg.to_string(),
-                    })
-                    .await;
-                model.entries.push(Entry::Notice(format!("model → {arg}")));
-            }
-        }
-        "/login" => model.entries.push(Entry::Notice(
-            "run `blumi login` from a shell to add/switch providers".into(),
-        )),
-        other => model.entries.push(Entry::Notice(format!(
-            "unknown command '{other}' (try /help)"
-        ))),
+        Action::ClearTranscript => model.clear_transcript(),
+        Action::CycleTheme => model.cycle_theme(),
     }
 }
 

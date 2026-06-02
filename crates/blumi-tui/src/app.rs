@@ -15,19 +15,26 @@ use futures::StreamExt;
 use ratatui::backend::CrosstermBackend;
 use ratatui::Terminal;
 use std::io::{self, Stdout};
+use std::path::PathBuf;
 use std::time::Duration;
 
 pub(crate) type Term = Terminal<CrosstermBackend<Stdout>>;
 
+/// Everything the TUI needs besides the session handle.
+pub struct TuiConfig {
+    pub model_name: String,
+    pub working_dir: String,
+    pub memory_md: PathBuf,
+    pub user_md: PathBuf,
+    /// Available skills (name, description) for `/skills`.
+    pub skills: Vec<(String, String)>,
+}
+
 /// Run the interactive TUI against an already-spawned session. Restores the
 /// terminal on exit (including on error).
-pub async fn run(
-    session: SessionHandle,
-    model_name: String,
-    working_dir: String,
-) -> anyhow::Result<()> {
+pub async fn run(session: SessionHandle, cfg: TuiConfig) -> anyhow::Result<()> {
     let mut terminal = setup_terminal()?;
-    let result = run_loop(&mut terminal, session, model_name, working_dir).await;
+    let result = run_loop(&mut terminal, session, cfg).await;
     let _ = teardown_terminal(&mut terminal);
     result
 }
@@ -58,10 +65,12 @@ pub(crate) fn teardown_terminal(terminal: &mut Term) -> anyhow::Result<()> {
 async fn run_loop(
     terminal: &mut Term,
     session: SessionHandle,
-    model_name: String,
-    working_dir: String,
+    cfg: TuiConfig,
 ) -> anyhow::Result<()> {
-    let mut model = Model::new(model_name, working_dir);
+    let mut model = Model::new(cfg.model_name, cfg.working_dir);
+    model.memory_md = cfg.memory_md;
+    model.user_md = cfg.user_md;
+    model.skills = cfg.skills;
     let mut events = session.subscribe();
     let mut input = EventStream::new();
     let mut tick = tokio::time::interval(Duration::from_millis(50)); // ~20fps

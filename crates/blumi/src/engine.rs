@@ -70,6 +70,12 @@ pub async fn build_session(config: &BlumiConfig, yolo: bool) -> anyhow::Result<S
         ))));
     }
 
+    // Long-term memory: the agent can persist to MEMORY.md / USER.md.
+    registry.register(Arc::new(blumi_core::Typed(blumi_skills::MemoryTool::new(
+        config.paths.memory_md(),
+        config.paths.user_md(),
+    ))));
+
     let mut perm_cfg = config.permissions.clone();
     if yolo {
         perm_cfg.yolo = true;

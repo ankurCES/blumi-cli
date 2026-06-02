@@ -5,6 +5,7 @@
 //! landing screen and the CLI banner share one definition.
 
 mod app;
+mod commands;
 mod dialog;
 mod diff;
 mod highlight;
@@ -17,7 +18,7 @@ mod update;
 mod view;
 mod wizard;
 
-pub use app::run;
+pub use app::{run, TuiConfig};
 pub use logo::{LOGO, MARK, PETAL, WORDMARK};
 pub use mascot::{banner_frame, ROSE_ROWS};
 pub use wizard::{run_onboarding, ProviderChoice, WizardOutcome};
