@@ -98,11 +98,19 @@ pub async fn build_session(
     }
     let perms = Arc::new(PermissionEngine::new(perm_cfg));
 
-    // Select the execution backend: a Docker sandbox (commands run in a
-    // container, files via a bind mount) or the local host. Docker failures fall
-    // back to local so a missing daemon never blocks startup.
-    let executor: Arc<dyn blumi_core::Executor> = if config.executor.backend == "docker" {
-        match blumi_exec::DockerExecutor::start(
+    // The agent's working directory. For ssh it's the remote workspace; for
+    // local/docker it's the project dir (docker bind-mounts it).
+    let work_dir: std::path::PathBuf =
+        if config.executor.backend == "ssh" && !config.executor.ssh_workdir.is_empty() {
+            std::path::PathBuf::from(&config.executor.ssh_workdir)
+        } else {
+            config.paths.working_dir.clone()
+        };
+
+    // Select the execution backend. Sandbox/remote failures fall back to local
+    // so a missing daemon/host never blocks startup.
+    let executor: Arc<dyn blumi_core::Executor> = match config.executor.backend.as_str() {
+        "docker" => match blumi_exec::DockerExecutor::start(
             &config.executor.docker_image,
             &config.paths.working_dir,
         )
@@ -116,9 +124,24 @@ pub async fn build_session(
                 tracing::warn!("docker sandbox unavailable ({e}); using local executor");
                 Arc::new(LocalExecutor::new(&config.paths.working_dir))
             }
+        },
+        "ssh" if !config.executor.ssh_host.is_empty() => {
+            tracing::info!(
+                "ssh sandbox: {} ({})",
+                config.executor.ssh_host,
+                work_dir.display()
+            );
+            Arc::new(blumi_exec::SshExecutor::new(
+                &config.executor.ssh_host,
+                &config.executor.ssh_workdir,
+            ))
         }
-    } else {
-        Arc::new(LocalExecutor::new(&config.paths.working_dir))
+        other => {
+            if other == "ssh" {
+                tracing::warn!("ssh backend needs executor.ssh_host; using local executor");
+            }
+            Arc::new(LocalExecutor::new(&work_dir))
+        }
     };
 
     // Personas: built-ins merged with config; the active one seeds the model and
@@ -180,7 +203,7 @@ pub async fn build_session(
         executor.clone(),
         options.clone(),
         config.llm.context_size,
-        config.paths.working_dir.clone(),
+        work_dir.clone(),
         builtin_agents(),
     ));
 
@@ -194,7 +217,7 @@ pub async fn build_session(
             config.llm.max_iterations,
             config.llm.context_size,
             system_prompt,
-            config.paths.working_dir.clone(),
+            work_dir.clone(),
         )
         .with_spawner(spawner)
         .with_personas(personas, &active),

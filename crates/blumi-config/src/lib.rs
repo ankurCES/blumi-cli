@@ -100,10 +100,14 @@ pub struct PersonaConfig {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct ExecutorConfig {
-    /// `"local"` (host) or `"docker"` (sandboxed container).
+    /// `"local"` (host), `"docker"` (container), or `"ssh"` (remote host).
     pub backend: String,
     /// Image used by the docker backend.
     pub docker_image: String,
+    /// SSH destination (`user@host` or alias) for the ssh backend.
+    pub ssh_host: String,
+    /// Absolute remote working directory for the ssh backend.
+    pub ssh_workdir: String,
 }
 
 impl Default for ExecutorConfig {
@@ -111,6 +115,8 @@ impl Default for ExecutorConfig {
         ExecutorConfig {
             backend: "local".into(),
             docker_image: "debian:stable-slim".into(),
+            ssh_host: String::new(),
+            ssh_workdir: String::new(),
         }
     }
 }
