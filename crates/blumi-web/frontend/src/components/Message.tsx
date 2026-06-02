@@ -1,8 +1,9 @@
 import type { Entry } from '../types'
+import { api } from '../api'
 import { Md } from './Md'
 import { ToolCard } from './ToolCard'
 
-export function Message({ entry }: { entry: Entry }) {
+export function Message({ entry, voiceEnabled }: { entry: Entry; voiceEnabled?: boolean }) {
   switch (entry.kind) {
     case 'user':
       return (
@@ -17,6 +18,15 @@ export function Message({ entry }: { entry: Entry }) {
           <div className="avatar">✿</div>
           <div className="bubble">
             <Md text={entry.text} />
+            {voiceEnabled && entry.text.trim() && (
+              <button
+                className="speak-btn"
+                title="Read aloud"
+                onClick={() => api.speak(entry.text)}
+              >
+                🔊
+              </button>
+            )}
           </div>
         </div>
       )

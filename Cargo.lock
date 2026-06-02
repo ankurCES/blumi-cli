@@ -301,6 +301,7 @@ dependencies = [
  "blumi-skills",
  "blumi-tools",
  "blumi-tui",
+ "blumi-voice",
  "blumi-web",
  "clap",
  "rand 0.8.6",
@@ -536,6 +537,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "blumi-voice"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "reqwest",
+ "serde",
+ "serde_json",
+ "tracing",
+]
+
+[[package]]
 name = "blumi-web"
 version = "0.1.0"
 dependencies = [
@@ -549,6 +561,7 @@ dependencies = [
  "blumi-core",
  "blumi-persist",
  "blumi-protocol",
+ "blumi-voice",
  "futures",
  "hmac",
  "mime_guess",
@@ -2372,6 +2385,7 @@ dependencies = [
  "hyper-util",
  "js-sys",
  "log",
+ "mime_guess",
  "percent-encoding",
  "pin-project-lite",
  "quinn",

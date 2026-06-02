@@ -11,6 +11,7 @@ blumi-core.workspace = true
 blumi-protocol.workspace = true
 blumi-config.workspace = true
 blumi-persist.workspace = true
+blumi-voice.workspace = true
 
 tokio = { workspace = true }
 tokio-stream.workspace = true

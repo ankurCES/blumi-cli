@@ -1021,3 +1021,35 @@ pre.code {
   color: var(--muted);
   font-weight: 600;
 }
+
+/* ── Voice ───────────────────────────────────────────────── */
+.btn.mic {
+  background: var(--surface-2, var(--border));
+  color: var(--fg);
+}
+.btn.mic.rec {
+  background: #e5484d;
+  color: #fff;
+  animation: pulse 1.2s ease-in-out infinite;
+}
+@keyframes pulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.55;
+  }
+}
+.speak-btn {
+  background: none;
+  border: none;
+  cursor: pointer;
+  opacity: 0.5;
+  font-size: 13px;
+  margin-top: 4px;
+  padding: 0;
+}
+.speak-btn:hover {
+  opacity: 1;
+}

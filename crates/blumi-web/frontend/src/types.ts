@@ -73,4 +73,5 @@ export type Config = {
   persona: string
   context_size: number
   auth_required: boolean
+  voice_enabled: boolean
 }

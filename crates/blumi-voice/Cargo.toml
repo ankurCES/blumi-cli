@@ -1,0 +1,14 @@
+[package]
+name = "blumi-voice"
+description = "Speech-to-text (whisper) + text-to-speech over OpenAI-compatible audio APIs."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]
+reqwest.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+anyhow.workspace = true
+tracing.workspace = true

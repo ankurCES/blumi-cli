@@ -130,6 +130,26 @@ pub struct WebSettings {
     pub password_hash: String,
 }
 
+/// Voice (speech-to-text + text-to-speech) over OpenAI-compatible audio APIs.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(default)]
+pub struct VoiceSettings {
+    /// Master switch for voice features in the web UI / gateways.
+    pub enabled: bool,
+    /// API key for the audio endpoints (blank for local servers).
+    pub api_key: String,
+    /// Transcription base URL, e.g. `https://api.openai.com/v1`.
+    pub stt_base_url: String,
+    /// Transcription model, e.g. `whisper-1`.
+    pub stt_model: String,
+    /// Speech base URL.
+    pub tts_base_url: String,
+    /// Speech model, e.g. `tts-1`.
+    pub tts_model: String,
+    /// Voice name, e.g. `alloy`.
+    pub tts_voice: String,
+}
+
 /// Messaging-gateway settings (run blumi as a bot). Tokens may also be passed
 /// on the command line, which override these.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
@@ -246,6 +266,9 @@ pub struct BlumiConfig {
     /// Web UI / server settings (auth).
     #[serde(default)]
     pub web: WebSettings,
+    /// Voice (speech-to-text + text-to-speech).
+    #[serde(default)]
+    pub voice: VoiceSettings,
     /// Resolved at load time; never serialized to/from files.
     #[serde(skip)]
     pub paths: Paths,
@@ -266,6 +289,7 @@ impl Default for BlumiConfig {
             lsp_servers: BTreeMap::new(),
             gateway: GatewayConfig::default(),
             web: WebSettings::default(),
+            voice: VoiceSettings::default(),
             paths: Paths::default(),
         }
     }

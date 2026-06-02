@@ -27,6 +27,7 @@ blumi-cron.workspace = true
 blumi-lsp.workspace = true
 blumi-playbook.workspace = true
 blumi-gateway.workspace = true
+blumi-voice.workspace = true
 
 tokio = { workspace = true }
 tokio-util.workspace = true

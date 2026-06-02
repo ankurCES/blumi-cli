@@ -8,8 +8,10 @@
 
 use crate::AppState;
 use axum::extract::State;
-use axum::http::HeaderMap;
+use axum::http::header::CONTENT_TYPE;
+use axum::http::{HeaderMap, StatusCode};
 use axum::response::sse::{Event as SseEvent, KeepAlive, Sse};
+use axum::response::{IntoResponse, Response};
 use axum::Json;
 use blumi_protocol::{ApprovalScope, Command, Decision, Envelope, RequestId, Role};
 use futures::Stream;
@@ -31,6 +33,7 @@ pub async fn config(State(state): State<AppState>) -> Json<Value> {
         "persona": state.config.persona,
         "context_size": state.config.context_size,
         "auth_required": state.auth().is_some(),
+        "voice_enabled": state.voice().is_some(),
     }))
 }
 
@@ -369,4 +372,57 @@ pub async fn memory_set(
 
 pub async fn usage(State(state): State<AppState>) -> Json<Value> {
     Json(json!({ "usage": state.mgmt().usage().await }))
+}
+
+// ── Voice (STT / TTS) ───────────────────────────────────────────────────────
+
+/// POST /api/voice/transcribe — raw audio body in, `{ text }` out.
+pub async fn voice_transcribe(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    body: axum::body::Bytes,
+) -> Response {
+    let Some(cfg) = state.voice() else {
+        return (
+            StatusCode::SERVICE_UNAVAILABLE,
+            Json(json!({ "error": "voice not enabled" })),
+        )
+            .into_response();
+    };
+    let mime = headers
+        .get(CONTENT_TYPE)
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("audio/webm")
+        .to_string();
+    let ext = mime
+        .rsplit('/')
+        .next()
+        .unwrap_or("webm")
+        .split(';')
+        .next()
+        .unwrap_or("webm");
+    match blumi_voice::transcribe(cfg, body.to_vec(), &format!("audio.{ext}"), &mime).await {
+        Ok(text) => Json(json!({ "text": text })).into_response(),
+        Err(e) => (
+            StatusCode::BAD_GATEWAY,
+            Json(json!({ "error": e.to_string() })),
+        )
+            .into_response(),
+    }
+}
+
+#[derive(Deserialize)]
+pub struct SpeakBody {
+    pub text: String,
+}
+
+/// POST /api/voice/speak — `{ text }` in, audio bytes out.
+pub async fn voice_speak(State(state): State<AppState>, Json(b): Json<SpeakBody>) -> Response {
+    let Some(cfg) = state.voice() else {
+        return (StatusCode::SERVICE_UNAVAILABLE, "voice not enabled").into_response();
+    };
+    match blumi_voice::synthesize(cfg, &b.text).await {
+        Ok(bytes) => ([(CONTENT_TYPE, "audio/mpeg")], bytes).into_response(),
+        Err(e) => (StatusCode::BAD_GATEWAY, e.to_string()).into_response(),
+    }
 }

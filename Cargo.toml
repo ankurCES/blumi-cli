@@ -24,6 +24,7 @@ blumi-skills = { path = "crates/blumi-skills" }
 blumi-cron = { path = "crates/blumi-cron" }
 blumi-playbook = { path = "crates/blumi-playbook" }
 blumi-gateway = { path = "crates/blumi-gateway" }
+blumi-voice = { path = "crates/blumi-voice" }
 blumi-config = { path = "crates/blumi-config" }
 blumi-tui = { path = "crates/blumi-tui" }
 blumi-web = { path = "crates/blumi-web" }
@@ -45,7 +46,7 @@ uuid = { version = "1", features = ["v4", "serde"] }
 time = { version = "0.3", features = ["serde", "serde-well-known", "formatting", "parsing", "macros"] }
 
 # HTTP / SSE client
-reqwest = { version = "0.12", default-features = false, features = ["json", "stream", "rustls-tls"] }
+reqwest = { version = "0.12", default-features = false, features = ["json", "stream", "multipart", "rustls-tls"] }
 eventsource-stream = "0.2"
 
 # WebSocket client (Discord/Slack gateways)

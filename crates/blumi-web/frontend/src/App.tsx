@@ -321,14 +321,19 @@ export function App() {
           <div className="transcript" ref={scrollRef}>
             {empty && <Landing />}
             {state.entries.map((e, i) => (
-              <Message entry={e} key={i} />
+              <Message entry={e} key={i} voiceEnabled={config?.voice_enabled} />
             ))}
             {state.streaming && <Message entry={{ kind: 'assistant', text: state.streaming }} />}
             {showThinking && <Thinking text={state.thinking ?? undefined} />}
             {state.clarify && <ClarifyCard clarify={state.clarify} onRespond={respondClarify} />}
             {state.approval && <ApprovalCard approval={state.approval} onRespond={respondApproval} />}
           </div>
-          <Composer busy={state.busy} onSend={send} onCancel={() => api.cancel()} />
+          <Composer
+            busy={state.busy}
+            onSend={send}
+            onCancel={() => api.cancel()}
+            voiceEnabled={config?.voice_enabled ?? false}
+          />
         </section>
         <RunPanel
           todos={state.todos}

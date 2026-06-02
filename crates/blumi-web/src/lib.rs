@@ -115,6 +115,7 @@ pub struct AppState {
     mgmt: Arc<dyn Management>,
     pub config: Arc<WebConfig>,
     auth: Option<Arc<Auth>>,
+    voice: Option<Arc<blumi_voice::VoiceConfig>>,
 }
 
 impl AppState {
@@ -151,6 +152,10 @@ impl AppState {
     pub(crate) fn auth(&self) -> Option<&Arc<Auth>> {
         self.auth.as_ref()
     }
+
+    pub(crate) fn voice(&self) -> Option<&Arc<blumi_voice::VoiceConfig>> {
+        self.voice.as_ref()
+    }
 }
 
 /// Build the axum router for a given state.
@@ -182,6 +187,8 @@ pub fn router(state: AppState) -> Router {
         .route("/api/skills", get(api::skills))
         .route("/api/memory", get(api::memory_get).post(api::memory_set))
         .route("/api/usage", get(api::usage))
+        .route("/api/voice/transcribe", post(api::voice_transcribe))
+        .route("/api/voice/speak", post(api::voice_speak))
         .fallback(assets::static_handler)
         .layer(axum::middleware::from_fn_with_state(
             state.clone(),
@@ -198,6 +205,7 @@ pub async fn serve(
     config: WebConfig,
     addr: SocketAddr,
     auth: Option<Auth>,
+    voice: Option<blumi_voice::VoiceConfig>,
 ) -> anyhow::Result<()> {
     let session = provider.create().await?;
     let state = AppState {
@@ -206,6 +214,7 @@ pub async fn serve(
         mgmt,
         config: Arc::new(config),
         auth: auth.map(Arc::new),
+        voice: voice.map(Arc::new),
     };
     let app = router(state.clone());
     let listener = tokio::net::TcpListener::bind(addr).await?;

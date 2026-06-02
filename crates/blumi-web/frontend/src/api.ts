@@ -45,6 +45,29 @@ export const api = {
   memorySet: (which: 'memory' | 'user', content: string) =>
     postJSON('/api/memory', { which, content }),
   usage: () => getJSON<{ usage: Usage }>('/api/usage').then((d) => d.usage),
+  // Voice.
+  transcribe: async (blob: Blob): Promise<string> => {
+    const r = await fetch('/api/voice/transcribe', {
+      method: 'POST',
+      headers: { 'content-type': blob.type || 'audio/webm' },
+      body: blob,
+    })
+    if (!r.ok) return ''
+    const d = await r.json().catch(() => ({}) as { text?: string })
+    return d.text || ''
+  },
+  speak: async (text: string): Promise<void> => {
+    const r = await fetch('/api/voice/speak', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ text }),
+    })
+    if (!r.ok) return
+    const url = URL.createObjectURL(await r.blob())
+    const audio = new Audio(url)
+    audio.onended = () => URL.revokeObjectURL(url)
+    await audio.play().catch(() => {})
+  },
   send: (text: string) => postJSON('/api/chat/send', { text }),
   cancel: () => postJSON('/api/chat/cancel'),
   compact: () => postJSON('/api/compact'),
