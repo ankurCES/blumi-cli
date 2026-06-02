@@ -167,6 +167,172 @@ dependencies = [
 ]
 
 [[package]]
+name = "blumi"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "blumi-config",
+ "blumi-core",
+ "blumi-exec",
+ "blumi-llm",
+ "blumi-persist",
+ "blumi-protocol",
+ "blumi-skills",
+ "blumi-tools",
+ "blumi-tui",
+ "clap",
+ "tokio",
+ "tracing",
+ "tracing-subscriber",
+]
+
+[[package]]
+name = "blumi-config"
+version = "0.1.0"
+dependencies = [
+ "dirs",
+ "figment",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.18",
+]
+
+[[package]]
+name = "blumi-core"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "async-trait",
+ "blumi-config",
+ "blumi-protocol",
+ "futures",
+ "glob",
+ "schemars",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.18",
+ "time",
+ "tokio",
+ "tokio-stream",
+ "tokio-util",
+ "tracing",
+]
+
+[[package]]
+name = "blumi-cron"
+version = "0.1.0"
+
+[[package]]
+name = "blumi-exec"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "async-trait",
+ "blumi-core",
+ "tempfile",
+ "tokio",
+ "tokio-util",
+ "tracing",
+]
+
+[[package]]
+name = "blumi-gateway"
+version = "0.1.0"
+
+[[package]]
+name = "blumi-llm"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "async-stream",
+ "async-trait",
+ "blumi-config",
+ "blumi-core",
+ "blumi-protocol",
+ "eventsource-stream",
+ "futures",
+ "reqwest",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.18",
+ "tokio",
+ "tokio-util",
+ "tracing",
+]
+
+[[package]]
+name = "blumi-lsp"
+version = "0.1.0"
+
+[[package]]
+name = "blumi-mcp"
+version = "0.1.0"
+
+[[package]]
+name = "blumi-persist"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "blumi-core",
+ "blumi-protocol",
+ "serde_json",
+ "sqlx",
+ "tempfile",
+ "thiserror 2.0.18",
+ "time",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
+name = "blumi-protocol"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "serde_json",
+ "time",
+ "uuid",
+]
+
+[[package]]
+name = "blumi-skills"
+version = "0.1.0"
+dependencies = [
+ "tempfile",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
+name = "blumi-tools"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "async-trait",
+ "blumi-core",
+ "blumi-exec",
+ "blumi-protocol",
+ "glob",
+ "regex",
+ "schemars",
+ "serde",
+ "serde_json",
+ "similar",
+ "tempfile",
+ "tokio",
+ "tokio-util",
+ "tracing",
+]
+
+[[package]]
+name = "blumi-tui"
+version = "0.1.0"
+
+[[package]]
+name = "blumi-web"
+version = "0.1.0"
+
+[[package]]
 name = "bumpalo"
 version = "3.20.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1068,171 +1234,6 @@ name = "lru-slab"
 version = "0.1.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "112b39cec0b298b6c1999fee3e31427f74f676e4cb9879ed1a121b43661a4154"
-
-[[package]]
-name = "lumi"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "clap",
- "lumi-config",
- "lumi-core",
- "lumi-exec",
- "lumi-llm",
- "lumi-persist",
- "lumi-protocol",
- "lumi-skills",
- "lumi-tools",
- "tokio",
- "tracing",
- "tracing-subscriber",
-]
-
-[[package]]
-name = "lumi-config"
-version = "0.1.0"
-dependencies = [
- "dirs",
- "figment",
- "serde",
- "serde_json",
- "thiserror 2.0.18",
-]
-
-[[package]]
-name = "lumi-core"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "async-trait",
- "futures",
- "glob",
- "lumi-config",
- "lumi-protocol",
- "schemars",
- "serde",
- "serde_json",
- "thiserror 2.0.18",
- "time",
- "tokio",
- "tokio-stream",
- "tokio-util",
- "tracing",
-]
-
-[[package]]
-name = "lumi-cron"
-version = "0.1.0"
-
-[[package]]
-name = "lumi-exec"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "async-trait",
- "lumi-core",
- "tempfile",
- "tokio",
- "tokio-util",
- "tracing",
-]
-
-[[package]]
-name = "lumi-gateway"
-version = "0.1.0"
-
-[[package]]
-name = "lumi-llm"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "async-stream",
- "async-trait",
- "eventsource-stream",
- "futures",
- "lumi-config",
- "lumi-core",
- "lumi-protocol",
- "reqwest",
- "serde",
- "serde_json",
- "thiserror 2.0.18",
- "tokio",
- "tokio-util",
- "tracing",
-]
-
-[[package]]
-name = "lumi-lsp"
-version = "0.1.0"
-
-[[package]]
-name = "lumi-mcp"
-version = "0.1.0"
-
-[[package]]
-name = "lumi-persist"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "lumi-core",
- "lumi-protocol",
- "serde_json",
- "sqlx",
- "tempfile",
- "thiserror 2.0.18",
- "time",
- "tokio",
- "tracing",
-]
-
-[[package]]
-name = "lumi-protocol"
-version = "0.1.0"
-dependencies = [
- "serde",
- "serde_json",
- "time",
- "uuid",
-]
-
-[[package]]
-name = "lumi-skills"
-version = "0.1.0"
-dependencies = [
- "tempfile",
- "tokio",
- "tracing",
-]
-
-[[package]]
-name = "lumi-tools"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "async-trait",
- "glob",
- "lumi-core",
- "lumi-exec",
- "lumi-protocol",
- "regex",
- "schemars",
- "serde",
- "serde_json",
- "similar",
- "tempfile",
- "tokio",
- "tokio-util",
- "tracing",
-]
-
-[[package]]
-name = "lumi-tui"
-version = "0.1.0"
-
-[[package]]
-name = "lumi-web"
-version = "0.1.0"
 
 [[package]]
 name = "matchers"

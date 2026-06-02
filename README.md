@@ -1,6 +1,13 @@
-# lumi-cli
+# blumi-cli
 
-`lumi` — a local-first, provider-agnostic agentic coding assistant. A single Rust binary with
+```
+      ✿
+    ❀ ◉ ❀
+      ✿
+   b l u m i
+```
+
+`blumi` — a local-first, provider-agnostic agentic coding assistant. A single Rust binary with
 a crush-inspired terminal UI and a packaged React web UI, both driven by one shared, UI-agnostic
 core that emits a single typed event stream.
 
@@ -11,30 +18,30 @@ core that emits a single typed event stream.
 
 | Command | What it does |
 |---|---|
-| `lumi` / `lumi tui` | Interactive terminal UI (default when attached to a TTY) |
-| `lumi run "<prompt>"` | One-shot / headless / pipeable agent run |
-| `lumi web` / `lumi serve` | Embedded React web UI + HTTP/SSE server |
-| `lumi cron`, `lumi skills`, `lumi memory`, `lumi config`, `lumi session` | Management subcommands |
+| `blumi` / `blumi tui` | Interactive terminal UI (default when attached to a TTY) |
+| `blumi run "<prompt>"` | One-shot / headless / pipeable agent run |
+| `blumi web` / `blumi serve` | Embedded React web UI + HTTP/SSE server |
+| `blumi cron`, `blumi skills`, `blumi memory`, `blumi config`, `blumi session` | Management subcommands |
 
 ## Workspace layout
 
 ```
 crates/
-  lumi-protocol   wire contract: Command / Event / Message / ToolResult (pure serde)
-  lumi-core       the brain: traits + session actor (agent loop) + context mgmt + permissions
-  lumi-llm        provider clients (OpenAI-compatible, Anthropic, Gemini, …)
-  lumi-tools      built-in tools + JSON-Schema validation + layered execution pipeline
-  lumi-exec       execution backends (Local; Docker/SSH feature-gated)
-  lumi-mcp        MCP client (rmcp) + tool adapters
-  lumi-lsp        generic LSP client (feature-gated)
-  lumi-persist    SQLite (sqlx): sessions, messages, checkpoints, FTS5 search
-  lumi-skills     SKILL.md skills + dual memory (MEMORY/USER)
-  lumi-cron       scheduler → headless sessions → delivery
-  lumi-gateway    messaging gateways + voice (feature-gated)
-  lumi-config     layered configuration (figment)
-  lumi-tui        ratatui terminal UI
-  lumi-web        axum server + embedded React build
-  lumi            the binary (clap)
+  blumi-protocol   wire contract: Command / Event / Message / ToolResult (pure serde)
+  blumi-core       the brain: traits + session actor (agent loop) + context mgmt + permissions
+  blumi-llm        provider clients (OpenAI-compatible, Anthropic, Gemini, …)
+  blumi-tools      built-in tools + JSON-Schema validation + layered execution pipeline
+  blumi-exec       execution backends (Local; Docker/SSH feature-gated)
+  blumi-mcp        MCP client (rmcp) + tool adapters
+  blumi-lsp        generic LSP client (feature-gated)
+  blumi-persist    SQLite (sqlx): sessions, messages, checkpoints, FTS5 search
+  blumi-skills     SKILL.md skills + dual memory (MEMORY/USER)
+  blumi-cron       scheduler → headless sessions → delivery
+  blumi-gateway    messaging gateways + voice (feature-gated)
+  blumi-config     layered configuration (figment)
+  blumi-tui        ratatui terminal UI
+  blumi-web        axum server + embedded React build
+  blumi            the binary (clap)
 ```
 
 ## Build

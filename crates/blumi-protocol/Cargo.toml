@@ -1,0 +1,13 @@
+[package]
+name = "blumi-protocol"
+description = "Wire contract for blumi: Command / Event / Message / ToolResult (pure serde)."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]
+serde.workspace = true
+serde_json.workspace = true
+uuid.workspace = true
+time.workspace = true

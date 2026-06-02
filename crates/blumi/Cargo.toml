@@ -1,0 +1,29 @@
+[package]
+name = "blumi"
+description = "blumi — local-first, provider-agnostic agentic coding assistant."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+default-run = "blumi"
+
+[[bin]]
+name = "blumi"
+path = "src/main.rs"
+
+[dependencies]
+blumi-protocol.workspace = true
+blumi-core.workspace = true
+blumi-config.workspace = true
+blumi-llm.workspace = true
+blumi-tools.workspace = true
+blumi-exec.workspace = true
+blumi-skills.workspace = true
+blumi-persist.workspace = true
+blumi-tui.workspace = true
+
+tokio = { workspace = true }
+clap.workspace = true
+anyhow.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true

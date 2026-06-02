@@ -1,0 +1,20 @@
+[package]
+name = "blumi-exec"
+description = "Execution backends (Local; Docker/SSH feature-gated)."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]
+blumi-core.workspace = true
+
+tokio = { workspace = true }
+tokio-util.workspace = true
+async-trait.workspace = true
+anyhow.workspace = true
+tracing.workspace = true
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
+tempfile = "3"

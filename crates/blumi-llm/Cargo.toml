@@ -1,0 +1,31 @@
+[package]
+name = "blumi-llm"
+description = "LLM provider clients (OpenAI-compatible, Anthropic, Gemini, ...)."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]
+blumi-core.workspace = true
+blumi-config.workspace = true
+blumi-protocol.workspace = true
+
+tokio = { workspace = true }
+tokio-util.workspace = true
+futures.workspace = true
+async-trait.workspace = true
+async-stream = "0.3"
+
+reqwest.workspace = true
+eventsource-stream.workspace = true
+
+serde.workspace = true
+serde_json.workspace = true
+
+anyhow.workspace = true
+thiserror.workspace = true
+tracing.workspace = true
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
