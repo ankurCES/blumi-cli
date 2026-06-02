@@ -94,6 +94,15 @@ enum GatewayCmd {
         #[arg(long)]
         token: Option<String>,
     },
+    /// Slack bot (Socket Mode; needs a bot token + an app-level token).
+    Slack {
+        /// Bot token `xoxb-…` (overrides gateway.slack.bot_token).
+        #[arg(long)]
+        bot_token: Option<String>,
+        /// App-level token `xapp-…` (overrides gateway.slack.app_token).
+        #[arg(long)]
+        app_token: Option<String>,
+    },
 }
 
 #[derive(Subcommand)]
@@ -236,6 +245,10 @@ async fn main() -> anyhow::Result<()> {
         Some(Commands::Gateway { action }) => match action {
             GatewayCmd::Telegram { token } => gateway::run_telegram(config, token).await,
             GatewayCmd::Discord { token } => gateway::run_discord(config, token).await,
+            GatewayCmd::Slack {
+                bot_token,
+                app_token,
+            } => gateway::run_slack(config, bot_token, app_token).await,
         },
     }
 }

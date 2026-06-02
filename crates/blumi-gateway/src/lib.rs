@@ -8,9 +8,11 @@
 //! that feeds the core inbound text and delivers its reply.
 
 mod discord;
+mod slack;
 mod telegram;
 
 pub use discord::{run_discord, DiscordOptions};
+pub use slack::{run_slack, SlackOptions};
 pub use telegram::{run_telegram, TelegramOptions};
 
 use blumi_core::SessionHandle;
