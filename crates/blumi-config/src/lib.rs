@@ -121,6 +121,15 @@ impl Default for ExecutorConfig {
     }
 }
 
+/// Web UI / server settings.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(default)]
+pub struct WebSettings {
+    /// argon2 password hash. When set (or when binding to a non-loopback
+    /// address), the web UI requires login. Set it with `blumi web --password`.
+    pub password_hash: String,
+}
+
 /// Messaging-gateway settings (run blumi as a bot). Tokens may also be passed
 /// on the command line, which override these.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
@@ -234,6 +243,9 @@ pub struct BlumiConfig {
     /// Messaging gateways (Telegram/Discord/Slack/WhatsApp bots).
     #[serde(default)]
     pub gateway: GatewayConfig,
+    /// Web UI / server settings (auth).
+    #[serde(default)]
+    pub web: WebSettings,
     /// Resolved at load time; never serialized to/from files.
     #[serde(skip)]
     pub paths: Paths,
@@ -253,6 +265,7 @@ impl Default for BlumiConfig {
             executor: ExecutorConfig::default(),
             lsp_servers: BTreeMap::new(),
             gateway: GatewayConfig::default(),
+            web: WebSettings::default(),
             paths: Paths::default(),
         }
     }

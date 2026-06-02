@@ -30,6 +30,7 @@ pub async fn config(State(state): State<AppState>) -> Json<Value> {
         "version": state.config.version,
         "persona": state.config.persona,
         "context_size": state.config.context_size,
+        "auth_required": state.auth().is_some(),
     }))
 }
 

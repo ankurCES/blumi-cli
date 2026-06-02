@@ -749,3 +749,69 @@ pre.code {
 ::-webkit-scrollbar-thumb:hover {
   background: var(--border);
 }
+
+/* ── Login ───────────────────────────────────────────────── */
+.login-screen {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 100vh;
+  background: var(--bg);
+}
+.login-card {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+  padding: 40px 48px;
+  background: var(--panel, var(--surface-1));
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  min-width: 300px;
+}
+.login-flower {
+  font-size: 44px;
+  color: var(--accent);
+}
+.login-word {
+  font-size: 26px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+}
+.login-tag {
+  color: var(--muted);
+  font-size: 13px;
+  margin-bottom: 8px;
+}
+.login-input {
+  width: 100%;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg);
+  color: var(--fg);
+  font-size: 14px;
+}
+.login-input:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+.login-error {
+  color: #e5484d;
+  font-size: 12px;
+}
+.login-btn {
+  width: 100%;
+  padding: 10px;
+  border: none;
+  border-radius: 8px;
+  background: var(--accent);
+  color: #fff;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.login-btn:disabled {
+  opacity: 0.5;
+  cursor: default;
+}

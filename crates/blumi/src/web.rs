@@ -92,16 +92,52 @@ impl blumi_web::SessionProvider for WebSessionProvider {
     }
 }
 
-pub async fn run(config: BlumiConfig) -> anyhow::Result<()> {
+pub async fn run(
+    config: BlumiConfig,
+    host: Option<String>,
+    password: Option<String>,
+) -> anyhow::Result<()> {
     config.paths.ensure_dirs().ok();
 
     let port: u16 = std::env::var("BLUMI_WEB_PORT")
         .ok()
         .and_then(|s| s.parse().ok())
         .unwrap_or(7777);
-    let addr: SocketAddr = ([127, 0, 0, 1], port).into();
-    let url = format!("http://{addr}");
 
+    // Resolve the bind address (default loopback).
+    let host = host.unwrap_or_else(|| "127.0.0.1".to_string());
+    let ip: std::net::IpAddr = host
+        .parse()
+        .map_err(|_| anyhow::anyhow!("--host must be an IP address, got '{host}'"))?;
+    let addr = SocketAddr::new(ip, port);
+
+    // Resolve auth: --password (hashed + persisted) overrides the stored hash.
+    let mut password_hash = config.web.password_hash.clone();
+    if let Some(pw) = password {
+        let hash = blumi_web::Auth::hash_password(&pw)?;
+        persist_password_hash(&config.paths.settings_json(), &hash)?;
+        eprintln!(
+            "  password saved to {}",
+            config.paths.settings_json().display()
+        );
+        password_hash = hash;
+    }
+    let auth = if password_hash.trim().is_empty() {
+        None
+    } else {
+        let key = load_or_create_key(&config.paths.home.join("web_key"))?;
+        Some(blumi_web::Auth::new(password_hash, key))
+    };
+
+    // Refuse to expose blumi on the network without a password.
+    if !ip.is_loopback() && auth.is_none() {
+        anyhow::bail!(
+            "binding to {host} would expose blumi on the network — set a password first:\n  \
+             blumi web --host {host} --password <password>"
+        );
+    }
+
+    let url = format!("http://{addr}");
     let store = Store::open(&config.paths.db).await.ok().map(Arc::new);
 
     let personas = crate::engine::resolve_personas(&config)
@@ -130,14 +166,67 @@ pub async fn run(config: BlumiConfig) -> anyhow::Result<()> {
     );
 
     crate::branding::banner();
-    eprintln!("  blumi web → {url}  (Ctrl+C to stop)");
-    if std::env::var_os("BLUMI_NO_BROWSER").is_none() {
+    eprintln!(
+        "  blumi web → {url}  ({})  (Ctrl+C to stop)",
+        if auth.is_some() {
+            "login required"
+        } else {
+            "no auth — loopback only"
+        }
+    );
+    // Only auto-open the browser for a local, no-auth server.
+    if ip.is_loopback() && auth.is_none() && std::env::var_os("BLUMI_NO_BROWSER").is_none() {
         open_browser(&url);
     }
 
-    let result = blumi_web::serve(provider, web, addr).await;
+    let result = blumi_web::serve(provider, web, addr, auth).await;
     let _ = std::fs::remove_file(&lock);
     result
+}
+
+/// Load the 32-byte cookie-signing key, creating it (0600) on first use.
+fn load_or_create_key(path: &std::path::Path) -> anyhow::Result<Vec<u8>> {
+    if let Ok(bytes) = std::fs::read(path) {
+        if bytes.len() >= 32 {
+            return Ok(bytes);
+        }
+    }
+    use rand::RngCore;
+    let mut key = vec![0u8; 32];
+    rand::thread_rng().fill_bytes(&mut key);
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent).ok();
+    }
+    std::fs::write(path, &key)?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600))?;
+    }
+    Ok(key)
+}
+
+/// Merge `web.password_hash` into settings.json (atomic, 0600).
+fn persist_password_hash(path: &std::path::Path, hash: &str) -> anyhow::Result<()> {
+    let mut root: serde_json::Value = std::fs::read_to_string(path)
+        .ok()
+        .and_then(|s| serde_json::from_str(&s).ok())
+        .filter(serde_json::Value::is_object)
+        .unwrap_or_else(|| serde_json::json!({}));
+    root["web"]["password_hash"] = serde_json::Value::String(hash.to_string());
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent).ok();
+    }
+    let body = serde_json::to_string_pretty(&root)?;
+    let tmp = path.with_extension("json.tmp");
+    std::fs::write(&tmp, body.as_bytes())?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&tmp, std::fs::Permissions::from_mode(0o600))?;
+    }
+    std::fs::rename(&tmp, path)?;
+    Ok(())
 }
 
 /// Best-effort: open the default browser at `url`.

@@ -24,6 +24,17 @@ export const api = {
   newSession: () => postJSON('/api/session/new'),
   resumeSession: (id: string) => postJSON('/api/session/resume', { id }),
   reload: () => postJSON('/api/session/reload'),
+  login: async (password: string): Promise<boolean> => {
+    const r = await fetch('/api/login', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ password }),
+    })
+    return r.ok
+  },
+  logout: () => postJSON('/api/logout'),
+  // Probe a protected route to see if the current cookie is valid.
+  checkAuth: async (): Promise<boolean> => (await fetch('/api/sessions')).ok,
   send: (text: string) => postJSON('/api/chat/send', { text }),
   cancel: () => postJSON('/api/chat/cancel'),
   compact: () => postJSON('/api/compact'),

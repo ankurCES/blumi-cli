@@ -56,4 +56,5 @@ export type Config = {
   version: string
   persona: string
   context_size: number
+  auth_required: boolean
 }

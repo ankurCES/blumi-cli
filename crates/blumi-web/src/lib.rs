@@ -7,6 +7,9 @@
 
 mod api;
 mod assets;
+mod auth;
+
+pub use auth::Auth;
 
 use axum::routing::{get, post};
 use axum::Router;
@@ -58,6 +61,7 @@ pub struct AppState {
     session: Arc<RwLock<SessionHandle>>,
     provider: Arc<dyn SessionProvider>,
     pub config: Arc<WebConfig>,
+    auth: Option<Arc<Auth>>,
 }
 
 impl AppState {
@@ -86,6 +90,10 @@ impl AppState {
     pub(crate) fn provider(&self) -> &Arc<dyn SessionProvider> {
         &self.provider
     }
+
+    pub(crate) fn auth(&self) -> Option<&Arc<Auth>> {
+        self.auth.as_ref()
+    }
 }
 
 /// Build the axum router for a given state.
@@ -110,21 +118,30 @@ pub fn router(state: AppState) -> Router {
         .route("/api/chat/stream", get(api::chat_stream))
         .route("/api/approval/respond", post(api::approval_respond))
         .route("/api/clarify/respond", post(api::clarify_respond))
+        .route("/api/login", post(auth::login))
+        .route("/api/logout", post(auth::logout))
         .fallback(assets::static_handler)
+        .layer(axum::middleware::from_fn_with_state(
+            state.clone(),
+            auth::require_auth,
+        ))
         .with_state(state)
 }
 
-/// Serve the web UI + API on `addr`, sourcing sessions from `provider`.
+/// Serve the web UI + API on `addr`, sourcing sessions from `provider`. When
+/// `auth` is `Some`, every data route requires a session cookie.
 pub async fn serve(
     provider: Arc<dyn SessionProvider>,
     config: WebConfig,
     addr: SocketAddr,
+    auth: Option<Auth>,
 ) -> anyhow::Result<()> {
     let session = provider.create().await?;
     let state = AppState {
         session: Arc::new(RwLock::new(session)),
         provider,
         config: Arc::new(config),
+        auth: auth.map(Arc::new),
     };
     let app = router(state.clone());
     let listener = tokio::net::TcpListener::bind(addr).await?;

@@ -9,6 +9,7 @@ import { Composer } from './components/Composer'
 import { ApprovalCard } from './components/ApprovalCard'
 import { ClarifyCard } from './components/ClarifyCard'
 import { Thinking } from './components/Thinking'
+import { Login } from './components/Login'
 
 type State = {
   entries: Entry[]
@@ -159,6 +160,8 @@ export function App() {
   const [persona, setPersona] = useState('default')
   const [yolo, setYolo] = useState(false)
   const [connected, setConnected] = useState(false)
+  // null = unknown, false = needs login, true = authenticated (or auth off).
+  const [authed, setAuthed] = useState<boolean | null>(null)
   // Bumped on a session switch to re-subscribe SSE + reload the transcript.
   const [epoch, setEpoch] = useState(0)
   const [start, setStart] = useState(() => Date.now())
@@ -168,15 +171,22 @@ export function App() {
 
   const refreshSessions = () => api.sessions().then(setSessions).catch(() => {})
 
-  // Static config + lists (once).
+  // Config + auth probe (once). When auth is required, check the cookie.
   useEffect(() => {
     api
       .config()
-      .then((c) => {
+      .then(async (c) => {
         setConfig(c)
         if (c.persona) setPersona(c.persona)
+        if (!c.auth_required) setAuthed(true)
+        else setAuthed(await api.checkAuth())
       })
       .catch(() => {})
+  }, [])
+
+  // Lists — loaded once we're authenticated.
+  useEffect(() => {
+    if (authed !== true) return
     refreshSessions()
     api
       .personas()
@@ -185,15 +195,17 @@ export function App() {
         if (p.active) setPersona(p.active)
       })
       .catch(() => {})
-  }, [])
+  }, [authed])
 
   // Restore the current session's transcript on load + after a switch.
   useEffect(() => {
+    if (authed !== true) return
     api.messages().then((ms) => dispatch({ type: 'load', messages: ms })).catch(() => {})
-  }, [epoch])
+  }, [epoch, authed])
 
   // SSE — re-subscribed on each session switch.
   useEffect(() => {
+    if (authed !== true) return
     const es = new EventSource('/api/chat/stream')
     es.onopen = () => setConnected(true)
     es.onerror = () => setConnected(false)
@@ -222,7 +234,7 @@ export function App() {
     }
     for (const name of SSE_EVENTS) es.addEventListener(name, handler as EventListener)
     return () => es.close()
-  }, [epoch])
+  }, [epoch, authed])
 
   // Uptime clock + active-with-bot accumulation.
   useEffect(() => {
@@ -280,6 +292,11 @@ export function App() {
   const empty = state.entries.length === 0 && !state.streaming
   const showThinking = state.busy && !state.streaming
   const uptimeSecs = Math.max(0, Math.floor((nowTs - start) / 1000))
+
+  // Gate the whole app behind login when auth is required.
+  if (authed === false) {
+    return <Login onAuth={() => setAuthed(true)} />
+  }
 
   return (
     <div className="app">
