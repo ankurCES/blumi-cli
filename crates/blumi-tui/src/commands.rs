@@ -73,6 +73,30 @@ pub const COMMANDS: &[CommandDef] = &[
         desc: "switch persona: /persona [name]",
     },
     CommandDef {
+        name: "/name",
+        desc: "name this session: /name <title>",
+    },
+    CommandDef {
+        name: "/queue",
+        desc: "queue a message: /queue <msg>",
+    },
+    CommandDef {
+        name: "/steer",
+        desc: "steer the agent now: /steer <msg>",
+    },
+    CommandDef {
+        name: "/goal",
+        desc: "set a session goal: /goal <text>",
+    },
+    CommandDef {
+        name: "/reasoning",
+        desc: "toggle reasoning display",
+    },
+    CommandDef {
+        name: "/cron",
+        desc: "list scheduled jobs",
+    },
+    CommandDef {
         name: "/model",
         desc: "switch model: /model <id>",
     },
@@ -139,12 +163,7 @@ pub async fn run(model: &mut Model, session: &SessionHandle, line: &str) {
             }
         }
         "/tasks" | "/dashboard" => model.show_dashboard = !model.show_dashboard,
-        "/usage" => model.entries.push(Entry::Notice(format!(
-            "tokens — input {} · output {} · total {}",
-            model.input_tokens,
-            model.output_tokens,
-            model.input_tokens + model.output_tokens
-        ))),
+        "/usage" => model.open_usage(),
         "/memory" => model.open_memory(),
         "/skills" => {
             if model.skills.is_empty() {
@@ -247,6 +266,79 @@ pub async fn run(model: &mut Model, session: &SessionHandle, line: &str) {
                 model.entries.push(Entry::Notice(format!(
                     "unknown persona '{arg}' (try /persona to list)"
                 )));
+            }
+        }
+        "/name" => {
+            if arg.is_empty() {
+                model
+                    .entries
+                    .push(Entry::Notice("usage: /name <title>".into()));
+            } else {
+                model
+                    .entries
+                    .push(Entry::Notice(format!("session named '{arg}'")));
+                model.session_title = arg;
+            }
+        }
+        "/queue" | "/steer" => {
+            if arg.is_empty() {
+                model
+                    .entries
+                    .push(Entry::Notice(format!("usage: {cmd} <message>")));
+            } else {
+                let was_busy = model.busy;
+                model.entries.push(Entry::User(arg.clone()));
+                model.busy = true;
+                model.scrollback = 0;
+                let _ = session
+                    .send(Command::UserMessage {
+                        text: arg,
+                        attachments: vec![],
+                        stream_id: None,
+                    })
+                    .await;
+                if was_busy {
+                    model
+                        .entries
+                        .push(Entry::Notice("queued — runs after the current turn".into()));
+                }
+            }
+        }
+        "/goal" => {
+            if arg.is_empty() && model.goal.is_empty() {
+                model
+                    .entries
+                    .push(Entry::Notice("no goal set. usage: /goal <text>".into()));
+            } else if arg.is_empty() {
+                model
+                    .entries
+                    .push(Entry::Notice(format!("goal: {}", model.goal)));
+            } else {
+                model
+                    .entries
+                    .push(Entry::Notice(format!("goal set: {arg}")));
+                model.goal = arg;
+            }
+        }
+        "/reasoning" => {
+            model.show_reasoning = !model.show_reasoning;
+            model.entries.push(Entry::Notice(format!(
+                "reasoning display {}",
+                if model.show_reasoning { "on" } else { "off" }
+            )));
+        }
+        "/cron" => {
+            if model.cron_jobs.is_empty() {
+                model.entries.push(Entry::Notice(
+                    "no scheduled jobs. add one with `blumi cron add` from a shell".into(),
+                ));
+            } else {
+                let mut s = String::from("scheduled jobs:");
+                for (name, sched) in &model.cron_jobs {
+                    s.push_str(&format!("\n- {name}: {sched}"));
+                }
+                s.push_str("\n(manage with `blumi cron` from a shell)");
+                model.entries.push(Entry::Notice(s));
             }
         }
         "/model" => {

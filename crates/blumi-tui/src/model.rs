@@ -4,6 +4,7 @@ use crate::dialog::Picker;
 use crate::theme::Theme;
 use blumi_protocol::{Envelope, RequestId, Todo, ToolCallId};
 use std::path::PathBuf;
+use std::time::Instant;
 use tui_textarea::TextArea;
 
 const PLACEHOLDER: &str = "Ask blumi to build, fix, or explain… (/ for commands)";
@@ -77,6 +78,22 @@ pub struct Model {
     pub turn_count: u32,
     /// Auto-approve everything (yolo). Toggled by `/yolo`; shown in the dashboard.
     pub yolo: bool,
+    /// When the session started (for uptime).
+    pub started: Instant,
+    /// Milliseconds spent actively working with the bot (busy time).
+    pub active_ms: u64,
+    /// Tokens in the most recent request ≈ current context usage.
+    pub context_tokens: u32,
+    /// Model context window (for the usage bar).
+    pub context_size: u32,
+    /// Optional session title (`/name`).
+    pub session_title: String,
+    /// Optional steering goal (`/goal`), shown in the dashboard.
+    pub goal: String,
+    /// Whether to show the reasoning/thinking stream (`/reasoning`).
+    pub show_reasoning: bool,
+    /// Scheduled cron jobs (name, schedule) for `/cron`.
+    pub cron_jobs: Vec<(String, String)>,
 
     pub focus: Focus,
     /// Lines scrolled up from the bottom; 0 = following the latest output.
@@ -95,6 +112,8 @@ pub struct Model {
     pub dialog: Option<Picker>,
     /// Rendered memory text when the `/memory` overlay is open.
     pub memory_view: Option<String>,
+    /// Rendered usage analytics when the `/usage` overlay is open.
+    pub usage_view: Option<String>,
 
     pub theme: Theme,
     pub theme_idx: usize,
@@ -128,6 +147,14 @@ impl Model {
             spinner_frame: 0,
             turn_count: 0,
             yolo: false,
+            started: Instant::now(),
+            active_ms: 0,
+            context_tokens: 0,
+            context_size: 131_072,
+            session_title: String::new(),
+            goal: String::new(),
+            show_reasoning: true,
+            cron_jobs: Vec::new(),
             focus: Focus::Editor,
             scrollback: 0,
             show_dashboard: true,
@@ -139,6 +166,7 @@ impl Model {
             pending: None,
             dialog: None,
             memory_view: None,
+            usage_view: None,
             theme: Theme::default(),
             theme_idx: 0,
             input_tokens: 0,
@@ -216,6 +244,61 @@ impl Model {
         })
     }
 
+    /// Seconds since the session started.
+    pub fn uptime_secs(&self) -> u64 {
+        self.started.elapsed().as_secs()
+    }
+
+    /// Number of tool calls in the transcript.
+    pub fn tools_run(&self) -> usize {
+        self.entries
+            .iter()
+            .filter(|e| matches!(e, Entry::Tool { .. }))
+            .count()
+    }
+
+    /// Fraction of the context window currently used (0.0–1.0).
+    pub fn context_frac(&self) -> f64 {
+        if self.context_size == 0 {
+            0.0
+        } else {
+            (self.context_tokens as f64 / self.context_size as f64).clamp(0.0, 1.0)
+        }
+    }
+
+    /// Build the `/usage` analytics overlay.
+    pub fn open_usage(&mut self) {
+        let total = self.input_tokens + self.output_tokens;
+        let pct = (self.context_frac() * 100.0).round() as u32;
+        let model = if self.model_name.is_empty() {
+            "default"
+        } else {
+            &self.model_name
+        };
+        let s = format!(
+            "usage analytics\n\n\
+             model:    {model}\n\
+             persona:  {}\n\
+             uptime:   {}\n\
+             active:   {} with the bot\n\
+             turns:    {}\n\
+             tools:    {} run\n\
+             tokens:   ↑{} in · ↓{} out · {} total\n\
+             context:  {} / {} ({pct}%)",
+            self.persona,
+            fmt_dur(self.uptime_secs()),
+            fmt_dur(self.active_ms / 1000),
+            self.turn_count,
+            self.tools_run(),
+            self.input_tokens,
+            self.output_tokens,
+            total,
+            self.context_tokens,
+            self.context_size,
+        );
+        self.usage_view = Some(s);
+    }
+
     /// Load the memory files into the `/memory` overlay.
     pub fn open_memory(&mut self) {
         let read = |p: &PathBuf| std::fs::read_to_string(p).unwrap_or_default();
@@ -264,5 +347,24 @@ impl Model {
             .join(format!("transcript-turn{}.md", self.turn_count));
         std::fs::write(&path, md)?;
         Ok(path)
+    }
+}
+
+/// Compact human duration: `2d 3h`, `4h 5m`, `6m 7s`, or `8s`.
+pub fn fmt_dur(secs: u64) -> String {
+    let (d, h, m, s) = (
+        secs / 86_400,
+        (secs % 86_400) / 3600,
+        (secs % 3600) / 60,
+        secs % 60,
+    );
+    if d > 0 {
+        format!("{d}d {h}h")
+    } else if h > 0 {
+        format!("{h}h {m}m")
+    } else if m > 0 {
+        format!("{m}m {s}s")
+    } else {
+        format!("{s}s")
     }
 }

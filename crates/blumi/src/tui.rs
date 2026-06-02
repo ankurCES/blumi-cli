@@ -38,6 +38,13 @@ pub async fn run(config: BlumiConfig) -> anyhow::Result<()> {
         .map(|p| (p.name, p.description))
         .collect();
 
+    // Scheduled cron jobs for `/cron`.
+    let cron_jobs = blumi_cron::CronStore::load(config.paths.home.join("cron.json"))
+        .jobs()
+        .iter()
+        .map(|j| (j.name.clone(), j.schedule.clone()))
+        .collect();
+
     let cfg = blumi_tui::TuiConfig {
         model_name: config.llm.model.clone(),
         working_dir: config.paths.working_dir.display().to_string(),
@@ -48,6 +55,8 @@ pub async fn run(config: BlumiConfig) -> anyhow::Result<()> {
         personas,
         persona: crate::engine::active_persona_name(&config),
         export_dir: config.paths.sessions.clone(),
+        context_size: config.llm.context_size,
+        cron_jobs,
     };
 
     blumi_tui::run(session, cfg).await?;

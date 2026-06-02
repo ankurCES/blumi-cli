@@ -1,17 +1,17 @@
 //! Rendering.
 
-use crate::model::{Entry, Focus, Model};
+use crate::model::{fmt_dur, Entry, Focus, Model};
 use crate::theme::{icon, Theme};
 use blumi_protocol::TodoStatus;
 use ratatui::layout::{Alignment, Constraint, Layout, Rect};
-use ratatui::style::{Modifier, Style};
+use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Clear, Paragraph};
 use ratatui::Frame;
 
 /// Min terminal width to show the run dashboard sidebar.
-const DASHBOARD_MIN_WIDTH: u16 = 90;
-const DASHBOARD_WIDTH: u16 = 28;
+const DASHBOARD_MIN_WIDTH: u16 = 92;
+const DASHBOARD_WIDTH: u16 = 32;
 
 const MAX_CONTENT_WIDTH: u16 = 100;
 
@@ -58,85 +58,154 @@ pub fn render(model: &mut Model, f: &mut Frame) {
     if model.memory_view.is_some() {
         render_memory(model, f, area, &theme);
     }
+    if model.usage_view.is_some() {
+        render_usage(model, f, area, &theme);
+    }
     // Slash-command popup floats just above the editor.
     if model.slash_active() {
         render_slash_popup(model, f, editor, &theme);
     }
 }
 
-/// The agent dashboard: live session state, tasks, recent tool activity, and
-/// recent sessions — the run turned into a terminal cockpit.
+/// The agent dashboard: live session state, context usage, tasks, recent tool
+/// activity, and recent sessions — the run turned into a terminal cockpit.
 fn render_dashboard(model: &Model, f: &mut Frame, area: Rect, theme: &Theme) {
+    // A pulsing "live agent" dot: amber while working, green when ready.
+    let dot_color = if model.busy {
+        crate::mascot::pulse_color(0xFF, 0xC0, 0x4F, model.spinner_frame)
+    } else {
+        crate::mascot::pulse_color(0x4F, 0xE0, 0xA0, model.spinner_frame)
+    };
     let block = Block::default()
         .borders(Borders::LEFT)
         .border_style(theme.dim())
-        .title(Span::styled(
-            format!(" {} agent ", icon::FLOWER),
-            theme.bold_primary(),
-        ));
+        .title(Line::from(vec![
+            Span::styled(
+                format!(" {} ", icon::DOT),
+                Style::default().fg(dot_color).add_modifier(Modifier::BOLD),
+            ),
+            Span::styled("agent ", theme.bold_primary()),
+        ]));
     let inner = block.inner(area);
     f.render_widget(block, area);
     let w = inner.width.saturating_sub(1) as usize;
 
     let mut lines: Vec<Line> = Vec::new();
-
-    // ── Session ───────────────────────────────────────────────
-    lines.push(section("Session", theme));
-    let (status, sstyle) = if model.busy {
-        ("working", theme.accent())
-    } else {
-        ("idle", Style::default().fg(theme.success))
-    };
-    lines.push(Line::from(vec![
-        Span::styled(format!("{:>7} ", "status"), theme.dim()),
-        Span::styled(status.to_string(), sstyle),
-    ]));
     let model_name = if model.model_name.is_empty() {
         "default"
     } else {
         &model.model_name
     };
-    lines.push(kv(
-        "persona",
-        &truncate(&model.persona, w.saturating_sub(9)),
-        theme,
-    ));
+
+    // ── Session ───────────────────────────────────────────────
+    lines.push(section("Session", theme));
+    lines.push(Line::from(vec![
+        Span::styled(format!("{:>7} ", "status"), theme.dim()),
+        Span::styled(
+            format!("{} ", icon::DOT),
+            Style::default().fg(dot_color).add_modifier(Modifier::BOLD),
+        ),
+        Span::styled(
+            if model.busy { "working" } else { "ready" },
+            if model.busy {
+                theme.accent()
+            } else {
+                Style::default().fg(theme.success)
+            },
+        ),
+    ]));
     lines.push(kv(
         "model",
         &truncate(model_name, w.saturating_sub(8)),
         theme,
     ));
-    lines.push(kv("turn", &model.turn_count.to_string(), theme));
     lines.push(kv(
-        "tokens",
-        &format!("↑{} ↓{}", model.input_tokens, model.output_tokens),
+        "persona",
+        &truncate(&model.persona, w.saturating_sub(8)),
         theme,
     ));
+    lines.push(kv("uptime", &fmt_dur(model.uptime_secs()), theme));
+    lines.push(kv("active", &fmt_dur(model.active_ms / 1000), theme));
     lines.push(kv(
         "approve",
-        if model.yolo { "auto" } else { "ask" },
+        if model.yolo { "auto (yolo)" } else { "ask" },
         theme,
     ));
 
+    // ── Context usage ─────────────────────────────────────────
+    lines.push(Line::raw(""));
+    lines.push(section("Context", theme));
+    let frac = model.context_frac();
+    let bar_color = if frac > 0.85 {
+        theme.error
+    } else if frac > 0.6 {
+        Color::Indexed(214) // amber
+    } else {
+        theme.success
+    };
+    lines.push(Line::from(Span::styled(
+        bar(frac, w),
+        Style::default().fg(bar_color),
+    )));
+    lines.push(Line::from(Span::styled(
+        format!(
+            "  {} / {} ({}%)",
+            fmt_k(model.context_tokens),
+            fmt_k(model.context_size),
+            (frac * 100.0).round() as u32
+        ),
+        theme.subtle(),
+    )));
+
+    // ── Usage ─────────────────────────────────────────────────
+    lines.push(Line::raw(""));
+    lines.push(section("Usage", theme));
+    lines.push(kv(
+        "tokens",
+        &format!(
+            "↑{} ↓{}",
+            fmt_k(model.input_tokens),
+            fmt_k(model.output_tokens)
+        ),
+        theme,
+    ));
+    lines.push(kv("turns", &model.turn_count.to_string(), theme));
+    lines.push(kv("tools", &model.tools_run().to_string(), theme));
+
+    // ── Goal (if set) ─────────────────────────────────────────
+    if !model.goal.is_empty() {
+        lines.push(Line::raw(""));
+        lines.push(section("Goal", theme));
+        for l in wrap_lines(&model.goal, w, theme.subtle()) {
+            lines.push(l);
+        }
+    }
+
     // ── Tasks ─────────────────────────────────────────────────
+    let total = model.todos.len();
     let done = model
         .todos
         .iter()
         .filter(|t| t.status == TodoStatus::Completed)
         .count();
     lines.push(Line::raw(""));
-    lines.push(section(
-        &format!("Tasks  {done}/{}", model.todos.len()),
-        theme,
-    ));
-    if model.todos.is_empty() {
+    lines.push(section(&format!("Tasks  {done}/{total}"), theme));
+    if total == 0 {
         lines.push(Line::from(Span::styled("  (none yet)", theme.dim())));
     } else {
+        lines.push(Line::from(Span::styled(
+            bar(done as f64 / total as f64, w),
+            Style::default().fg(theme.success),
+        )));
         for todo in &model.todos {
             let (mark, style) = match todo.status {
-                TodoStatus::Completed => (icon::OK, Style::default().fg(theme.success)),
-                TodoStatus::InProgress => ("→", theme.accent()),
-                TodoStatus::Pending => ("•", theme.subtle()),
+                TodoStatus::Completed => (icon::OK.to_string(), Style::default().fg(theme.success)),
+                // In-flight tasks get an animated spinner.
+                TodoStatus::InProgress => (
+                    crate::mascot::spinner(model.spinner_frame).to_string(),
+                    theme.accent(),
+                ),
+                TodoStatus::Pending => ("•".to_string(), theme.subtle()),
             };
             lines.push(Line::from(vec![
                 Span::styled(format!("{mark} "), style),
@@ -145,7 +214,7 @@ fn render_dashboard(model: &Model, f: &mut Frame, area: Rect, theme: &Theme) {
         }
     }
 
-    // ── Activity (recent tool calls) ──────────────────────────
+    // ── Activity (recent tool calls; running ones spin) ───────
     let mut tools: Vec<(&str, Option<bool>)> = model
         .entries
         .iter()
@@ -162,9 +231,12 @@ fn render_dashboard(model: &Model, f: &mut Frame, area: Rect, theme: &Theme) {
         lines.push(section("Activity", theme));
         for (name, ok) in tools {
             let (mark, style) = match ok {
-                Some(true) => (icon::OK, Style::default().fg(theme.success)),
-                Some(false) => (icon::ERR, Style::default().fg(theme.error)),
-                None => (icon::PENDING, theme.accent()),
+                Some(true) => (icon::OK.to_string(), Style::default().fg(theme.success)),
+                Some(false) => (icon::ERR.to_string(), Style::default().fg(theme.error)),
+                None => (
+                    crate::mascot::spinner(model.spinner_frame).to_string(),
+                    theme.accent(),
+                ),
             };
             lines.push(Line::from(vec![
                 Span::styled(format!("{mark} "), style),
@@ -177,7 +249,7 @@ fn render_dashboard(model: &Model, f: &mut Frame, area: Rect, theme: &Theme) {
     if !model.recent_sessions.is_empty() {
         lines.push(Line::raw(""));
         lines.push(section("Sessions", theme));
-        for (_, title) in model.recent_sessions.iter().take(4) {
+        for (_, title) in model.recent_sessions.iter().take(3) {
             let title = if title.is_empty() {
                 "(untitled)"
             } else {
@@ -190,12 +262,16 @@ fn render_dashboard(model: &Model, f: &mut Frame, area: Rect, theme: &Theme) {
         }
     }
 
-    if model.busy {
-        lines.push(Line::raw(""));
-        lines.push(Line::from(crate::mascot::thinking(model.spinner_frame)));
-    }
-
     f.render_widget(Paragraph::new(lines), inner);
+}
+
+/// Format a token count compactly: `1.2k`, `131k`, `42`.
+fn fmt_k(n: u32) -> String {
+    if n >= 1000 {
+        format!("{:.1}k", n as f64 / 1000.0)
+    } else {
+        n.to_string()
+    }
 }
 
 /// A dashboard section header.
@@ -292,6 +368,48 @@ fn render_memory(model: &Model, f: &mut Frame, area: Rect, theme: &Theme) {
     f.render_widget(Paragraph::new(lines), inner);
 }
 
+/// The `/usage` analytics overlay.
+fn render_usage(model: &Model, f: &mut Frame, area: Rect, theme: &Theme) {
+    let Some(text) = &model.usage_view else {
+        return;
+    };
+    let popup = centered_rect(58, 60, area);
+    f.render_widget(Clear, popup);
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .border_type(ratatui::widgets::BorderType::Rounded)
+        .border_style(Style::default().fg(theme.primary))
+        .title(Span::styled(
+            " usage analytics — any key to close ",
+            theme.bold_primary(),
+        ));
+    let inner = block.inner(popup);
+    f.render_widget(block, popup);
+
+    let width = inner.width.saturating_sub(1) as usize;
+    let mut lines: Vec<Line> = Vec::new();
+    for (i, raw) in text.lines().enumerate() {
+        let style = if i == 0 {
+            theme.bold_primary()
+        } else {
+            theme.body()
+        };
+        lines.push(Line::from(Span::styled(truncate(raw, width), style)));
+    }
+    // A visual context-usage bar.
+    lines.push(Line::raw(""));
+    let frac = model.context_frac();
+    lines.push(Line::from(vec![
+        Span::styled("context  ", theme.dim()),
+        Span::styled(bar(frac, width.min(36)), theme.accent()),
+        Span::styled(
+            format!("  {}%", (frac * 100.0).round() as u32),
+            theme.subtle(),
+        ),
+    ]));
+    f.render_widget(Paragraph::new(lines), inner);
+}
+
 fn render_dialog(model: &Model, f: &mut Frame, area: Rect, theme: &Theme) {
     let Some(d) = &model.dialog else { return };
     let popup = centered_rect(60, 50, area);
@@ -335,10 +453,15 @@ fn render_dialog(model: &Model, f: &mut Frame, area: Rect, theme: &Theme) {
 
 fn render_header(model: &Model, f: &mut Frame, area: Rect, theme: &Theme) {
     let [left_area, right_area] =
-        Layout::horizontal([Constraint::Min(0), Constraint::Length(20)]).areas(area);
+        Layout::horizontal([Constraint::Min(0), Constraint::Length(40)]).areas(area);
 
+    let title = if model.session_title.is_empty() {
+        "blumi".to_string()
+    } else {
+        model.session_title.clone()
+    };
     let mut spans = vec![
-        Span::styled(format!("{} blumi", icon::FLOWER), theme.bold_primary()),
+        Span::styled(format!("{} {title}", icon::FLOWER), theme.bold_primary()),
         Span::styled("  ·  ", theme.dim()),
         Span::styled(
             if model.model_name.is_empty() {
@@ -349,15 +472,23 @@ fn render_header(model: &Model, f: &mut Frame, area: Rect, theme: &Theme) {
             theme.accent(),
         ),
         Span::styled("  ·  ", theme.dim()),
-        Span::styled(shorten(&model.working_dir, 36), theme.subtle()),
+        Span::styled(shorten(&model.working_dir, 32), theme.subtle()),
     ];
-    if model.busy {
-        spans.push(Span::raw("   "));
-        spans.extend(crate::mascot::thinking(model.spinner_frame));
+    if !model.persona.is_empty() && model.persona != "default" {
+        spans.push(Span::styled("  ·  ", theme.dim()));
+        spans.push(Span::styled(model.persona.clone(), theme.subtle()));
     }
     f.render_widget(Paragraph::new(Line::from(spans)), left_area);
 
-    let meter = format!("↑{} ↓{}", model.input_tokens, model.output_tokens);
+    // Right: context %, uptime, token meter.
+    let frac = model.context_frac();
+    let meter = format!(
+        "ctx {}% · {} · ↑{} ↓{}",
+        (frac * 100.0).round() as u32,
+        fmt_dur(model.uptime_secs()),
+        fmt_k(model.input_tokens),
+        fmt_k(model.output_tokens),
+    );
     f.render_widget(
         Paragraph::new(Line::from(Span::styled(meter, theme.dim()))).alignment(Alignment::Right),
         right_area,
@@ -387,10 +518,28 @@ fn render_landing(model: &Model, f: &mut Frame, area: Rect, theme: &Theme) {
     lines.push(
         Line::from(Span::styled(crate::logo::TAGLINE, theme.subtle())).alignment(Alignment::Center),
     );
+
+    // A table of helpful commands, two per row.
+    lines.push(Line::raw(""));
+    lines.push(
+        Line::from(Span::styled("─ quick commands ─", theme.dim())).alignment(Alignment::Center),
+    );
+    for chunk in LANDING_CMDS.chunks(2) {
+        let mut spans = Vec::new();
+        for (i, (cmd, desc)) in chunk.iter().enumerate() {
+            if i > 0 {
+                spans.push(Span::raw("    "));
+            }
+            spans.push(Span::styled(format!("{cmd:<9}"), theme.accent()));
+            spans.push(Span::styled(format!("{desc:<17}"), theme.dim()));
+        }
+        lines.push(Line::from(spans).alignment(Alignment::Center));
+    }
+
     lines.push(Line::raw(""));
     lines.push(
         Line::from(Span::styled(
-            "type a message below and press Enter",
+            "type a message and press Enter · / for the command palette",
             theme.dim(),
         ))
         .alignment(Alignment::Center),
@@ -398,6 +547,18 @@ fn render_landing(model: &Model, f: &mut Frame, area: Rect, theme: &Theme) {
     let para = Paragraph::new(lines);
     f.render_widget(para, area);
 }
+
+/// Helpful commands shown on the landing screen.
+const LANDING_CMDS: [(&str, &str); 8] = [
+    ("/help", "list commands"),
+    ("/persona", "switch persona"),
+    ("/model", "switch model"),
+    ("/usage", "usage analytics"),
+    ("/theme", "change theme"),
+    ("/tasks", "toggle dashboard"),
+    ("/memory", "view memory"),
+    ("/quit", "exit blumi"),
+];
 
 fn render_chat(model: &Model, f: &mut Frame, area: Rect, theme: &Theme) {
     let width = area.width.min(MAX_CONTENT_WIDTH).saturating_sub(2) as usize;
@@ -412,19 +573,24 @@ fn render_chat(model: &Model, f: &mut Frame, area: Rect, theme: &Theme) {
 
 fn build_lines(model: &Model, width: usize, theme: &Theme) -> Vec<Line<'static>> {
     let mut lines = Vec::new();
+    let inner = width.saturating_sub(2).max(8); // content width inside the gutter
+
     for entry in &model.entries {
         match entry {
             Entry::User(t) => {
-                push_wrapped(
-                    &mut lines,
-                    t,
-                    width,
-                    theme.bold_primary(),
-                    &format!("{} ", icon::BAR),
-                );
+                let content = wrap_lines(t, inner, theme.body());
+                push_card(&mut lines, icon::USER, "you", theme.accent, content, width);
             }
             Entry::Assistant(t) => {
-                lines.extend(crate::markdown::render_markdown(t, width, theme));
+                let content = crate::markdown::render_markdown(t, inner, theme);
+                push_card(
+                    &mut lines,
+                    icon::FLOWER,
+                    "blumi",
+                    theme.primary,
+                    content,
+                    width,
+                );
             }
             Entry::Tool {
                 name,
@@ -435,38 +601,41 @@ fn build_lines(model: &Model, width: usize, theme: &Theme) -> Vec<Line<'static>>
                 diff,
                 ..
             } => {
-                let (mark, style) = match ok {
-                    None => (icon::PENDING, theme.accent()),
-                    Some(true) => (icon::OK, Style::default().fg(theme.success)),
-                    Some(false) => (icon::ERR, Style::default().fg(theme.error)),
+                let (mark, color) = match ok {
+                    None => (
+                        crate::mascot::spinner(model.spinner_frame).to_string(),
+                        theme.accent,
+                    ),
+                    Some(true) => (icon::OK.to_string(), theme.success),
+                    Some(false) => (icon::ERR.to_string(), theme.error),
                 };
-                let mut header = format!("{} {name}", mark);
-                if !summary.is_empty() {
-                    header.push_str(&format!(": {}", truncate(summary, width.saturating_sub(6))));
-                }
+                let mut label = format!("{} {name}", icon::TOOL);
                 if let Some(d) = diff_stat {
-                    header.push_str(&format!("  ({d})"));
+                    label.push_str(&format!("  {d}"));
                 }
-                lines.push(Line::from(Span::styled(header, style)));
+                let mut content = Vec::new();
+                if !summary.is_empty() {
+                    content.push(Line::from(Span::styled(
+                        truncate(summary, inner),
+                        theme.subtle(),
+                    )));
+                }
                 if let Some(p) = preview {
                     if !p.is_empty() {
-                        lines.push(Line::from(Span::styled(
-                            format!("    {}", truncate(p, width.saturating_sub(4))),
-                            theme.dim(),
-                        )));
+                        content.push(Line::from(Span::styled(truncate(p, inner), theme.dim())));
                     }
                 }
                 if let Some(d) = diff {
-                    for dl in crate::diff::render_unified(d, theme, 14) {
-                        let mut spans = vec![Span::raw("    ")];
-                        spans.extend(dl.spans);
-                        lines.push(Line::from(spans));
-                    }
+                    content.extend(crate::diff::render_unified(d, theme, 14));
                 }
+                if content.is_empty() {
+                    content.push(Line::from(Span::styled("…", theme.dim())));
+                }
+                push_card(&mut lines, &mark, &label, color, content, width);
             }
             Entry::Notice(t) => {
                 lines.push(Line::from(Span::styled(
-                    format!("— {t}"),
+                    format!("  · {t}"),
                     theme.dim().add_modifier(Modifier::ITALIC),
                 )));
             }
@@ -474,19 +643,93 @@ fn build_lines(model: &Model, width: usize, theme: &Theme) -> Vec<Line<'static>>
         lines.push(Line::raw(""));
     }
 
-    // Animated mascot while the agent works but hasn't produced output yet.
-    if model.busy && model.streaming.is_none() && model.thinking.is_none() {
+    // Animated mascot while the agent works but hasn't produced visible output.
+    if model.busy && model.streaming.is_none() {
         lines.push(Line::from(crate::mascot::thinking(model.spinner_frame)));
-    }
-    if let Some(th) = &model.thinking {
-        if !th.trim().is_empty() {
-            push_wrapped(&mut lines, th, width, theme.dim(), "  ");
+        if model.show_reasoning {
+            if let Some(th) = &model.thinking {
+                if !th.trim().is_empty() {
+                    for l in wrap_lines(th, inner, theme.dim().add_modifier(Modifier::ITALIC)) {
+                        let mut spans = vec![Span::styled("  ", theme.dim())];
+                        spans.extend(l.spans);
+                        lines.push(Line::from(spans));
+                    }
+                }
+            }
         }
     }
     if let Some(s) = &model.streaming {
-        lines.extend(crate::markdown::render_markdown(s, width, theme));
+        let content = crate::markdown::render_markdown(s, inner, theme);
+        push_card(
+            &mut lines,
+            icon::FLOWER,
+            "blumi",
+            theme.primary,
+            content,
+            width,
+        );
     }
     lines
+}
+
+/// Wrap plain text into styled lines at `width`.
+fn wrap_lines(text: &str, width: usize, style: Style) -> Vec<Line<'static>> {
+    let mut out = Vec::new();
+    for para in text.split('\n') {
+        let wrapped = textwrap::wrap(para, width.max(8));
+        if wrapped.is_empty() {
+            out.push(Line::raw(""));
+            continue;
+        }
+        for piece in wrapped {
+            out.push(Line::from(Span::styled(piece.to_string(), style)));
+        }
+    }
+    out
+}
+
+/// Push a titled, left-accented card — a header rule, a coloured left gutter
+/// around `content`, and a bottom rule. Reads as a coloured box.
+fn push_card(
+    out: &mut Vec<Line<'static>>,
+    glyph: &str,
+    label: &str,
+    color: Color,
+    content: Vec<Line<'static>>,
+    width: usize,
+) {
+    let head = format!("{} {glyph} {label} ", icon::TL);
+    let used = head.chars().count();
+    let rule = icon::H.repeat(width.saturating_sub(used).max(1));
+    out.push(Line::from(Span::styled(
+        format!("{head}{rule}"),
+        Style::default().fg(color).add_modifier(Modifier::BOLD),
+    )));
+    let gutter = Style::default().fg(color);
+    for l in content {
+        let mut spans = vec![Span::styled(format!("{} ", icon::V), gutter)];
+        spans.extend(l.spans);
+        out.push(Line::from(spans));
+    }
+    out.push(Line::from(Span::styled(
+        format!(
+            "{}{}",
+            icon::BL,
+            icon::H.repeat(width.saturating_sub(1).max(1))
+        ),
+        gutter,
+    )));
+}
+
+/// A textual progress bar like `███████░░░`.
+fn bar(frac: f64, width: usize) -> String {
+    let w = width.max(1);
+    let filled = (frac.clamp(0.0, 1.0) * w as f64).round() as usize;
+    format!(
+        "{}{}",
+        icon::BAR_FULL.repeat(filled),
+        icon::BAR_EMPTY.repeat(w - filled)
+    )
 }
 
 fn push_wrapped(
@@ -666,10 +909,13 @@ mod tests {
     #[test]
     fn landing_shows_flower_and_header() {
         let mut model = Model::new("test-model".into(), "/tmp/proj".into());
-        let out = render_to_string(&mut model, 80, 24);
+        let out = render_to_string(&mut model, 90, 30);
+        eprintln!("\n{out}");
         assert!(out.contains("blumi"), "header wordmark");
         assert!(out.contains('✿'), "flower glyph");
         assert!(out.contains("local-first"), "landing tagline");
+        assert!(out.contains("quick commands"), "command table heading");
+        assert!(out.contains("/help"), "command table entry");
     }
 
     #[test]
@@ -747,5 +993,73 @@ mod tests {
         assert!(out.contains("permission"));
         assert!(out.contains("rm -rf build"));
         assert!(out.contains("allow once"));
+    }
+
+    #[test]
+    fn dashboard_and_cards_look() {
+        use blumi_protocol::{Todo, TodoStatus};
+        let mut model = Model::new(
+            "claude-sonnet".into(),
+            "/Users/ankur/AI_EXPERIMENTS/blumi-cli".into(),
+        );
+        model.context_size = 200_000;
+        model.context_tokens = 84_000;
+        model.input_tokens = 84_000;
+        model.output_tokens = 5_200;
+        model.turn_count = 3;
+        model.persona = "architect".into();
+        model.busy = true;
+        model
+            .entries
+            .push(Entry::User("refactor the parser and add tests".into()));
+        model.entries.push(Entry::Assistant(
+            "Here's the plan:\n\n1. extract `tokenize`\n2. add `parse_expr`\n\n\
+             ```rust\nfn parse() {}\n```"
+                .into(),
+        ));
+        model.entries.push(Entry::Tool {
+            id: ToolCallId::from("c1"),
+            name: "FileEdit".into(),
+            summary: "src/parser.rs".into(),
+            ok: Some(true),
+            preview: Some("Edited src/parser.rs (2 replacements)".into()),
+            diff_stat: Some("+8 -2".into()),
+            diff: None,
+        });
+        model.entries.push(Entry::Tool {
+            id: ToolCallId::from("c2"),
+            name: "Bash".into(),
+            summary: "cargo test".into(),
+            ok: None,
+            preview: None,
+            diff_stat: None,
+            diff: None,
+        });
+        model
+            .entries
+            .push(Entry::Notice("context compacted (6 messages)".into()));
+        model.todos = vec![
+            Todo {
+                id: "1".into(),
+                content: "extract tokenize".into(),
+                status: TodoStatus::Completed,
+            },
+            Todo {
+                id: "2".into(),
+                content: "add parse_expr".into(),
+                status: TodoStatus::InProgress,
+            },
+            Todo {
+                id: "3".into(),
+                content: "write tests".into(),
+                status: TodoStatus::Pending,
+            },
+        ];
+        let out = render_to_string(&mut model, 110, 40);
+        eprintln!("\n{out}");
+        assert!(out.contains('╭'), "card top border");
+        assert!(out.contains("agent"), "dashboard agent panel");
+        assert!(out.contains("Context"), "context section");
+        assert!(out.contains("Tasks"), "tasks section");
     }
 }
