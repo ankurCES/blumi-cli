@@ -1,9 +1,11 @@
 //! blumi — the CLI entry point.
 
 mod branding;
+mod engine;
 mod prompt;
 mod run;
 mod session;
+mod tui;
 
 use clap::{Parser, Subcommand};
 use std::path::PathBuf;
@@ -82,9 +84,9 @@ async fn main() -> anyhow::Result<()> {
 
     match cli.command {
         Some(Commands::Run { prompt, yolo }) => run::run(config, prompt.join(" "), yolo).await,
-        Some(Commands::Tui) | None => {
+        Some(Commands::Tui) => tui::run(config).await,
+        None => {
             println!("{}", branding::logo_banner());
-            eprintln!("  the interactive TUI lands in Phase 2 — for now, use `blumi run`.\n");
             println!("{}", branding::hint());
             Ok(())
         }

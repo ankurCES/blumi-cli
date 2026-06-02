@@ -1,9 +1,24 @@
 [package]
 name = "blumi-tui"
-description = "ratatui terminal UI."
+description = "Terminal UI for blumi (ratatui)."
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 
 [dependencies]
+blumi-core.workspace = true
+blumi-protocol.workspace = true
+
+ratatui = "0.29"
+crossterm = { version = "0.28", features = ["event-stream"] }
+tui-textarea = "0.7"
+textwrap = "0.16"
+
+tokio = { workspace = true }
+futures.workspace = true
+anyhow.workspace = true
+tracing.workspace = true
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
