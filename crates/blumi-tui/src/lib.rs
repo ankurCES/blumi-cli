@@ -5,7 +5,11 @@
 //! landing screen and the CLI banner share one definition.
 
 mod app;
+mod dialog;
+mod diff;
+mod highlight;
 mod logo;
+mod markdown;
 mod model;
 mod theme;
 mod update;

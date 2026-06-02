@@ -1,6 +1,8 @@
 //! Message handling: keys, terminal events, and core events.
 
+use crate::dialog::{Action, Picker};
 use crate::model::{Entry, Focus, Model, Msg, PendingApproval};
+use crate::theme::Theme;
 use blumi_core::SessionHandle;
 use blumi_protocol::{ApprovalScope, Command, Decision, Event};
 use crossterm::event::{Event as TermEvent, KeyCode, KeyEventKind, KeyModifiers};
@@ -37,9 +39,23 @@ async fn handle_term(model: &mut Model, ev: TermEvent, session: &SessionHandle) 
                 return;
             }
 
+            // A dialog (command palette) captures all keys.
+            if model.dialog.is_some() {
+                handle_dialog_key(model, key.code);
+                model.mark_dirty();
+                return;
+            }
+
             // A pending approval captures all keys.
             if model.pending.is_some() {
                 handle_approval_key(model, key.code, session).await;
+                model.mark_dirty();
+                return;
+            }
+
+            // Ctrl+P opens the command palette.
+            if ctrl && matches!(key.code, KeyCode::Char('p')) {
+                model.dialog = Some(Picker::command_palette());
                 model.mark_dirty();
                 return;
             }
@@ -69,7 +85,12 @@ async fn handle_term(model: &mut Model, ev: TermEvent, session: &SessionHandle) 
                 }
                 KeyCode::Enter => {
                     let text = model.input_text();
-                    if !text.trim().is_empty() && !model.busy {
+                    let trimmed = text.trim().to_string();
+                    if trimmed.is_empty() {
+                        // nothing to do
+                    } else if trimmed.starts_with('/') {
+                        handle_slash(model, session, &trimmed).await;
+                    } else if !model.busy {
                         send_message(model, session, text).await;
                     }
                 }
@@ -170,6 +191,7 @@ async fn handle_core(model: &mut Model, event: Event, session: &SessionHandle) {
                 ok: None,
                 preview: None,
                 diff_stat: None,
+                diff: None,
             });
         }
         Event::ToolResult {
@@ -185,12 +207,17 @@ async fn handle_core(model: &mut Model, event: Event, session: &SessionHandle) {
         }
         Event::Diff {
             id,
+            unified,
             additions,
             deletions,
             ..
         } => {
-            if let Some(Entry::Tool { diff_stat, .. }) = find_tool(model, &id) {
+            if let Some(Entry::Tool {
+                diff_stat, diff, ..
+            }) = find_tool(model, &id)
+            {
                 *diff_stat = Some(format!("+{additions} -{deletions}"));
+                *diff = Some(unified);
             }
         }
         Event::ApprovalRequest {
@@ -299,6 +326,136 @@ fn history_next(model: &mut Model) {
     }
 }
 
+fn handle_dialog_key(model: &mut Model, code: KeyCode) {
+    match code {
+        KeyCode::Esc => model.dialog = None,
+        KeyCode::Up => {
+            if let Some(d) = model.dialog.as_mut() {
+                d.move_up();
+            }
+        }
+        KeyCode::Down => {
+            if let Some(d) = model.dialog.as_mut() {
+                d.move_down();
+            }
+        }
+        KeyCode::Backspace => {
+            if let Some(d) = model.dialog.as_mut() {
+                d.pop_char();
+            }
+        }
+        KeyCode::Char(c) => {
+            if let Some(d) = model.dialog.as_mut() {
+                d.push_char(c);
+            }
+        }
+        KeyCode::Enter => {
+            let action = model.dialog.as_ref().and_then(|d| d.selected_action());
+            model.dialog = None;
+            if let Some(a) = action {
+                perform_action(model, a);
+            }
+        }
+        _ => {}
+    }
+}
+
+fn perform_action(model: &mut Model, action: Action) {
+    match action {
+        Action::Quit => model.should_quit = true,
+        Action::ClearTranscript => clear_transcript(model),
+        Action::CycleTheme => cycle_theme(model),
+    }
+}
+
+fn clear_transcript(model: &mut Model) {
+    model.entries.clear();
+    model.streaming = None;
+    model.thinking = None;
+    model.scrollback = 0;
+}
+
+fn cycle_theme(model: &mut Model) {
+    model.theme_idx = (model.theme_idx + 1) % crate::theme::THEMES.len();
+    model.theme = Theme::by_index(model.theme_idx);
+    model
+        .entries
+        .push(Entry::Notice(format!("theme: {}", model.theme.name)));
+}
+
+async fn handle_slash(model: &mut Model, session: &SessionHandle, input: &str) {
+    model.clear_input();
+    let mut parts = input.splitn(2, char::is_whitespace);
+    let cmd = parts.next().unwrap_or("");
+    let arg = parts.next().unwrap_or("").trim();
+    match cmd {
+        "/help" => model.entries.push(Entry::Notice(
+            "commands: /help · /clear · /theme [name] · /model <id> · /quit   \
+             (ctrl+p palette · tab focus · esc cancel)"
+                .into(),
+        )),
+        "/clear" => clear_transcript(model),
+        "/quit" => model.should_quit = true,
+        "/theme" => {
+            if arg.is_empty() {
+                cycle_theme(model);
+            } else if let Some(i) =
+                (0..crate::theme::THEMES.len()).find(|&i| Theme::by_index(i).name == arg)
+            {
+                model.theme_idx = i;
+                model.theme = Theme::by_index(i);
+                model.entries.push(Entry::Notice(format!("theme: {arg}")));
+            } else {
+                model
+                    .entries
+                    .push(Entry::Notice(format!("unknown theme '{arg}'")));
+            }
+        }
+        "/model" => {
+            if arg.is_empty() {
+                model
+                    .entries
+                    .push(Entry::Notice("usage: /model <id>".into()));
+            } else {
+                model.model_name = arg.to_string();
+                let _ = session
+                    .send(Command::SetModel {
+                        model: arg.to_string(),
+                    })
+                    .await;
+                model.entries.push(Entry::Notice(format!("model → {arg}")));
+            }
+        }
+        other => model.entries.push(Entry::Notice(format!(
+            "unknown command '{other}' (try /help)"
+        ))),
+    }
+}
+
 fn first_line(s: &str) -> String {
     s.lines().next().unwrap_or("").to_string()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn cycle_theme_changes_name() {
+        let mut m = Model::new("x".into(), "/".into());
+        let first = m.theme.name;
+        perform_action(&mut m, Action::CycleTheme);
+        assert_ne!(m.theme.name, first);
+        assert_eq!(m.theme_idx, 1);
+    }
+
+    #[test]
+    fn clear_transcript_empties() {
+        let mut m = Model::new("x".into(), "/".into());
+        m.entries.push(Entry::User("hi".into()));
+        m.streaming = Some("partial".into());
+        perform_action(&mut m, Action::ClearTranscript);
+        assert!(m.entries.is_empty());
+        assert!(m.streaming.is_none());
+    }
 }

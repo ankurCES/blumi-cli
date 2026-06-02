@@ -1,5 +1,7 @@
 //! TUI state.
 
+use crate::dialog::Picker;
+use crate::theme::Theme;
 use blumi_protocol::{Envelope, RequestId, ToolCallId};
 use tui_textarea::TextArea;
 
@@ -22,6 +24,7 @@ pub enum Entry {
         ok: Option<bool>,
         preview: Option<String>,
         diff_stat: Option<String>,
+        diff: Option<String>,
     },
     Notice(String),
 }
@@ -64,6 +67,10 @@ pub struct Model {
     pub draft: String,
 
     pub pending: Option<PendingApproval>,
+    pub dialog: Option<Picker>,
+
+    pub theme: Theme,
+    pub theme_idx: usize,
 
     pub input_tokens: u32,
     pub output_tokens: u32,
@@ -91,6 +98,9 @@ impl Model {
             history_pos: None,
             draft: String::new(),
             pending: None,
+            dialog: None,
+            theme: Theme::default(),
+            theme_idx: 0,
             input_tokens: 0,
             output_tokens: 0,
             should_quit: false,

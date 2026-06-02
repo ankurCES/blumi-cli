@@ -2,7 +2,9 @@
 
 use ratatui::style::{Color, Modifier, Style};
 
+#[derive(Clone, Copy)]
 pub struct Theme {
+    pub name: &'static str,
     pub primary: Color,
     pub accent: Color,
     pub fg: Color,
@@ -14,8 +16,18 @@ pub struct Theme {
 
 impl Default for Theme {
     fn default() -> Self {
-        // A soft "bloom" palette: pink primary, warm accent.
+        Theme::bloom()
+    }
+}
+
+/// All selectable themes, in cycle order.
+pub const THEMES: [fn() -> Theme; 3] = [Theme::bloom, Theme::dark, Theme::mono];
+
+impl Theme {
+    /// The soft "bloom" palette: pink primary, warm accent (default).
+    pub fn bloom() -> Self {
         Theme {
+            name: "bloom",
             primary: Color::Indexed(213), // pink
             accent: Color::Indexed(221),  // warm yellow
             fg: Color::Indexed(252),
@@ -25,9 +37,39 @@ impl Default for Theme {
             error: Color::Indexed(203),
         }
     }
-}
 
-impl Theme {
+    /// A cool blue/teal dark theme.
+    pub fn dark() -> Self {
+        Theme {
+            name: "dark",
+            primary: Color::Indexed(75), // sky blue
+            accent: Color::Indexed(80),  // teal
+            fg: Color::Indexed(252),
+            fg_subtle: Color::Indexed(245),
+            fg_dim: Color::Indexed(239),
+            success: Color::Indexed(114),
+            error: Color::Indexed(203),
+        }
+    }
+
+    /// A restrained monochrome theme.
+    pub fn mono() -> Self {
+        Theme {
+            name: "mono",
+            primary: Color::Indexed(254),
+            accent: Color::Indexed(250),
+            fg: Color::Indexed(250),
+            fg_subtle: Color::Indexed(244),
+            fg_dim: Color::Indexed(239),
+            success: Color::Indexed(246),
+            error: Color::Indexed(210),
+        }
+    }
+
+    pub fn by_index(i: usize) -> Self {
+        THEMES[i % THEMES.len()]()
+    }
+
     pub fn primary(&self) -> Style {
         Style::default().fg(self.primary)
     }

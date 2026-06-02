@@ -103,20 +103,27 @@ impl TurnRunner for AgentTurnRunner {
                 .await;
 
             // Build the context window: system prompt + conversation so far.
-            let window = {
+            let (window, current_model) = {
                 let st = state.lock().await;
                 let mut msgs = Vec::with_capacity(st.messages.len() + 1);
                 if !self.system_prompt.is_empty() {
                     msgs.push(Message::system(self.system_prompt.clone()));
                 }
                 msgs.extend(st.messages.iter().cloned());
-                msgs
+                (msgs, st.model.clone())
             };
+
+            // Honor mid-session model switches (Command::SetModel) within the
+            // active provider/client.
+            let mut options = self.options.clone();
+            if !current_model.is_empty() {
+                options.model = current_model;
+            }
 
             // Stream the model.
             let mut stream = match self
                 .llm
-                .stream_chat(&window, &tool_specs, &self.options, ct.child_token())
+                .stream_chat(&window, &tool_specs, &options, ct.child_token())
                 .await
             {
                 Ok(s) => s,

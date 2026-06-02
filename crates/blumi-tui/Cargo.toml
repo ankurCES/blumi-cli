@@ -14,6 +14,10 @@ ratatui = "0.29"
 crossterm = { version = "0.28", features = ["event-stream"] }
 tui-textarea = "0.7"
 textwrap = "0.16"
+pulldown-cmark = { version = "0.12", default-features = false }
+syntect = { version = "5", default-features = false, features = ["default-fancy"] }
+similar = { workspace = true }
+nucleo-matcher = "0.3"
 
 tokio = { workspace = true }
 futures.workspace = true
