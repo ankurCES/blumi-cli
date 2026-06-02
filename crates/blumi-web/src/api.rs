@@ -111,6 +111,16 @@ pub async fn session_resume(
     }
 }
 
+/// Rebuild the agent in place (self-evolution) so newly written skills + config
+/// edits take effect, preserving the conversation. The client calls this when it
+/// sees a `reload` event, then re-subscribes + restores the transcript.
+pub async fn session_reload(State(state): State<AppState>) -> Json<Value> {
+    match state.reload_current().await {
+        Ok(()) => Json(json!({ "ok": true })),
+        Err(e) => Json(json!({ "ok": false, "error": e.to_string() })),
+    }
+}
+
 /// The current session's transcript (for restore-on-load and after a switch).
 pub async fn messages(State(state): State<AppState>) -> Json<Value> {
     let snap = state.current().await.snapshot().await;

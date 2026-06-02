@@ -137,6 +137,10 @@ pub enum Event {
     /// An informational message from the core (e.g. `/undo` / `/compact`
     /// confirmations). Rendered like a system note, not an error.
     Notice { message: String },
+    /// The agent asked to reload itself (self-evolution): the host should
+    /// rebuild the session so newly written skills + config edits take effect,
+    /// preserving the conversation. Hosts that can't reload may ignore it.
+    Reload { reason: String },
     /// A turn-level error.
     Error {
         kind: String,
@@ -166,6 +170,7 @@ impl Event {
             Event::Compaction { .. } => "compaction",
             Event::TurnDone { .. } => "done",
             Event::Notice { .. } => "notice",
+            Event::Reload { .. } => "reload",
             Event::Error { .. } => "error",
         }
     }

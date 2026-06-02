@@ -205,6 +205,19 @@ export function App() {
       } catch {
         return
       }
+      // Self-evolution: the agent asked to reload. Rebuild the session
+      // server-side (fresh skills + config), then re-subscribe + restore the
+      // (preserved) transcript by bumping the epoch.
+      if (e.type === 'reload') {
+        api
+          .reload()
+          .then(() => {
+            setEpoch((x) => x + 1)
+            refreshSessions()
+          })
+          .catch(() => {})
+        return
+      }
       dispatch({ type: 'sse', name: e.type, data })
     }
     for (const name of SSE_EVENTS) es.addEventListener(name, handler as EventListener)

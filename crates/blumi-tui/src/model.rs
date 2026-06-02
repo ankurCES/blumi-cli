@@ -125,6 +125,10 @@ pub struct Model {
     pub usage_view: Option<String>,
     /// A pending session switch for the app loop to perform.
     pub session_request: Option<SessionRequest>,
+    /// Set when the agent asked to reload itself (self-evolution). The app loop
+    /// rebuilds the session in place once the turn is idle, keeping the
+    /// transcript. Holds the reason for the completion notice.
+    pub reload_pending: Option<String>,
 
     pub theme: Theme,
     pub theme_idx: usize,
@@ -179,6 +183,7 @@ impl Model {
             memory_view: None,
             usage_view: None,
             session_request: None,
+            reload_pending: None,
             theme: Theme::default(),
             theme_idx: 0,
             input_tokens: 0,
@@ -268,6 +273,11 @@ impl Model {
 
     pub fn take_session_request(&mut self) -> Option<SessionRequest> {
         self.session_request.take()
+    }
+
+    /// Record an agent-requested self-reload (applied by the app loop when idle).
+    pub fn request_reload(&mut self, reason: impl Into<String>) {
+        self.reload_pending = Some(reason.into());
     }
 
     /// Reset all per-session state (keeps theme, personas, skills, paths).

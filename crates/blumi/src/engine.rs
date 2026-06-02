@@ -81,6 +81,16 @@ pub async fn build_session(
         config.paths.user_md(),
     ))));
 
+    // Self-evolution: the agent can author its own skills, edit its own config
+    // (validated before it lands), and reload itself in place to apply both.
+    registry.register(Arc::new(blumi_core::Typed(
+        blumi_skills::SkillManager::new(config.paths.skills.clone()),
+    )));
+    registry.register(Arc::new(blumi_core::Typed(blumi_skills::SelfConfig::new(
+        config.paths.settings_json(),
+    ))));
+    registry.register(Arc::new(blumi_core::Typed(blumi_skills::ReloadTool::new())));
+
     // Cross-session recall: full-text (FTS5) search over past sessions. Skipped
     // if the history DB can't be opened — it must never block startup.
     match blumi_persist::Store::open(&config.paths.db).await {
