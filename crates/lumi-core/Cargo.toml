@@ -24,6 +24,7 @@ time.workspace = true
 anyhow.workspace = true
 thiserror.workspace = true
 tracing.workspace = true
+glob.workspace = true
 
 [dev-dependencies]
 tokio = { workspace = true, features = ["macros", "rt-multi-thread", "test-util"] }

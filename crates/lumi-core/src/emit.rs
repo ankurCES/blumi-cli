@@ -8,7 +8,7 @@
 //!   via a `Command` from some UI. This is the single mechanism that unifies
 //!   OpenMono's blocking TUI prompt and its async ACP pause/resume.
 
-use lumi_protocol::{ClarifyChoice, Decision, Event, RequestId};
+use lumi_protocol::{ApprovalScope, ClarifyChoice, Decision, Event, RequestId};
 use tokio::sync::{mpsc, oneshot};
 
 /// Pushes events toward the session actor. Cloneable and cheap.
@@ -38,7 +38,7 @@ pub enum InteractionKind {
 /// The user's reply to an interaction.
 #[derive(Debug)]
 pub enum InteractionReply {
-    Approval(Decision),
+    Approval { decision: Decision, scope: ApprovalScope },
     Clarify(String),
 }
 
@@ -61,15 +61,15 @@ impl Interactor {
         Interactor { tx }
     }
 
-    /// Ask the user to approve a capability. Returns `Deny` if no UI responds
-    /// (actor gone / cancelled) — fail closed.
+    /// Ask the user to approve a capability. Returns `(Deny, Once)` if no UI
+    /// responds (actor gone / cancelled) — fail closed.
     pub async fn approve(
         &self,
         tool: impl Into<String>,
         summary: impl Into<String>,
         dangerous: bool,
         diff: Option<String>,
-    ) -> Decision {
+    ) -> (Decision, ApprovalScope) {
         let (respond, rx) = oneshot::channel();
         let req = InteractionRequest {
             id: RequestId::new(),
@@ -82,11 +82,11 @@ impl Interactor {
             respond,
         };
         if self.tx.send(req).is_err() {
-            return Decision::Deny;
+            return (Decision::Deny, ApprovalScope::Once);
         }
         match rx.await {
-            Ok(InteractionReply::Approval(d)) => d,
-            _ => Decision::Deny,
+            Ok(InteractionReply::Approval { decision, scope }) => (decision, scope),
+            _ => (Decision::Deny, ApprovalScope::Once),
         }
     }
 
@@ -125,11 +125,16 @@ mod tests {
         let actor = tokio::spawn(async move {
             let req = rx.recv().await.unwrap();
             assert!(matches!(req.kind, InteractionKind::Approval { .. }));
-            req.respond.send(InteractionReply::Approval(Decision::Allow)).unwrap();
+            req.respond
+                .send(InteractionReply::Approval {
+                    decision: Decision::Allow,
+                    scope: ApprovalScope::Once,
+                })
+                .unwrap();
         });
 
-        let d = interactor.approve("Bash", "run ls", false, None).await;
-        assert_eq!(d, Decision::Allow);
+        let (decision, _scope) = interactor.approve("Bash", "run ls", false, None).await;
+        assert_eq!(decision, Decision::Allow);
         actor.await.unwrap();
     }
 
@@ -138,6 +143,7 @@ mod tests {
         let (tx, rx) = mpsc::unbounded_channel::<InteractionRequest>();
         drop(rx); // no actor listening
         let interactor = Interactor::new(tx);
-        assert_eq!(interactor.approve("Bash", "x", true, None).await, Decision::Deny);
+        let (decision, _) = interactor.approve("Bash", "x", true, None).await;
+        assert_eq!(decision, Decision::Deny);
     }
 }

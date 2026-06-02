@@ -166,9 +166,9 @@ impl SessionActor {
                     tok.cancel();
                 }
             }
-            Command::ApproveTool { request_id, decision, .. } => {
+            Command::ApproveTool { request_id, decision, scope } => {
                 if let Some(resp) = self.pending.remove(&request_id) {
-                    let _ = resp.send(InteractionReply::Approval(decision));
+                    let _ = resp.send(InteractionReply::Approval { decision, scope });
                 }
             }
             Command::AnswerClarify { request_id, value } => {
@@ -277,7 +277,7 @@ mod tests {
             ctx: TurnContext,
             _ct: CancellationToken,
         ) -> DoneReason {
-            let decision = ctx.interactor.approve("Bash", "run rm", true, None).await;
+            let (decision, _scope) = ctx.interactor.approve("Bash", "run rm", true, None).await;
             let text = format!("decision={decision:?}");
             state.lock().await.messages.push(Message::assistant(text));
             DoneReason::Completed
