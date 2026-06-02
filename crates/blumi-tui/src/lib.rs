@@ -10,6 +10,7 @@ mod diff;
 mod highlight;
 mod logo;
 mod markdown;
+mod mascot;
 mod model;
 mod theme;
 mod update;

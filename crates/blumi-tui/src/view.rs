@@ -100,8 +100,8 @@ fn render_header(model: &Model, f: &mut Frame, area: Rect, theme: &Theme) {
         Span::styled(shorten(&model.working_dir, 36), theme.subtle()),
     ];
     if model.busy {
-        let frame = icon::SPINNER[model.spinner_frame % icon::SPINNER.len()];
-        spans.push(Span::styled(format!("  {frame} working…"), theme.accent()));
+        spans.push(Span::raw("   "));
+        spans.extend(crate::mascot::thinking(model.spinner_frame));
     }
     f.render_widget(Paragraph::new(Line::from(spans)), left_area);
 
@@ -113,14 +113,15 @@ fn render_header(model: &Model, f: &mut Frame, area: Rect, theme: &Theme) {
 }
 
 fn render_landing(f: &mut Frame, area: Rect, theme: &Theme) {
-    let logo: Vec<Line> = blumi_tui_logo()
-        .lines()
-        .map(|l| {
-            Line::from(Span::styled(l.to_string(), theme.primary())).alignment(Alignment::Center)
-        })
-        .collect();
     let mut lines = vec![Line::raw(""), Line::raw("")];
-    lines.extend(logo);
+    lines.extend(
+        crate::mascot::rose_logo()
+            .into_iter()
+            .map(|l| l.alignment(Alignment::Center)),
+    );
+    lines.push(Line::raw(""));
+    lines
+        .push(Line::from(Span::styled("blumi", theme.bold_primary())).alignment(Alignment::Center));
     lines.push(Line::raw(""));
     lines.push(
         Line::from(Span::styled(
@@ -157,7 +158,13 @@ fn build_lines(model: &Model, width: usize, theme: &Theme) -> Vec<Line<'static>>
     for entry in &model.entries {
         match entry {
             Entry::User(t) => {
-                push_wrapped(&mut lines, t, width, theme.bold_primary(), "› ");
+                push_wrapped(
+                    &mut lines,
+                    t,
+                    width,
+                    theme.bold_primary(),
+                    &format!("{} ", icon::BAR),
+                );
             }
             Entry::Assistant(t) => {
                 lines.extend(crate::markdown::render_markdown(t, width, theme));
@@ -210,6 +217,10 @@ fn build_lines(model: &Model, width: usize, theme: &Theme) -> Vec<Line<'static>>
         lines.push(Line::raw(""));
     }
 
+    // Animated mascot while the agent works but hasn't produced output yet.
+    if model.busy && model.streaming.is_none() && model.thinking.is_none() {
+        lines.push(Line::from(crate::mascot::thinking(model.spinner_frame)));
+    }
     if let Some(th) = &model.thinking {
         if !th.trim().is_empty() {
             push_wrapped(&mut lines, th, width, theme.dim(), "  ");
@@ -346,10 +357,6 @@ fn centered_rect(percent_x: u16, percent_y: u16, area: Rect) -> Rect {
         Constraint::Percentage((100 - percent_x) / 2),
     ])
     .split(vertical[1])[1]
-}
-
-fn blumi_tui_logo() -> &'static str {
-    crate::LOGO
 }
 
 fn shorten(s: &str, max: usize) -> String {
