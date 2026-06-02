@@ -63,6 +63,7 @@ pub async fn run(config: LumiConfig, prompt: String, yolo: bool) -> anyhow::Resu
         executor,
         options,
         config.llm.max_iterations,
+        config.llm.context_size,
         system_prompt,
         config.paths.working_dir.clone(),
     ));

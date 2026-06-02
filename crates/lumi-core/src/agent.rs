@@ -6,6 +6,7 @@
 //! iterate until the model stops calling tools, the iteration budget runs out,
 //! a doom loop is detected, or the turn is cancelled.
 
+use crate::context::ContextManager;
 use crate::llm::{LlmClient, LlmOptions};
 use crate::permissions::PermissionEngine;
 use crate::pipeline::execute_tool_call;
@@ -39,6 +40,7 @@ pub struct AgentTurnRunner {
     max_iterations: u32,
     system_prompt: String,
     working_dir: PathBuf,
+    context: ContextManager,
 }
 
 impl AgentTurnRunner {
@@ -50,6 +52,7 @@ impl AgentTurnRunner {
         executor: Arc<dyn Executor>,
         options: LlmOptions,
         max_iterations: u32,
+        context_size: u32,
         system_prompt: String,
         working_dir: PathBuf,
     ) -> Self {
@@ -62,6 +65,7 @@ impl AgentTurnRunner {
             max_iterations,
             system_prompt,
             working_dir,
+            context: ContextManager::new(context_size),
         }
     }
 
@@ -92,6 +96,11 @@ impl TurnRunner for AgentTurnRunner {
             if ct.is_cancelled() {
                 return DoneReason::Cancelled;
             }
+
+            // Compact the history if it has grown past the context budget.
+            self.context
+                .maybe_compact(&self.llm, &state, &self.options, &ctx.events, &ct)
+                .await;
 
             // Build the context window: system prompt + conversation so far.
             let window = {
@@ -455,6 +464,7 @@ mod tests {
             Arc::new(NoopExec),
             LlmOptions::default(),
             10,
+            131_072,
             "you are lumi".into(),
             PathBuf::from("."),
         ));

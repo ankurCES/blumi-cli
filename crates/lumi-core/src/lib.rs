@@ -7,6 +7,7 @@
 
 mod actor;
 mod agent;
+mod context;
 mod emit;
 mod error;
 mod eventlog;
@@ -21,6 +22,7 @@ mod tool;
 
 pub use actor::{spawn_session, SessionClosed, SessionHandle};
 pub use agent::AgentTurnRunner;
+pub use context::ContextManager;
 pub use emit::{
     EventEmitter, InteractionKind, InteractionReply, InteractionRequest, Interactor,
 };
