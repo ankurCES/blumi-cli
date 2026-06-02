@@ -19,4 +19,5 @@ mod wizard;
 
 pub use app::run;
 pub use logo::{LOGO, MARK, PETAL, WORDMARK};
+pub use mascot::{banner_frame, ROSE_ROWS};
 pub use wizard::{run_onboarding, ProviderChoice, WizardOutcome};

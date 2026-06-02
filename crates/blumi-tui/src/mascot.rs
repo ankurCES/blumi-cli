@@ -1,13 +1,12 @@
 //! The blumi flower mascot: a colorful animated rose for the "thinking" state,
-//! and a colorful rose mark for the landing screen. Colors are the Living Rose
-//! petal ramp (rose → lavender → violet → cyan → mint), swept over time like
-//! crush's gradient spinner.
+//! the TUI landing, and the CLI banner. Colors are the Living Rose petal ramp
+//! (rose → lavender → violet → cyan → mint), swept over time like crush's
+//! gradient spinner.
 
-use crate::theme::PETAL_RAMP;
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
 
-/// Petal color anchors as RGB tuples (mirrors [`PETAL_RAMP`]) for interpolation.
+/// Petal color anchors (RGB) for the swept gradient.
 const ANCHORS: [(u8, u8, u8); 5] = [
     (0xFF, 0x4F, 0x87), // rose-pink
     (0x9B, 0x86, 0xFF), // lavender
@@ -22,8 +21,20 @@ const STEPS: usize = 6;
 /// Morphing petal glyphs — the flower "blooms"/turns as the tick advances.
 const PETALS: [&str; 8] = ["✿", "❀", "❁", "✾", "❃", "❀", "✿", "❋"];
 
-/// A smooth swept color along the petal ramp for a given tick.
-pub fn ramp_color(tick: usize) -> Color {
+/// The rose mark: rose/lavender petals around a cyan ◉ nucleus (10-petal motif).
+const ROSE_ART: [&str; 5] = [
+    "  ✿ ❀ ✿  ",
+    " ❀ ❁ ❁ ❀ ",
+    "  ❁ ◉ ❁  ",
+    " ❀ ❁ ❁ ❀ ",
+    "  ✿ ❀ ✿  ",
+];
+
+/// Number of rows in the rose mark (for the CLI's cursor-rewind animation).
+pub const ROSE_ROWS: usize = ROSE_ART.len();
+
+/// A swept RGB color along the petal ramp for a given tick.
+fn ramp_rgb(tick: usize) -> (u8, u8, u8) {
     let total = ANCHORS.len() * STEPS;
     let idx = tick % total;
     let seg = idx / STEPS;
@@ -31,7 +42,13 @@ pub fn ramp_color(tick: usize) -> Color {
     let a = ANCHORS[seg];
     let b = ANCHORS[(seg + 1) % ANCHORS.len()];
     let l = |x: u8, y: u8| (x as f32 + (y as f32 - x as f32) * t).round() as u8;
-    Color::Rgb(l(a.0, b.0), l(a.1, b.1), l(a.2, b.2))
+    (l(a.0, b.0), l(a.1, b.1), l(a.2, b.2))
+}
+
+/// The swept color as a ratatui [`Color`].
+pub fn ramp_color(tick: usize) -> Color {
+    let (r, g, b) = ramp_rgb(tick);
+    Color::Rgb(r, g, b)
 }
 
 /// The tiny animated mascot for the thinking/working state: a morphing,
@@ -56,38 +73,47 @@ pub fn thinking(tick: usize) -> Vec<Span<'static>> {
     ]
 }
 
-/// A colorful multi-line rose mark for the landing screen (10-petal motif:
-/// rose/lavender petals around a cyan nucleus).
-pub fn rose_logo() -> Vec<Line<'static>> {
-    const ART: [&str; 5] = [
-        "  ✿ ❀ ✿  ",
-        " ❀ ❁ ❁ ❀ ",
-        "  ❁ ◉ ❁  ",
-        " ❀ ❁ ❁ ❀ ",
-        "  ✿ ❀ ✿  ",
-    ];
-    ART.iter().map(|line| colorize(line)).collect()
+/// The animated rose mark for the TUI landing — glyphs flow through the ramp,
+/// so it shimmers when the landing is redrawn each tick.
+pub fn rose_logo(tick: usize) -> Vec<Line<'static>> {
+    let mut out = Vec::new();
+    let mut idx = tick;
+    for row in ROSE_ART {
+        let mut spans = Vec::new();
+        for ch in row.chars() {
+            if ch == ' ' {
+                spans.push(Span::raw(" "));
+            } else {
+                let style = Style::default()
+                    .fg(ramp_color(idx))
+                    .add_modifier(Modifier::BOLD);
+                spans.push(Span::styled(ch.to_string(), style));
+                idx += 1;
+            }
+        }
+        out.push(Line::from(spans));
+    }
+    out
 }
 
-fn colorize(line: &str) -> Line<'static> {
-    let spans: Vec<Span<'static>> = line
-        .chars()
-        .map(|ch| {
-            let style = match ch {
-                '✿' => Style::default()
-                    .fg(PETAL_RAMP[0])
-                    .add_modifier(Modifier::BOLD), // rose
-                '❀' => Style::default().fg(PETAL_RAMP[1]), // lavender
-                '❁' => Style::default().fg(PETAL_RAMP[2]), // violet
-                '◉' => Style::default()
-                    .fg(PETAL_RAMP[3])
-                    .add_modifier(Modifier::BOLD), // cyan
-                _ => Style::default(),
-            };
-            Span::styled(ch.to_string(), style)
-        })
-        .collect();
-    Line::from(spans)
+/// One frame of the rose mark as a truecolor ANSI string (for the CLI banner,
+/// which is not a ratatui surface). Ends each row with a reset + newline.
+pub fn banner_frame(tick: usize) -> String {
+    let mut out = String::new();
+    let mut idx = tick;
+    for row in ROSE_ART {
+        for ch in row.chars() {
+            if ch == ' ' {
+                out.push(' ');
+            } else {
+                let (r, g, b) = ramp_rgb(idx);
+                out.push_str(&format!("\x1b[1;38;2;{r};{g};{b}m{ch}"));
+                idx += 1;
+            }
+        }
+        out.push_str("\x1b[0m\n");
+    }
+    out
 }
 
 #[cfg(test)]
@@ -95,11 +121,9 @@ mod tests {
     use super::*;
 
     #[test]
-    fn ramp_is_continuous_and_cycles() {
-        // distinct colors across a segment, and wraps back to the start
-        let c0 = ramp_color(0);
+    fn ramp_cycles() {
         let total = ANCHORS.len() * STEPS;
-        assert_eq!(c0, ramp_color(total)); // full cycle
+        assert_eq!(ramp_color(0), ramp_color(total));
         assert!(matches!(ramp_color(3), Color::Rgb(..)));
     }
 
@@ -108,15 +132,22 @@ mod tests {
         let spans = thinking(5);
         let text: String = spans.iter().map(|s| s.content.as_ref()).collect();
         assert!(text.contains("thinking"));
-        // first span is the flower glyph
         assert!(PETALS.iter().any(|g| spans[0].content.starts_with(g)));
     }
 
     #[test]
-    fn rose_logo_has_five_rows_and_nucleus() {
-        let lines = rose_logo();
-        assert_eq!(lines.len(), 5);
+    fn rose_logo_has_rows_and_nucleus() {
+        let lines = rose_logo(0);
+        assert_eq!(lines.len(), ROSE_ROWS);
         let mid: String = lines[2].spans.iter().map(|s| s.content.as_ref()).collect();
         assert!(mid.contains('◉'));
+    }
+
+    #[test]
+    fn banner_frame_is_ansi_and_multiline() {
+        let f = banner_frame(0);
+        assert_eq!(f.matches('\n').count(), ROSE_ROWS);
+        assert!(f.contains("\x1b[1;38;2;")); // truecolor escape
+        assert!(f.contains('◉'));
     }
 }

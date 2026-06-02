@@ -75,6 +75,7 @@ async fn main() -> anyhow::Result<()> {
 
     let cli = Cli::parse();
     let provider_flag = cli.provider.is_some();
+    let is_bare = cli.command.is_none();
 
     let working_dir = std::env::current_dir()?;
     let home_override = std::env::var("BLUMI_HOME").ok().map(PathBuf::from);
@@ -91,8 +92,8 @@ async fn main() -> anyhow::Result<()> {
         Some(Commands::Login) => {
             match onboarding::ensure_configured(config, true).await? {
                 Some(_) => {
-                    println!("{}", branding::logo_banner());
-                    eprintln!("  saved to ~/.blumi/settings.json — run `blumi` to start.");
+                    branding::greeting();
+                    eprintln!("  ✓ saved to ~/.blumi/settings.json — run `blumi` to start.");
                 }
                 None => eprintln!("onboarding cancelled."),
             }
@@ -101,10 +102,13 @@ async fn main() -> anyhow::Result<()> {
         Some(Commands::Tui) | None => {
             use std::io::IsTerminal;
             if !std::io::stdout().is_terminal() {
-                // Non-interactive (piped): show the banner instead of a TUI.
-                println!("{}", branding::logo_banner());
-                println!("{}", branding::hint());
+                // Non-interactive (piped): show the static banner instead of a TUI.
+                branding::banner();
                 return Ok(());
+            }
+            // Bare `blumi` shows the animated rose splash; `blumi tui` skips it.
+            if is_bare {
+                branding::greeting();
             }
             // First-run onboarding, unless a provider was passed explicitly.
             let config = if config.is_first_run() && !provider_flag {
@@ -118,7 +122,7 @@ async fn main() -> anyhow::Result<()> {
             tui::run(config).await
         }
         Some(Commands::Web) => {
-            println!("{}", branding::logo_banner());
+            branding::banner();
             eprintln!("  the web UI lands in Phase 4. For now: blumi run \"<prompt>\"");
             Ok(())
         }

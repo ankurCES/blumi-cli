@@ -21,8 +21,16 @@ impl Default for Theme {
 }
 
 /// All selectable themes, in cycle order. `rose` (the Living Rose palette,
-/// from project_mythara) is the default.
-pub const THEMES: [fn() -> Theme; 4] = [Theme::rose, Theme::bloom, Theme::dark, Theme::mono];
+/// from project_mythara) is the default; `spatial`/`aurora` are mythara's
+/// Charmtone-derived skins.
+pub const THEMES: [fn() -> Theme; 6] = [
+    Theme::rose,
+    Theme::spatial,
+    Theme::aurora,
+    Theme::bloom,
+    Theme::dark,
+    Theme::mono,
+];
 
 /// `0xRRGGBB` → truecolor.
 const fn rgb(hex: u32) -> Color {
@@ -32,17 +40,6 @@ const fn rgb(hex: u32) -> Color {
         (hex & 0xFF) as u8,
     )
 }
-
-/// Living Rose petal colors (from project_mythara's rose), used by the
-/// animated flower mascot's color sweep. Anchors: rose → lavender → violet →
-/// cyan → mint.
-pub const PETAL_RAMP: [Color; 5] = [
-    rgb(0xFF4F87), // rose-pink (brand)
-    rgb(0x9B86FF), // lavender (small petals)
-    rgb(0x6B50FF), // violet (big petals)
-    rgb(0x68FFD6), // cyan (nucleus)
-    rgb(0x4FE0A0), // mint
-];
 
 impl Theme {
     /// Living Rose — rose-pink brand on a warm palette with a cyan accent,
@@ -57,6 +54,35 @@ impl Theme {
             fg_dim: rgb(0x8C6571),
             success: rgb(0x4FE0A0), // Julep
             error: rgb(0xFF5470),   // Sriracha
+        }
+    }
+
+    /// Spatial — the original Charmtone Pantera (violet brand + cyan), the
+    /// look closest to crush's own palette.
+    pub fn spatial() -> Self {
+        Theme {
+            name: "spatial",
+            primary: rgb(0x6B50FF), // Charple violet
+            accent: rgb(0x68FFD6),  // Bok cyan
+            fg: rgb(0xDFDBDD),
+            fg_subtle: rgb(0xA8A4AB),
+            fg_dim: rgb(0x605F6B),
+            success: rgb(0x00FFB2), // Julep
+            error: rgb(0xEB4268),   // Sriracha
+        }
+    }
+
+    /// Aurora — a deep, brighter-violet variant that glows.
+    pub fn aurora() -> Self {
+        Theme {
+            name: "aurora",
+            primary: rgb(0x8B6BFF), // brighter violet
+            accent: rgb(0x68FFD6),  // cyan
+            fg: rgb(0xEDE8F7),
+            fg_subtle: rgb(0xB3A8C8),
+            fg_dim: rgb(0x6E6488),
+            success: rgb(0x00FFB2),
+            error: rgb(0xEB4268),
         }
     }
 

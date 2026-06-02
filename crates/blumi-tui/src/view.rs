@@ -25,7 +25,7 @@ pub fn render(model: &mut Model, f: &mut Frame) {
 
     render_header(model, f, header, &theme);
     if model.is_empty() {
-        render_landing(f, chat, &theme);
+        render_landing(model, f, chat, &theme);
     } else {
         render_chat(model, f, chat, &theme);
     }
@@ -112,10 +112,10 @@ fn render_header(model: &Model, f: &mut Frame, area: Rect, theme: &Theme) {
     );
 }
 
-fn render_landing(f: &mut Frame, area: Rect, theme: &Theme) {
+fn render_landing(model: &Model, f: &mut Frame, area: Rect, theme: &Theme) {
     let mut lines = vec![Line::raw(""), Line::raw("")];
     lines.extend(
-        crate::mascot::rose_logo()
+        crate::mascot::rose_logo(model.spinner_frame)
             .into_iter()
             .map(|l| l.alignment(Alignment::Center)),
     );

@@ -10,7 +10,8 @@ use crossterm::event::{Event as TermEvent, KeyCode, KeyEventKind, KeyModifiers};
 pub async fn update(model: &mut Model, msg: Msg, session: &SessionHandle) {
     match msg {
         Msg::Tick => {
-            if model.busy {
+            // Animate while the agent works, or while the landing rose shows.
+            if model.busy || model.is_empty() {
                 model.spinner_frame = model.spinner_frame.wrapping_add(1);
                 model.mark_dirty();
             }
