@@ -100,10 +100,14 @@ pub struct PersonaConfig {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct ExecutorConfig {
-    /// `"local"` (host) or `"docker"` (sandboxed container).
+    /// `"local"` (host), `"docker"` (container), or `"ssh"` (remote host).
     pub backend: String,
     /// Image used by the docker backend.
     pub docker_image: String,
+    /// SSH destination (`user@host` or alias) for the ssh backend.
+    pub ssh_host: String,
+    /// Absolute remote working directory for the ssh backend.
+    pub ssh_workdir: String,
 }
 
 impl Default for ExecutorConfig {
@@ -111,8 +115,25 @@ impl Default for ExecutorConfig {
         ExecutorConfig {
             backend: "local".into(),
             docker_image: "debian:stable-slim".into(),
+            ssh_host: String::new(),
+            ssh_workdir: String::new(),
         }
     }
+}
+
+/// A language server for code-intelligence, keyed by name in
+/// [`BlumiConfig::lsp_servers`].
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct LspServerConfig {
+    /// Executable to spawn, e.g. `rust-analyzer`.
+    pub command: String,
+    #[serde(default)]
+    pub args: Vec<String>,
+    /// File extensions (without the dot) this server handles, e.g. `["rs"]`.
+    pub extensions: Vec<String>,
+    /// LSP languageId; defaults to the first extension if empty.
+    #[serde(default)]
+    pub language_id: String,
 }
 
 /// An external MCP (Model Context Protocol) server launched over stdio.
@@ -148,6 +169,9 @@ pub struct BlumiConfig {
     pub personas: BTreeMap<String, PersonaConfig>,
     /// Execution backend (host vs docker sandbox).
     pub executor: ExecutorConfig,
+    /// Language servers for the `Lsp` code-intel tool, keyed by name.
+    #[serde(default)]
+    pub lsp_servers: BTreeMap<String, LspServerConfig>,
     /// Resolved at load time; never serialized to/from files.
     #[serde(skip)]
     pub paths: Paths,
@@ -165,6 +189,7 @@ impl Default for BlumiConfig {
             persona: "default".into(),
             personas: BTreeMap::new(),
             executor: ExecutorConfig::default(),
+            lsp_servers: BTreeMap::new(),
             paths: Paths::default(),
         }
     }

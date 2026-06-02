@@ -8,6 +8,8 @@
 
 mod docker;
 mod local;
+mod ssh;
 
 pub use docker::{DockerExecutor, CONTAINER_WORKDIR};
 pub use local::LocalExecutor;
+pub use ssh::SshExecutor;

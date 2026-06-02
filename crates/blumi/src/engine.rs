@@ -92,17 +92,48 @@ pub async fn build_session(
         Err(e) => tracing::warn!("session history unavailable; SessionSearch disabled: {e}"),
     }
 
+    // Code intelligence: register the `Lsp` tool if any language servers are
+    // configured (language-agnostic, keyed by file extension).
+    if !config.lsp_servers.is_empty() {
+        let servers: Vec<blumi_lsp::LspServer> = config
+            .lsp_servers
+            .values()
+            .map(|s| blumi_lsp::LspServer {
+                command: s.command.clone(),
+                args: s.args.clone(),
+                extensions: s.extensions.clone(),
+                language_id: if s.language_id.is_empty() {
+                    s.extensions.first().cloned().unwrap_or_default()
+                } else {
+                    s.language_id.clone()
+                },
+            })
+            .collect();
+        registry.register(Arc::new(blumi_core::Typed(blumi_lsp::LspTool::new(
+            servers,
+            config.paths.working_dir.clone(),
+        ))));
+    }
+
     let mut perm_cfg = config.permissions.clone();
     if yolo {
         perm_cfg.yolo = true;
     }
     let perms = Arc::new(PermissionEngine::new(perm_cfg));
 
-    // Select the execution backend: a Docker sandbox (commands run in a
-    // container, files via a bind mount) or the local host. Docker failures fall
-    // back to local so a missing daemon never blocks startup.
-    let executor: Arc<dyn blumi_core::Executor> = if config.executor.backend == "docker" {
-        match blumi_exec::DockerExecutor::start(
+    // The agent's working directory. For ssh it's the remote workspace; for
+    // local/docker it's the project dir (docker bind-mounts it).
+    let work_dir: std::path::PathBuf =
+        if config.executor.backend == "ssh" && !config.executor.ssh_workdir.is_empty() {
+            std::path::PathBuf::from(&config.executor.ssh_workdir)
+        } else {
+            config.paths.working_dir.clone()
+        };
+
+    // Select the execution backend. Sandbox/remote failures fall back to local
+    // so a missing daemon/host never blocks startup.
+    let executor: Arc<dyn blumi_core::Executor> = match config.executor.backend.as_str() {
+        "docker" => match blumi_exec::DockerExecutor::start(
             &config.executor.docker_image,
             &config.paths.working_dir,
         )
@@ -116,9 +147,24 @@ pub async fn build_session(
                 tracing::warn!("docker sandbox unavailable ({e}); using local executor");
                 Arc::new(LocalExecutor::new(&config.paths.working_dir))
             }
+        },
+        "ssh" if !config.executor.ssh_host.is_empty() => {
+            tracing::info!(
+                "ssh sandbox: {} ({})",
+                config.executor.ssh_host,
+                work_dir.display()
+            );
+            Arc::new(blumi_exec::SshExecutor::new(
+                &config.executor.ssh_host,
+                &config.executor.ssh_workdir,
+            ))
         }
-    } else {
-        Arc::new(LocalExecutor::new(&config.paths.working_dir))
+        other => {
+            if other == "ssh" {
+                tracing::warn!("ssh backend needs executor.ssh_host; using local executor");
+            }
+            Arc::new(LocalExecutor::new(&work_dir))
+        }
     };
 
     // Personas: built-ins merged with config; the active one seeds the model and
@@ -180,7 +226,7 @@ pub async fn build_session(
         executor.clone(),
         options.clone(),
         config.llm.context_size,
-        config.paths.working_dir.clone(),
+        work_dir.clone(),
         builtin_agents(),
     ));
 
@@ -194,7 +240,7 @@ pub async fn build_session(
             config.llm.max_iterations,
             config.llm.context_size,
             system_prompt,
-            config.paths.working_dir.clone(),
+            work_dir.clone(),
         )
         .with_spawner(spawner)
         .with_personas(personas, &active),
