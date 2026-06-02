@@ -1,4 +1,4 @@
-import type { Config, Persona, ServerMessage, SessionMeta } from './types'
+import type { Config, CronJob, Persona, ServerMessage, SessionMeta, SkillFull, Usage } from './types'
 
 async function getJSON<T>(path: string): Promise<T> {
   const r = await fetch(path)
@@ -35,6 +35,16 @@ export const api = {
   logout: () => postJSON('/api/logout'),
   // Probe a protected route to see if the current cookie is valid.
   checkAuth: async (): Promise<boolean> => (await fetch('/api/sessions')).ok,
+  // Control center.
+  cron: () => getJSON<{ jobs: CronJob[] }>('/api/cron').then((d) => d.jobs),
+  cronAdd: (name: string, schedule: string, prompt: string) =>
+    postJSON('/api/cron', { name, schedule, prompt }),
+  cronRemove: (id: string) => postJSON('/api/cron/remove', { id }),
+  skillsList: () => getJSON<{ skills: SkillFull[] }>('/api/skills').then((d) => d.skills),
+  memoryGet: () => getJSON<{ memory: string; user: string }>('/api/memory'),
+  memorySet: (which: 'memory' | 'user', content: string) =>
+    postJSON('/api/memory', { which, content }),
+  usage: () => getJSON<{ usage: Usage }>('/api/usage').then((d) => d.usage),
   send: (text: string) => postJSON('/api/chat/send', { text }),
   cancel: () => postJSON('/api/chat/cancel'),
   compact: () => postJSON('/api/compact'),

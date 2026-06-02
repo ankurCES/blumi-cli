@@ -49,6 +49,22 @@ export type ServerMessage = {
 
 export type Persona = { name: string; description: string }
 
+export type CronJob = { id: string; name: string; schedule: string; prompt: string }
+export type SkillFull = { name: string; description: string; body: string }
+export type ModelUsage = {
+  model: string
+  sessions: number
+  input_tokens: number
+  output_tokens: number
+}
+export type Usage = {
+  sessions: number
+  messages: number
+  input_tokens: number
+  output_tokens: number
+  by_model: ModelUsage[]
+}
+
 export type Config = {
   model: string
   models: string[]

@@ -11,6 +11,7 @@ type Props = {
   busy: boolean
   onCompact: () => void
   onUndo: () => void
+  onCenter: () => void
 }
 
 export function Header({
@@ -24,6 +25,7 @@ export function Header({
   busy,
   onCompact,
   onUndo,
+  onCenter,
 }: Props) {
   return (
     <header className="header">
@@ -61,6 +63,9 @@ export function Header({
         </button>
         <button className="hbtn" onClick={onUndo} disabled={busy} title="Undo the last file change">
           undo
+        </button>
+        <button className="hbtn" onClick={onCenter} title="Control center: cron, skills, memory, usage">
+          ⚙ center
         </button>
         {config && (
           <span className="cwd" title={config.working_dir}>

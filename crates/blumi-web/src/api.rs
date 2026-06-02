@@ -306,3 +306,67 @@ fn to_sse(env: &Envelope) -> SseEvent {
         .event(env.event.name())
         .data(data)
 }
+
+// ── Control center (cron / skills / memory / usage) ─────────────────────────
+
+pub async fn cron_list(State(state): State<AppState>) -> Json<Value> {
+    Json(json!({ "jobs": state.mgmt().cron_list().await }))
+}
+
+#[derive(Deserialize)]
+pub struct CronAddBody {
+    pub name: String,
+    pub schedule: String,
+    pub prompt: String,
+}
+
+pub async fn cron_add(State(state): State<AppState>, Json(b): Json<CronAddBody>) -> Json<Value> {
+    match state.mgmt().cron_add(&b.name, &b.schedule, &b.prompt).await {
+        Ok(()) => Json(json!({ "ok": true })),
+        Err(e) => Json(json!({ "ok": false, "error": e.to_string() })),
+    }
+}
+
+#[derive(Deserialize)]
+pub struct CronRemoveBody {
+    pub id: String,
+}
+
+pub async fn cron_remove(
+    State(state): State<AppState>,
+    Json(b): Json<CronRemoveBody>,
+) -> Json<Value> {
+    match state.mgmt().cron_remove(&b.id).await {
+        Ok(()) => Json(json!({ "ok": true })),
+        Err(e) => Json(json!({ "ok": false, "error": e.to_string() })),
+    }
+}
+
+pub async fn skills(State(state): State<AppState>) -> Json<Value> {
+    Json(json!({ "skills": state.mgmt().skills() }))
+}
+
+pub async fn memory_get(State(state): State<AppState>) -> Json<Value> {
+    let (memory, user) = state.mgmt().memory();
+    Json(json!({ "memory": memory, "user": user }))
+}
+
+#[derive(Deserialize)]
+pub struct MemorySetBody {
+    pub which: String,
+    pub content: String,
+}
+
+pub async fn memory_set(
+    State(state): State<AppState>,
+    Json(b): Json<MemorySetBody>,
+) -> Json<Value> {
+    match state.mgmt().memory_set(&b.which, &b.content) {
+        Ok(()) => Json(json!({ "ok": true })),
+        Err(e) => Json(json!({ "ok": false, "error": e.to_string() })),
+    }
+}
+
+pub async fn usage(State(state): State<AppState>) -> Json<Value> {
+    Json(json!({ "usage": state.mgmt().usage().await }))
+}

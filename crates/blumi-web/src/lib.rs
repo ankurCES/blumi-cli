@@ -55,11 +55,64 @@ pub trait SessionProvider: Send + Sync {
     async fn save(&self, handle: &SessionHandle);
 }
 
+/// A scheduled cron job, for the control center.
+#[derive(Clone, serde::Serialize)]
+pub struct CronJobInfo {
+    pub id: String,
+    pub name: String,
+    pub schedule: String,
+    pub prompt: String,
+}
+
+/// A discovered skill (name + description + body), for the control center.
+#[derive(Clone, serde::Serialize)]
+pub struct SkillInfo {
+    pub name: String,
+    pub description: String,
+    pub body: String,
+}
+
+/// Per-model usage rollup.
+#[derive(Clone, serde::Serialize)]
+pub struct ModelUsage {
+    pub model: String,
+    pub sessions: u64,
+    pub input_tokens: u64,
+    pub output_tokens: u64,
+}
+
+/// Aggregate usage insights across stored sessions.
+#[derive(Clone, Default, serde::Serialize)]
+pub struct UsageStats {
+    pub sessions: u64,
+    pub messages: u64,
+    pub input_tokens: u64,
+    pub output_tokens: u64,
+    pub by_model: Vec<ModelUsage>,
+}
+
+/// Control-center data + actions (cron, skills, memory, usage) — the seam the
+/// binary implements over the cron store, skill catalog, memory files, and the
+/// persistence store.
+#[async_trait::async_trait]
+pub trait Management: Send + Sync {
+    async fn cron_list(&self) -> Vec<CronJobInfo>;
+    async fn cron_add(&self, name: &str, schedule: &str, prompt: &str) -> anyhow::Result<()>;
+    async fn cron_remove(&self, id: &str) -> anyhow::Result<()>;
+    fn skills(&self) -> Vec<SkillInfo>;
+    /// Returns (MEMORY.md, USER.md) contents.
+    fn memory(&self) -> (String, String);
+    /// `which` is "memory" or "user".
+    fn memory_set(&self, which: &str, content: &str) -> anyhow::Result<()>;
+    async fn usage(&self) -> UsageStats;
+}
+
 /// Shared server state.
 #[derive(Clone)]
 pub struct AppState {
     session: Arc<RwLock<SessionHandle>>,
     provider: Arc<dyn SessionProvider>,
+    mgmt: Arc<dyn Management>,
     pub config: Arc<WebConfig>,
     auth: Option<Arc<Auth>>,
 }
@@ -91,6 +144,10 @@ impl AppState {
         &self.provider
     }
 
+    pub(crate) fn mgmt(&self) -> &Arc<dyn Management> {
+        &self.mgmt
+    }
+
     pub(crate) fn auth(&self) -> Option<&Arc<Auth>> {
         self.auth.as_ref()
     }
@@ -120,6 +177,11 @@ pub fn router(state: AppState) -> Router {
         .route("/api/clarify/respond", post(api::clarify_respond))
         .route("/api/login", post(auth::login))
         .route("/api/logout", post(auth::logout))
+        .route("/api/cron", get(api::cron_list).post(api::cron_add))
+        .route("/api/cron/remove", post(api::cron_remove))
+        .route("/api/skills", get(api::skills))
+        .route("/api/memory", get(api::memory_get).post(api::memory_set))
+        .route("/api/usage", get(api::usage))
         .fallback(assets::static_handler)
         .layer(axum::middleware::from_fn_with_state(
             state.clone(),
@@ -132,6 +194,7 @@ pub fn router(state: AppState) -> Router {
 /// `auth` is `Some`, every data route requires a session cookie.
 pub async fn serve(
     provider: Arc<dyn SessionProvider>,
+    mgmt: Arc<dyn Management>,
     config: WebConfig,
     addr: SocketAddr,
     auth: Option<Auth>,
@@ -140,6 +203,7 @@ pub async fn serve(
     let state = AppState {
         session: Arc::new(RwLock::new(session)),
         provider,
+        mgmt,
         config: Arc::new(config),
         auth: auth.map(Arc::new),
     };

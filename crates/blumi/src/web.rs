@@ -5,10 +5,15 @@ use crate::engine::build_session;
 use async_trait::async_trait;
 use blumi_config::BlumiConfig;
 use blumi_core::{SessionHandle, SessionState};
+use blumi_cron::CronStore;
 use blumi_persist::Store;
 use blumi_protocol::SessionId;
+use blumi_skills::SkillCatalog;
+use blumi_web::{CronJobInfo, Management, ModelUsage, SkillInfo, UsageStats};
+use std::collections::BTreeMap;
 use std::net::SocketAddr;
 use std::sync::Arc;
+use time::OffsetDateTime;
 
 /// Creates / resumes / lists / saves sessions for the web server.
 struct WebSessionProvider {
@@ -92,6 +97,124 @@ impl blumi_web::SessionProvider for WebSessionProvider {
     }
 }
 
+/// Control-center data + actions (cron / skills / memory / usage) over the cron
+/// store, skill catalog, memory files, and the persistence store.
+struct WebManagement {
+    config: BlumiConfig,
+    store: Option<Arc<Store>>,
+}
+
+impl WebManagement {
+    fn cron_path(&self) -> std::path::PathBuf {
+        self.config.paths.home.join("cron.json")
+    }
+    fn skill_dirs(&self) -> [std::path::PathBuf; 2] {
+        [
+            self.config.paths.skills.clone(),
+            self.config.paths.working_dir.join(".blumi").join("skills"),
+        ]
+    }
+}
+
+#[async_trait]
+impl Management for WebManagement {
+    async fn cron_list(&self) -> Vec<CronJobInfo> {
+        CronStore::load(self.cron_path())
+            .jobs()
+            .iter()
+            .map(|j| CronJobInfo {
+                id: j.id.clone(),
+                name: j.name.clone(),
+                schedule: j.schedule.clone(),
+                prompt: j.prompt.clone(),
+            })
+            .collect()
+    }
+
+    async fn cron_add(&self, name: &str, schedule: &str, prompt: &str) -> anyhow::Result<()> {
+        let mut store = CronStore::load(self.cron_path());
+        store
+            .add(name, schedule, prompt, "log", OffsetDateTime::now_utc())
+            .map_err(|e| anyhow::anyhow!("invalid schedule: {e}"))?;
+        store.save()?;
+        Ok(())
+    }
+
+    async fn cron_remove(&self, id: &str) -> anyhow::Result<()> {
+        let mut store = CronStore::load(self.cron_path());
+        if store.remove(id) {
+            store.save()?;
+            Ok(())
+        } else {
+            anyhow::bail!("no cron job '{id}'")
+        }
+    }
+
+    fn skills(&self) -> Vec<SkillInfo> {
+        let cat = SkillCatalog::load(&self.skill_dirs());
+        cat.list()
+            .into_iter()
+            .filter_map(|m| {
+                cat.get(&m.name).map(|s| SkillInfo {
+                    name: s.name.clone(),
+                    description: s.description.clone(),
+                    body: s.body.clone(),
+                })
+            })
+            .collect()
+    }
+
+    fn memory(&self) -> (String, String) {
+        let mem = std::fs::read_to_string(self.config.paths.memory_md()).unwrap_or_default();
+        let usr = std::fs::read_to_string(self.config.paths.user_md()).unwrap_or_default();
+        (mem, usr)
+    }
+
+    fn memory_set(&self, which: &str, content: &str) -> anyhow::Result<()> {
+        let path = if which == "user" {
+            self.config.paths.user_md()
+        } else {
+            self.config.paths.memory_md()
+        };
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent).ok();
+        }
+        std::fs::write(path, content)?;
+        Ok(())
+    }
+
+    async fn usage(&self) -> UsageStats {
+        let Some(store) = &self.store else {
+            return UsageStats::default();
+        };
+        let metas = store.list_sessions(1000).await.unwrap_or_default();
+        let mut stats = UsageStats::default();
+        let mut by: BTreeMap<String, ModelUsage> = BTreeMap::new();
+        for m in &metas {
+            stats.sessions += 1;
+            stats.messages += m.message_count.max(0) as u64;
+            stats.input_tokens += m.input_tokens.max(0) as u64;
+            stats.output_tokens += m.output_tokens.max(0) as u64;
+            let model = if m.model.is_empty() {
+                "default".to_string()
+            } else {
+                m.model.clone()
+            };
+            let e = by.entry(model.clone()).or_insert_with(|| ModelUsage {
+                model,
+                sessions: 0,
+                input_tokens: 0,
+                output_tokens: 0,
+            });
+            e.sessions += 1;
+            e.input_tokens += m.input_tokens.max(0) as u64;
+            e.output_tokens += m.output_tokens.max(0) as u64;
+        }
+        stats.by_model = by.into_values().collect();
+        stats
+    }
+}
+
 pub async fn run(
     config: BlumiConfig,
     host: Option<String>,
@@ -155,6 +278,10 @@ pub async fn run(
         context_size: config.llm.context_size,
     };
 
+    let mgmt = Arc::new(WebManagement {
+        config: config.clone(),
+        store: store.clone(),
+    });
     let provider = Arc::new(WebSessionProvider { config, store });
 
     // Discovery lock file (analog of OpenMono's ACP lock writer) so other tools
@@ -179,7 +306,7 @@ pub async fn run(
         open_browser(&url);
     }
 
-    let result = blumi_web::serve(provider, web, addr, auth).await;
+    let result = blumi_web::serve(provider, mgmt, web, addr, auth).await;
     let _ = std::fs::remove_file(&lock);
     result
 }

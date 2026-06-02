@@ -10,6 +10,7 @@ import { ApprovalCard } from './components/ApprovalCard'
 import { ClarifyCard } from './components/ClarifyCard'
 import { Thinking } from './components/Thinking'
 import { Login } from './components/Login'
+import { ControlCenter } from './components/ControlCenter'
 
 type State = {
   entries: Entry[]
@@ -162,6 +163,7 @@ export function App() {
   const [connected, setConnected] = useState(false)
   // null = unknown, false = needs login, true = authenticated (or auth off).
   const [authed, setAuthed] = useState<boolean | null>(null)
+  const [showCenter, setShowCenter] = useState(false)
   // Bumped on a session switch to re-subscribe SSE + reload the transcript.
   const [epoch, setEpoch] = useState(0)
   const [start, setStart] = useState(() => Date.now())
@@ -311,6 +313,7 @@ export function App() {
         busy={state.busy}
         onCompact={() => api.compact()}
         onUndo={() => api.undo()}
+        onCenter={() => setShowCenter(true)}
       />
       <div className="main">
         <Sidebar sessions={sessions} onNew={newSession} onResume={resumeSession} />
@@ -339,6 +342,7 @@ export function App() {
           activeSecs={activeSecs}
         />
       </div>
+      {showCenter && <ControlCenter onClose={() => setShowCenter(false)} />}
     </div>
   )
 }
