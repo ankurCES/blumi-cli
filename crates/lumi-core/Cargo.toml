@@ -1,9 +1,28 @@
 [package]
 name = "lumi-core"
-description = "the brain: traits, session actor (agent loop), context mgmt, permissions"
+description = "The brain: traits, session actor (agent loop), context mgmt, permissions."
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 
 [dependencies]
+lumi-protocol.workspace = true
+lumi-config.workspace = true
+
+tokio = { workspace = true }
+tokio-util.workspace = true
+tokio-stream.workspace = true
+futures.workspace = true
+async-trait.workspace = true
+
+serde.workspace = true
+serde_json.workspace = true
+schemars.workspace = true
+
+anyhow.workspace = true
+thiserror.workspace = true
+tracing.workspace = true
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["macros", "rt-multi-thread", "test-util"] }
