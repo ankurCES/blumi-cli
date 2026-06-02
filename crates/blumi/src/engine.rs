@@ -97,7 +97,29 @@ pub async fn build_session(
         perm_cfg.yolo = true;
     }
     let perms = Arc::new(PermissionEngine::new(perm_cfg));
-    let executor = Arc::new(LocalExecutor::new(&config.paths.working_dir));
+
+    // Select the execution backend: a Docker sandbox (commands run in a
+    // container, files via a bind mount) or the local host. Docker failures fall
+    // back to local so a missing daemon never blocks startup.
+    let executor: Arc<dyn blumi_core::Executor> = if config.executor.backend == "docker" {
+        match blumi_exec::DockerExecutor::start(
+            &config.executor.docker_image,
+            &config.paths.working_dir,
+        )
+        .await
+        {
+            Ok(d) => {
+                tracing::info!("docker sandbox: {}", config.executor.docker_image);
+                Arc::new(d)
+            }
+            Err(e) => {
+                tracing::warn!("docker sandbox unavailable ({e}); using local executor");
+                Arc::new(LocalExecutor::new(&config.paths.working_dir))
+            }
+        }
+    } else {
+        Arc::new(LocalExecutor::new(&config.paths.working_dir))
+    };
 
     // Personas: built-ins merged with config; the active one seeds the model and
     // is layered onto the system prompt by the runner.

@@ -96,6 +96,25 @@ pub struct PersonaConfig {
     pub temperature: Option<f32>,
 }
 
+/// Which execution backend tools run through, and its options.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct ExecutorConfig {
+    /// `"local"` (host) or `"docker"` (sandboxed container).
+    pub backend: String,
+    /// Image used by the docker backend.
+    pub docker_image: String,
+}
+
+impl Default for ExecutorConfig {
+    fn default() -> Self {
+        ExecutorConfig {
+            backend: "local".into(),
+            docker_image: "debian:stable-slim".into(),
+        }
+    }
+}
+
 /// An external MCP (Model Context Protocol) server launched over stdio.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct McpServerConfig {
@@ -127,6 +146,8 @@ pub struct BlumiConfig {
     /// Configured personas, merged over the built-in roster, keyed by name.
     #[serde(default)]
     pub personas: BTreeMap<String, PersonaConfig>,
+    /// Execution backend (host vs docker sandbox).
+    pub executor: ExecutorConfig,
     /// Resolved at load time; never serialized to/from files.
     #[serde(skip)]
     pub paths: Paths,
@@ -143,6 +164,7 @@ impl Default for BlumiConfig {
             verbose: false,
             persona: "default".into(),
             personas: BTreeMap::new(),
+            executor: ExecutorConfig::default(),
             paths: Paths::default(),
         }
     }
