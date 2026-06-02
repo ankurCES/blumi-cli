@@ -17,6 +17,7 @@ pub fn build_client(provider: &ProviderConfig) -> Result<Arc<dyn LlmClient>, Llm
     match provider.kind {
         ProviderKind::OpenaiCompat => Ok(Arc::new(OpenAiCompatClient::new(base_url, api_key))),
         ProviderKind::Anthropic => Ok(Arc::new(AnthropicClient::new(base_url, api_key))),
+        ProviderKind::AnthropicFoundry => Ok(Arc::new(AnthropicClient::foundry(base_url, api_key))),
         ProviderKind::Gemini => Err(LlmError::Other(anyhow::anyhow!(
             "the Gemini client lands in Phase 3"
         ))),
@@ -33,6 +34,17 @@ mod tests {
             kind: ProviderKind::OpenaiCompat,
             base_url: Some("http://localhost:7474/v1".into()),
             api_key: None,
+            api_key_env: None,
+        };
+        assert!(build_client(&cfg).is_ok());
+    }
+
+    #[test]
+    fn builds_anthropic_foundry() {
+        let cfg = ProviderConfig {
+            kind: ProviderKind::AnthropicFoundry,
+            base_url: Some("https://res.services.ai.azure.com".into()),
+            api_key: Some("azkey".into()),
             api_key_env: None,
         };
         assert!(build_client(&cfg).is_ok());

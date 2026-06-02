@@ -18,24 +18,61 @@ use serde_json::{json, Value};
 use tokio_util::sync::CancellationToken;
 
 const ANTHROPIC_VERSION: &str = "2023-06-01";
+/// Beta header required when authenticating with an OAuth access token.
+const OAUTH_BETA: &str = "oauth-2025-04-20";
+
+/// How the Anthropic client authenticates.
+#[derive(Clone)]
+pub enum AnthropicAuth {
+    /// `x-api-key` header (direct Anthropic, or the Azure key for Foundry).
+    ApiKey(String),
+    /// `Authorization: Bearer` + OAuth beta header (account login).
+    OAuth(String),
+    None,
+}
 
 pub struct AnthropicClient {
     http: reqwest::Client,
     base_url: String,
-    api_key: Option<String>,
+    /// Path appended to `base_url`, e.g. `/v1/messages` (direct) or
+    /// `/anthropic/v1/messages` (Azure AI Foundry).
+    messages_path: String,
+    auth: AnthropicAuth,
 }
 
 impl AnthropicClient {
+    /// Direct Anthropic (`/v1/messages`, `x-api-key`).
     pub fn new(base_url: impl Into<String>, api_key: Option<String>) -> Self {
+        let auth = api_key
+            .map(AnthropicAuth::ApiKey)
+            .unwrap_or(AnthropicAuth::None);
+        Self::with_auth(base_url, "/v1/messages", auth)
+    }
+
+    /// Anthropic on Azure AI Foundry (`/anthropic/v1/messages`, Azure `x-api-key`).
+    pub fn foundry(base_url: impl Into<String>, api_key: Option<String>) -> Self {
+        let auth = api_key
+            .map(AnthropicAuth::ApiKey)
+            .unwrap_or(AnthropicAuth::None);
+        Self::with_auth(base_url, "/anthropic/v1/messages", auth)
+    }
+
+    /// Full control over path and auth (e.g. OAuth bearer).
+    pub fn with_auth(
+        base_url: impl Into<String>,
+        messages_path: impl Into<String>,
+        auth: AnthropicAuth,
+    ) -> Self {
         AnthropicClient {
             http: reqwest::Client::new(),
             base_url: base_url.into().trim_end_matches('/').to_string(),
-            api_key,
+            messages_path: messages_path.into(),
+            auth,
         }
     }
 
     fn endpoint(&self) -> String {
-        format!("{}/v1/messages", self.base_url)
+        format!("{}{}", self.base_url, self.messages_path)
     }
 }
 
@@ -52,11 +89,15 @@ impl LlmClient for AnthropicClient {
         let mut req = self
             .http
             .post(self.endpoint())
-            .header("anthropic-version", ANTHROPIC_VERSION)
-            .json(&body);
-        if let Some(key) = &self.api_key {
-            req = req.header("x-api-key", key);
-        }
+            .header("anthropic-version", ANTHROPIC_VERSION);
+        req = match &self.auth {
+            AnthropicAuth::ApiKey(key) => req.header("x-api-key", key),
+            AnthropicAuth::OAuth(token) => req
+                .header("authorization", format!("Bearer {token}"))
+                .header("anthropic-beta", OAUTH_BETA),
+            AnthropicAuth::None => req,
+        };
+        let req = req.json(&body);
 
         let resp = send_with_retry(req, &ct).await?;
         let mut events = resp.bytes_stream().eventsource();

@@ -16,6 +16,9 @@ pub enum ProviderKind {
     OpenaiCompat,
     /// Native Anthropic `/v1/messages`.
     Anthropic,
+    /// Anthropic (Claude) on Azure AI Foundry: same Messages format at
+    /// `<endpoint>/anthropic/v1/messages` with the Azure `x-api-key`.
+    AnthropicFoundry,
     /// Native Google Gemini.
     Gemini,
 }
@@ -99,6 +102,16 @@ pub fn default_providers() -> BTreeMap<String, ProviderConfig> {
                 base_url: Some("https://api.anthropic.com".into()),
                 api_key: None,
                 api_key_env: Some("ANTHROPIC_API_KEY".into()),
+            },
+        ),
+        (
+            "azure-foundry".into(),
+            P {
+                kind: ProviderKind::AnthropicFoundry,
+                // Replace with your Azure AI Foundry resource endpoint.
+                base_url: Some("https://YOUR-RESOURCE.services.ai.azure.com".into()),
+                api_key: None,
+                api_key_env: Some("AZURE_FOUNDRY_API_KEY".into()),
             },
         ),
         (
