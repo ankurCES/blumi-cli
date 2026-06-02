@@ -4,8 +4,8 @@
 use crate::prompt::build_system_prompt;
 use blumi_config::BlumiConfig;
 use blumi_core::{
-    spawn_session, AgentTurnRunner, LlmClient, LlmOptions, PermissionEngine, SessionHandle,
-    ToolRegistry,
+    builtin_agents, spawn_session, AgentSpawner, AgentTurnRunner, LlmClient, LlmOptions,
+    PermissionEngine, SessionHandle, ToolRegistry,
 };
 use blumi_exec::LocalExecutor;
 use blumi_llm::{build_client, MockLlmClient};
@@ -75,17 +75,34 @@ pub fn build_session(config: &BlumiConfig, yolo: bool) -> anyhow::Result<Session
     let memory = MemorySnapshot::load(&config.paths.memory_md(), &config.paths.user_md());
     let system_prompt = build_system_prompt(config, &memory);
 
-    let runner = Arc::new(AgentTurnRunner::new(
-        llm,
-        Arc::new(registry),
-        perms,
-        executor,
-        options,
-        config.llm.max_iterations,
+    let registry = Arc::new(registry);
+
+    // Sub-agent delegation: the spawner shares the same provider/registry/executor.
+    let spawner = Arc::new(AgentSpawner::new(
+        llm.clone(),
+        registry.clone(),
+        perms.clone(),
+        executor.clone(),
+        options.clone(),
         config.llm.context_size,
-        system_prompt,
         config.paths.working_dir.clone(),
+        builtin_agents(),
     ));
+
+    let runner = Arc::new(
+        AgentTurnRunner::new(
+            llm,
+            registry,
+            perms,
+            executor,
+            options,
+            config.llm.max_iterations,
+            config.llm.context_size,
+            system_prompt,
+            config.paths.working_dir.clone(),
+        )
+        .with_spawner(spawner),
+    );
 
     Ok(spawn_session(
         SessionId::new(),

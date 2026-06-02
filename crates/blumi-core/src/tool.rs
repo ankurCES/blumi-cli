@@ -17,6 +17,26 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use tokio_util::sync::CancellationToken;
 
+/// Spawns sub-agents (the `delegate` tool's backend). Implemented in the core
+/// over the same machinery as the top-level agent; child agents get a
+/// restricted toolset and their own budget.
+#[async_trait]
+pub trait SubAgentSpawner: Send + Sync {
+    /// The available sub-agent type names (for discovery / error messages).
+    fn agent_types(&self) -> Vec<String>;
+
+    /// Run a sub-agent of `agent_type` on `prompt`, returning its final text.
+    /// `interactor` is the parent's, so child approvals still reach the user.
+    async fn spawn(
+        &self,
+        agent_type: &str,
+        prompt: &str,
+        events: EventEmitter,
+        interactor: Interactor,
+        ct: CancellationToken,
+    ) -> Result<String, ToolError>;
+}
+
 /// Everything a tool needs at execution time. Notably it carries an
 /// [`Executor`] (so file/shell ops respect the active backend) and channels to
 /// the user — never a concrete UI.
@@ -27,6 +47,8 @@ pub struct ToolContext {
     pub executor: Arc<dyn Executor>,
     pub events: EventEmitter,
     pub interactor: Interactor,
+    /// Present when sub-agent delegation is available.
+    pub spawner: Option<Arc<dyn SubAgentSpawner>>,
 }
 
 /// A tool the model can call. Object-safe (via `async_trait`) so the registry

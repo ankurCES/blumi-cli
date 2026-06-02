@@ -4,6 +4,7 @@
 //! become a `Tool`. [`register_builtin_tools`] installs the default set into a
 //! registry; the generic execution pipeline lives in `blumi-core`.
 
+mod delegate;
 mod dir;
 mod files;
 mod path;
@@ -11,6 +12,7 @@ mod search;
 mod shell;
 mod todo;
 
+pub use delegate::Delegate;
 pub use dir::ListDirectory;
 pub use files::{FileEdit, FileRead, FileWrite};
 pub use search::{Glob, Grep};
@@ -30,6 +32,7 @@ pub fn register_builtin_tools(reg: &mut ToolRegistry) {
     reg.register(Arc::new(Typed(Glob)));
     reg.register(Arc::new(Typed(Grep)));
     reg.register(Arc::new(Typed(TodoWrite)));
+    reg.register(Arc::new(Typed(Delegate)));
 }
 
 #[cfg(test)]
@@ -51,6 +54,7 @@ pub(crate) mod testutil {
             executor: Arc::new(LocalExecutor::new(working_dir)),
             events: EventEmitter::new(etx),
             interactor: Interactor::new(itx),
+            spawner: None,
         }
     }
 }
@@ -63,9 +67,10 @@ mod tests {
     fn registers_all_builtins() {
         let mut reg = ToolRegistry::new();
         register_builtin_tools(&mut reg);
-        assert_eq!(reg.len(), 8);
+        assert_eq!(reg.len(), 9);
         assert!(reg.get("Bash").is_some());
+        assert!(reg.get("delegate").is_some());
         // every non-deferred tool produces a spec
-        assert_eq!(reg.specs().len(), 8);
+        assert_eq!(reg.specs().len(), 9);
     }
 }

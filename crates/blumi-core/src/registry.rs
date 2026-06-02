@@ -29,6 +29,24 @@ impl ToolRegistry {
         self.by_name.get(name).cloned()
     }
 
+    /// Build a restricted registry containing only tools whose names match
+    /// `allowed` (`"*"` allows all), minus any in `exclude` (e.g. `delegate`, to
+    /// prevent nested sub-agents). Used to scope a sub-agent's toolset.
+    pub fn subset(&self, allowed: &[String], exclude: &[&str]) -> ToolRegistry {
+        let allow_all = allowed.iter().any(|a| a == "*");
+        let mut r = ToolRegistry::new();
+        for tool in self.by_name.values() {
+            let name = tool.name();
+            if exclude.contains(&name) {
+                continue;
+            }
+            if allow_all || allowed.iter().any(|a| a == name) {
+                r.register(tool.clone());
+            }
+        }
+        r
+    }
+
     pub fn len(&self) -> usize {
         self.by_name.len()
     }

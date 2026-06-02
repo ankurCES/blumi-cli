@@ -13,7 +13,7 @@ use crate::pipeline::execute_tool_call;
 use crate::registry::ToolRegistry;
 use crate::runner::{TurnContext, TurnRunner};
 use crate::session::SessionState;
-use crate::tool::ToolContext;
+use crate::tool::{SubAgentSpawner, ToolContext};
 use crate::Executor;
 use async_trait::async_trait;
 use blumi_protocol::{
@@ -41,6 +41,7 @@ pub struct AgentTurnRunner {
     system_prompt: String,
     working_dir: PathBuf,
     context: ContextManager,
+    spawner: Option<Arc<dyn SubAgentSpawner>>,
 }
 
 impl AgentTurnRunner {
@@ -66,7 +67,14 @@ impl AgentTurnRunner {
             system_prompt,
             working_dir,
             context: ContextManager::new(context_size),
+            spawner: None,
         }
+    }
+
+    /// Enable sub-agent delegation (the `delegate` tool's backend).
+    pub fn with_spawner(mut self, spawner: Arc<dyn SubAgentSpawner>) -> Self {
+        self.spawner = Some(spawner);
+        self
     }
 
     fn tool_ctx(&self, ctx: &TurnContext) -> ToolContext {
@@ -76,6 +84,7 @@ impl AgentTurnRunner {
             executor: self.executor.clone(),
             events: ctx.events.clone(),
             interactor: ctx.interactor.clone(),
+            spawner: self.spawner.clone(),
         }
     }
 }
