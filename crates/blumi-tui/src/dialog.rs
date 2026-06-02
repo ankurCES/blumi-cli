@@ -5,11 +5,13 @@ use nucleo_matcher::pattern::{CaseMatching, Normalization, Pattern};
 use nucleo_matcher::{Config, Matcher, Utf32Str};
 
 /// An action a palette entry performs.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Action {
     Quit,
     ClearTranscript,
     CycleTheme,
+    NewSession,
+    ResumeSession(String),
 }
 
 pub struct PickerItem {
@@ -57,6 +59,36 @@ impl Picker {
         p
     }
 
+    /// A picker over recent sessions (+ a "new session" entry on top).
+    pub fn session_picker(sessions: &[(String, String)]) -> Self {
+        let mut items = vec![PickerItem {
+            label: "✿ New session".into(),
+            hint: "fresh".into(),
+            action: Action::NewSession,
+        }];
+        for (id, title) in sessions {
+            let label = if title.trim().is_empty() {
+                "(untitled)".to_string()
+            } else {
+                title.clone()
+            };
+            items.push(PickerItem {
+                label,
+                hint: id.clone(),
+                action: Action::ResumeSession(id.clone()),
+            });
+        }
+        let mut p = Picker {
+            title: "Sessions".into(),
+            items,
+            filter: String::new(),
+            filtered: Vec::new(),
+            selected: 0,
+        };
+        p.refilter();
+        p
+    }
+
     pub fn refilter(&mut self) {
         let labels = self.items.iter().map(|i| i.label.as_str());
         self.filtered = fuzzy_filter(labels, &self.filter);
@@ -90,7 +122,7 @@ impl Picker {
     pub fn selected_action(&self) -> Option<Action> {
         self.filtered
             .get(self.selected)
-            .map(|&i| self.items[i].action)
+            .map(|&i| self.items[i].action.clone())
     }
 
     /// (label, hint, is_selected) for each visible row.

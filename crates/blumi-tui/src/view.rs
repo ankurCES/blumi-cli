@@ -6,7 +6,7 @@ use blumi_protocol::TodoStatus;
 use ratatui::layout::{Alignment, Constraint, Layout, Rect};
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
-use ratatui::widgets::{Block, Borders, Clear, Paragraph};
+use ratatui::widgets::{Block, BorderType, Borders, Clear, Paragraph};
 use ratatui::Frame;
 
 /// Min terminal width to show the run dashboard sidebar.
@@ -310,6 +310,7 @@ fn render_slash_popup(model: &Model, f: &mut Frame, editor: Rect, theme: &Theme)
 
     let block = Block::default()
         .borders(Borders::ALL)
+        .border_type(BorderType::Rounded)
         .border_style(Style::default().fg(theme.primary))
         .title(Span::styled(" commands ", theme.subtle()));
     let inner = block.inner(popup);
@@ -347,6 +348,7 @@ fn render_memory(model: &Model, f: &mut Frame, area: Rect, theme: &Theme) {
     f.render_widget(Clear, popup);
     let block = Block::default()
         .borders(Borders::ALL)
+        .border_type(BorderType::Rounded)
         .border_style(Style::default().fg(theme.primary))
         .title(Span::styled(
             " memory — any key to close ",
@@ -377,7 +379,7 @@ fn render_usage(model: &Model, f: &mut Frame, area: Rect, theme: &Theme) {
     f.render_widget(Clear, popup);
     let block = Block::default()
         .borders(Borders::ALL)
-        .border_type(ratatui::widgets::BorderType::Rounded)
+        .border_type(BorderType::Rounded)
         .border_style(Style::default().fg(theme.primary))
         .title(Span::styled(
             " usage analytics — any key to close ",
@@ -417,6 +419,7 @@ fn render_dialog(model: &Model, f: &mut Frame, area: Rect, theme: &Theme) {
 
     let block = Block::default()
         .borders(Borders::ALL)
+        .border_type(BorderType::Rounded)
         .border_style(Style::default().fg(theme.primary))
         .title(Span::styled(format!(" {} ", d.title), theme.bold_primary()));
     let inner = block.inner(popup);
@@ -773,6 +776,7 @@ fn render_editor(model: &mut Model, f: &mut Frame, area: Rect, theme: &Theme) {
     model.input.set_block(
         Block::default()
             .borders(Borders::ALL)
+            .border_type(BorderType::Rounded)
             .border_style(Style::default().fg(border))
             .title(Span::styled(title, theme.subtle())),
     );
@@ -810,6 +814,7 @@ fn render_approval(model: &Model, f: &mut Frame, area: Rect, theme: &Theme) {
     };
     let block = Block::default()
         .borders(Borders::ALL)
+        .border_type(BorderType::Rounded)
         .border_style(Style::default().fg(if p.dangerous {
             theme.error
         } else {
@@ -993,6 +998,24 @@ mod tests {
         assert!(out.contains("permission"));
         assert!(out.contains("rm -rf build"));
         assert!(out.contains("allow once"));
+    }
+
+    #[test]
+    fn session_picker_renders() {
+        let mut model = Model::new("m".into(), "/tmp".into());
+        model.recent_sessions = vec![
+            ("sess_abc".into(), "refactor parser".into()),
+            ("sess_def".into(), "fix the web build".into()),
+        ];
+        model.dialog = Some(crate::dialog::Picker::session_picker(
+            &model.recent_sessions,
+        ));
+        let out = render_to_string(&mut model, 90, 24);
+        eprintln!("\n{out}");
+        assert!(out.contains("Sessions"), "picker title");
+        assert!(out.contains("New session"), "new-session entry");
+        assert!(out.contains("refactor parser"), "a session title");
+        assert!(out.contains('╭'), "rounded editor/border");
     }
 
     #[test]

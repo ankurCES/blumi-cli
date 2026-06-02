@@ -16,7 +16,7 @@ pub async fn run(config: BlumiConfig) -> anyhow::Result<()> {
     let url = format!("http://{addr}");
 
     // Approvals are handled by the UI's cards, so the server runs without yolo.
-    let session = build_session(&config, false).await?;
+    let session = build_session(&config, false, None).await?;
     let store = blumi_persist::Store::open(&config.paths.db)
         .await
         .ok()

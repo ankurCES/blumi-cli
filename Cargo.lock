@@ -265,6 +265,7 @@ name = "blumi"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "async-trait",
  "blumi-config",
  "blumi-core",
  "blumi-cron",
@@ -451,6 +452,7 @@ name = "blumi-tui"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "async-trait",
  "blumi-config",
  "blumi-core",
  "blumi-protocol",

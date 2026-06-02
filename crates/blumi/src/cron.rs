@@ -115,7 +115,7 @@ async fn run_due(config: &BlumiConfig) -> anyhow::Result<usize> {
 /// Execute one prompt in a fresh headless session, returning the assistant text.
 async fn run_job(config: &BlumiConfig, prompt: &str) -> anyhow::Result<String> {
     // Headless: auto-approve so unattended runs don't hang on a permission prompt.
-    let session = build_session(config, true).await?;
+    let session = build_session(config, true, None).await?;
     let mut events = session.subscribe();
     session
         .send(Command::UserMessage {
