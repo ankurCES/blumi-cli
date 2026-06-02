@@ -2,6 +2,7 @@
 
 mod branding;
 mod engine;
+mod onboarding;
 mod prompt;
 mod run;
 mod session;
@@ -39,8 +40,10 @@ enum Commands {
         #[arg(long)]
         yolo: bool,
     },
-    /// Interactive terminal UI (Phase 2).
+    /// Interactive terminal UI.
     Tui,
+    /// Run the setup wizard (pick provider, enter key/endpoint, choose model).
+    Login,
     /// Web UI + server (Phase 4).
     Web,
     /// List, search, and show stored sessions.
@@ -71,6 +74,7 @@ async fn main() -> anyhow::Result<()> {
         .init();
 
     let cli = Cli::parse();
+    let provider_flag = cli.provider.is_some();
 
     let working_dir = std::env::current_dir()?;
     let home_override = std::env::var("BLUMI_HOME").ok().map(PathBuf::from);
@@ -84,11 +88,34 @@ async fn main() -> anyhow::Result<()> {
 
     match cli.command {
         Some(Commands::Run { prompt, yolo }) => run::run(config, prompt.join(" "), yolo).await,
-        Some(Commands::Tui) => tui::run(config).await,
-        None => {
-            println!("{}", branding::logo_banner());
-            println!("{}", branding::hint());
+        Some(Commands::Login) => {
+            match onboarding::ensure_configured(config, true).await? {
+                Some(_) => {
+                    println!("{}", branding::logo_banner());
+                    eprintln!("  saved to ~/.blumi/settings.json — run `blumi` to start.");
+                }
+                None => eprintln!("onboarding cancelled."),
+            }
             Ok(())
+        }
+        Some(Commands::Tui) | None => {
+            use std::io::IsTerminal;
+            if !std::io::stdout().is_terminal() {
+                // Non-interactive (piped): show the banner instead of a TUI.
+                println!("{}", branding::logo_banner());
+                println!("{}", branding::hint());
+                return Ok(());
+            }
+            // First-run onboarding, unless a provider was passed explicitly.
+            let config = if config.is_first_run() && !provider_flag {
+                match onboarding::ensure_configured(config, false).await? {
+                    Some(c) => c,
+                    None => return Ok(()), // cancelled
+                }
+            } else {
+                config
+            };
+            tui::run(config).await
         }
         Some(Commands::Web) => {
             println!("{}", branding::logo_banner());

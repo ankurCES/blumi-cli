@@ -14,6 +14,8 @@ mod model;
 mod theme;
 mod update;
 mod view;
+mod wizard;
 
 pub use app::run;
 pub use logo::{LOGO, MARK, PETAL, WORDMARK};
+pub use wizard::{run_onboarding, ProviderChoice, WizardOutcome};

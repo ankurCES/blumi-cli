@@ -9,6 +9,7 @@ license.workspace = true
 [dependencies]
 blumi-core.workspace = true
 blumi-protocol.workspace = true
+blumi-config.workspace = true
 
 ratatui = "0.29"
 crossterm = { version = "0.28", features = ["event-stream"] }

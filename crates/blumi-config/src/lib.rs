@@ -135,6 +135,59 @@ impl BlumiConfig {
     pub fn active_provider(&self) -> Option<&ProviderConfig> {
         self.providers.get(&self.llm.provider)
     }
+
+    /// True when no settings file exists yet — treat as first run (→ onboarding).
+    pub fn is_first_run(&self) -> bool {
+        !self.paths.settings_json().exists()
+    }
+}
+
+/// Persist an onboarding choice into `settings.json`, merging with any existing
+/// content: sets the active provider + model, and (when given) the provider's
+/// `base_url` and `api_key`. Written `0600` on unix.
+pub fn write_provider_setup(
+    paths: &Paths,
+    provider: &str,
+    kind: ProviderKind,
+    model: &str,
+    base_url: Option<&str>,
+    api_key: Option<&str>,
+) -> std::io::Result<()> {
+    use std::io::Write;
+
+    let path = paths.settings_json();
+    let mut root: serde_json::Value = if path.exists() {
+        std::fs::read_to_string(&path)
+            .ok()
+            .and_then(|s| serde_json::from_str(&s).ok())
+            .unwrap_or_else(|| serde_json::json!({}))
+    } else {
+        serde_json::json!({})
+    };
+
+    root["llm"]["provider"] = serde_json::json!(provider);
+    root["llm"]["model"] = serde_json::json!(model);
+    // Write kind explicitly so the entry is self-contained (independent of
+    // whether the loader deep-merges with the built-in preset).
+    root["providers"][provider]["kind"] =
+        serde_json::to_value(kind).unwrap_or(serde_json::Value::Null);
+    if let Some(b) = base_url {
+        root["providers"][provider]["base_url"] = serde_json::json!(b);
+    }
+    if let Some(k) = api_key {
+        root["providers"][provider]["api_key"] = serde_json::json!(k);
+    }
+
+    std::fs::create_dir_all(&paths.home)?;
+    let body = serde_json::to_string_pretty(&root).unwrap_or_else(|_| "{}".to_string());
+    let mut file = std::fs::File::create(&path)?;
+    file.write_all(body.as_bytes())?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let _ = std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600));
+    }
+    Ok(())
 }
 
 #[cfg(test)]
@@ -174,6 +227,39 @@ mod tests {
             let cfg2 = BlumiConfig::load(jail.directory(), Some(jail.directory().join("home")))
                 .expect("load");
             assert_eq!(cfg2.llm.model, "claude-y");
+            Ok(())
+        });
+    }
+
+    #[test]
+    #[allow(clippy::result_large_err)]
+    fn onboarding_write_and_reload() {
+        Jail::expect_with(|jail| {
+            let home = jail.directory().join("home");
+            let paths = Paths::resolve(Some(home.clone()), jail.directory());
+            assert!(!paths.settings_json().exists());
+
+            write_provider_setup(
+                &paths,
+                "azure-foundry",
+                ProviderKind::AnthropicFoundry,
+                "claude-sonnet",
+                Some("https://r.services.ai.azure.com"),
+                Some("azkey"),
+            )
+            .unwrap();
+
+            let cfg = BlumiConfig::load(jail.directory(), Some(home)).unwrap();
+            assert!(!cfg.is_first_run());
+            assert_eq!(cfg.llm.provider, "azure-foundry");
+            assert_eq!(cfg.llm.model, "claude-sonnet");
+            let p = cfg.active_provider().unwrap();
+            assert_eq!(p.kind, ProviderKind::AnthropicFoundry);
+            assert_eq!(
+                p.base_url.as_deref(),
+                Some("https://r.services.ai.azure.com")
+            );
+            assert_eq!(p.resolve_api_key().as_deref(), Some("azkey"));
             Ok(())
         });
     }

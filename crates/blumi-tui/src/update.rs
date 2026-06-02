@@ -390,7 +390,7 @@ async fn handle_slash(model: &mut Model, session: &SessionHandle, input: &str) {
     let arg = parts.next().unwrap_or("").trim();
     match cmd {
         "/help" => model.entries.push(Entry::Notice(
-            "commands: /help · /clear · /theme [name] · /model <id> · /quit   \
+            "commands: /help · /clear · /theme [name] · /model <id> · /login · /quit   \
              (ctrl+p palette · tab focus · esc cancel)"
                 .into(),
         )),
@@ -426,6 +426,9 @@ async fn handle_slash(model: &mut Model, session: &SessionHandle, input: &str) {
                 model.entries.push(Entry::Notice(format!("model → {arg}")));
             }
         }
+        "/login" => model.entries.push(Entry::Notice(
+            "run `blumi login` from a shell to add/switch providers".into(),
+        )),
         other => model.entries.push(Entry::Notice(format!(
             "unknown command '{other}' (try /help)"
         ))),

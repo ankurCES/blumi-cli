@@ -46,6 +46,11 @@ impl Paths {
         self.memory_dir.join("USER.md")
     }
 
+    /// The user settings file, `<home>/settings.json`.
+    pub fn settings_json(&self) -> PathBuf {
+        self.home.join("settings.json")
+    }
+
     /// Create the home, skills, memory, and sessions directories if missing.
     pub fn ensure_dirs(&self) -> std::io::Result<()> {
         for dir in [&self.home, &self.skills, &self.memory_dir, &self.sessions] {

@@ -359,6 +359,7 @@ name = "blumi-tui"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "blumi-config",
  "blumi-core",
  "blumi-protocol",
  "crossterm",
