@@ -37,10 +37,14 @@ export type SessionMeta = {
   id: string
   title: string
   model: string
-  updated_at: string
   message_count: number
-  input_tokens: number
-  output_tokens: number
+}
+
+/** A message from the server snapshot, used to restore a transcript. */
+export type ServerMessage = {
+  role: 'user' | 'assistant' | 'tool'
+  text: string
+  tool_name?: string | null
 }
 
 export type Persona = { name: string; description: string }
@@ -51,4 +55,5 @@ export type Config = {
   working_dir: string
   version: string
   persona: string
+  context_size: number
 }

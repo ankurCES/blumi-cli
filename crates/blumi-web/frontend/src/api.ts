@@ -1,4 +1,4 @@
-import type { Config, Persona, SessionMeta } from './types'
+import type { Config, Persona, ServerMessage, SessionMeta } from './types'
 
 async function getJSON<T>(path: string): Promise<T> {
   const r = await fetch(path)
@@ -18,10 +18,15 @@ async function postJSON(path: string, body?: unknown): Promise<unknown> {
 export const api = {
   config: () => getJSON<Config>('/api/config'),
   sessions: () => getJSON<{ sessions: SessionMeta[] }>('/api/sessions').then((d) => d.sessions),
+  messages: () => getJSON<{ messages: ServerMessage[] }>('/api/messages').then((d) => d.messages),
   personas: () =>
     getJSON<{ personas: Persona[]; active: string }>('/api/personas'),
+  newSession: () => postJSON('/api/session/new'),
+  resumeSession: (id: string) => postJSON('/api/session/resume', { id }),
   send: (text: string) => postJSON('/api/chat/send', { text }),
   cancel: () => postJSON('/api/chat/cancel'),
+  compact: () => postJSON('/api/compact'),
+  undo: () => postJSON('/api/undo'),
   setModel: (model: string) => postJSON('/api/model/set', { model }),
   setPersona: (name: string) => postJSON('/api/persona/set', { name }),
   setYolo: (on: boolean) => postJSON('/api/yolo', { on }),

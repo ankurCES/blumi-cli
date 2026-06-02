@@ -1,6 +1,6 @@
 import { useEffect, useReducer, useRef, useState } from 'react'
 import { api, SSE_EVENTS } from './api'
-import type { Approval, Clarify, Config, Entry, Persona, SessionMeta, Todo } from './types'
+import type { Approval, Clarify, Config, Entry, Persona, ServerMessage, SessionMeta, Todo } from './types'
 import { Header } from './components/Header'
 import { Sidebar } from './components/Sidebar'
 import { RunPanel } from './components/RunPanel'
@@ -19,6 +19,7 @@ type State = {
   clarify: Clarify | null
   todos: Todo[]
   usage: { input: number; output: number }
+  contextTokens: number
 }
 
 const initial: State = {
@@ -30,14 +31,15 @@ const initial: State = {
   clarify: null,
   todos: [],
   usage: { input: 0, output: 0 },
+  contextTokens: 0,
 }
 
 type Action =
   | { type: 'sse'; name: string; data: any }
   | { type: 'user'; text: string }
+  | { type: 'load'; messages: ServerMessage[] }
   | { type: 'clearApproval' }
   | { type: 'clearClarify' }
-  | { type: 'reset' }
 
 function firstLine(s: string): string {
   return (s ?? '').split('\n')[0] ?? ''
@@ -94,6 +96,8 @@ function applyEvent(s: State, name: string, d: any): State {
       return {
         ...s,
         usage: { input: s.usage.input + (d.input ?? 0), output: s.usage.output + (d.output ?? 0) },
+        // The latest request's input ≈ current context usage.
+        contextTokens: d.input ?? s.contextTokens,
       }
     case 'compaction':
       return {
@@ -117,16 +121,31 @@ function applyEvent(s: State, name: string, d: any): State {
   }
 }
 
+function messagesToEntries(messages: ServerMessage[]): Entry[] {
+  return messages.map((m): Entry => {
+    if (m.role === 'user') return { kind: 'user', text: m.text }
+    if (m.role === 'assistant') return { kind: 'assistant', text: m.text }
+    return {
+      kind: 'tool',
+      id: `r${Math.random().toString(36).slice(2)}`,
+      name: m.tool_name || 'tool',
+      summary: '',
+      ok: true,
+      preview: firstLine(m.text),
+    }
+  })
+}
+
 function reducer(s: State, a: Action): State {
   switch (a.type) {
     case 'user':
       return { ...s, entries: [...s.entries, { kind: 'user', text: a.text }], busy: true }
+    case 'load':
+      return { ...initial, entries: messagesToEntries(a.messages) }
     case 'clearApproval':
       return { ...s, approval: null }
     case 'clearClarify':
       return { ...s, clarify: null }
-    case 'reset':
-      return initial
     case 'sse':
       return applyEvent(s, a.name, a.data)
   }
@@ -140,8 +159,16 @@ export function App() {
   const [persona, setPersona] = useState('default')
   const [yolo, setYolo] = useState(false)
   const [connected, setConnected] = useState(false)
+  // Bumped on a session switch to re-subscribe SSE + reload the transcript.
+  const [epoch, setEpoch] = useState(0)
+  const [start, setStart] = useState(() => Date.now())
+  const [activeSecs, setActiveSecs] = useState(0)
+  const [nowTs, setNowTs] = useState(() => Date.now())
   const scrollRef = useRef<HTMLDivElement>(null)
 
+  const refreshSessions = () => api.sessions().then(setSessions).catch(() => {})
+
+  // Static config + lists (once).
   useEffect(() => {
     api
       .config()
@@ -150,7 +177,7 @@ export function App() {
         if (c.persona) setPersona(c.persona)
       })
       .catch(() => {})
-    api.sessions().then(setSessions).catch(() => {})
+    refreshSessions()
     api
       .personas()
       .then((p) => {
@@ -160,15 +187,18 @@ export function App() {
       .catch(() => {})
   }, [])
 
+  // Restore the current session's transcript on load + after a switch.
+  useEffect(() => {
+    api.messages().then((ms) => dispatch({ type: 'load', messages: ms })).catch(() => {})
+  }, [epoch])
+
+  // SSE — re-subscribed on each session switch.
   useEffect(() => {
     const es = new EventSource('/api/chat/stream')
     es.onopen = () => setConnected(true)
     es.onerror = () => setConnected(false)
     const handler = (e: MessageEvent) => {
-      // The browser fires a native, data-less `error` event on connection
-      // issues/reconnects — ignore those (handled by onerror), only process
-      // real server events, which always carry a JSON `data` payload.
-      if (!e.data) return
+      if (!e.data) return // native data-less error/keep-alive
       let data: any = {}
       try {
         data = JSON.parse(e.data)
@@ -179,7 +209,18 @@ export function App() {
     }
     for (const name of SSE_EVENTS) es.addEventListener(name, handler as EventListener)
     return () => es.close()
+  }, [epoch])
+
+  // Uptime clock + active-with-bot accumulation.
+  useEffect(() => {
+    const t = setInterval(() => setNowTs(Date.now()), 1000)
+    return () => clearInterval(t)
   }, [])
+  useEffect(() => {
+    if (!state.busy) return
+    const t = setInterval(() => setActiveSecs((n) => n + 1), 1000)
+    return () => clearInterval(t)
+  }, [state.busy])
 
   useEffect(() => {
     const el = scrollRef.current
@@ -208,10 +249,24 @@ export function App() {
     setYolo(on)
     api.setYolo(on)
   }
+  async function newSession() {
+    await api.newSession()
+    setStart(Date.now())
+    setActiveSecs(0)
+    setEpoch((e) => e + 1)
+    refreshSessions()
+  }
+  async function resumeSession(id: string) {
+    await api.resumeSession(id)
+    setStart(Date.now())
+    setActiveSecs(0)
+    setEpoch((e) => e + 1)
+    refreshSessions()
+  }
 
   const empty = state.entries.length === 0 && !state.streaming
-  // Show the thinking mascot while working with nothing streaming yet.
   const showThinking = state.busy && !state.streaming
+  const uptimeSecs = Math.max(0, Math.floor((nowTs - start) / 1000))
 
   return (
     <div className="app">
@@ -223,9 +278,12 @@ export function App() {
         onPersona={changePersona}
         yolo={yolo}
         onYolo={toggleYolo}
+        busy={state.busy}
+        onCompact={() => api.compact()}
+        onUndo={() => api.undo()}
       />
       <div className="main">
-        <Sidebar sessions={sessions} onNew={() => dispatch({ type: 'reset' })} />
+        <Sidebar sessions={sessions} onNew={newSession} onResume={resumeSession} />
         <section className="chat">
           <div className="transcript" ref={scrollRef}>
             {empty && <Landing />}
@@ -245,6 +303,10 @@ export function App() {
           model={config?.model ?? ''}
           persona={persona}
           busy={state.busy}
+          contextTokens={state.contextTokens}
+          contextSize={config?.context_size ?? 0}
+          uptimeSecs={uptimeSecs}
+          activeSecs={activeSecs}
         />
       </div>
     </div>

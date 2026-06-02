@@ -492,6 +492,48 @@ pre.code {
   gap: 2px;
 }
 
+/* ── Web-parity extras ──────────────────────────────────── */
+/* session-item is a button now — reset native chrome */
+.session-item {
+  display: block;
+  width: 100%;
+  text-align: left;
+  background: transparent;
+  border: none;
+  color: inherit;
+  font: inherit;
+}
+.muted.small {
+  font-size: 11px;
+  padding: 2px 0 4px;
+}
+.progress-fill.ok {
+  background: linear-gradient(90deg, var(--success), var(--cyan));
+}
+.progress-fill.warn {
+  background: linear-gradient(90deg, #ffb020, #ffd479);
+}
+.progress-fill.danger {
+  background: linear-gradient(90deg, var(--error), #ff8aa0);
+}
+.hbtn {
+  background: transparent;
+  border: 1px solid var(--border);
+  color: var(--fg-subtle);
+  border-radius: 7px;
+  padding: 3px 9px;
+  font-size: 12px;
+  cursor: pointer;
+}
+.hbtn:hover:not(:disabled) {
+  filter: brightness(1.3);
+  color: var(--fg);
+}
+.hbtn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
 /* ── Approval / clarify cards ───────────────────────────── */
 .approval,
 .clarify {

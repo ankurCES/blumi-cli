@@ -3,26 +3,32 @@ import type { SessionMeta } from '../types'
 type Props = {
   sessions: SessionMeta[]
   onNew: () => void
+  onResume: (id: string) => void
 }
 
-export function Sidebar({ sessions, onNew }: Props) {
+export function Sidebar({ sessions, onNew, onResume }: Props) {
   return (
     <aside className="sidebar">
       <div className="sidebar-head">
         <span>Sessions</span>
-        <button className="btn ghost" onClick={onNew} title="Clear the current view">
+        <button className="btn ghost" onClick={onNew} title="Start a fresh session">
           + new
         </button>
       </div>
       <div className="session-list">
         {sessions.length === 0 && <div className="muted">no past sessions</div>}
         {sessions.map((s) => (
-          <div className="session-item" key={s.id} title={s.id}>
+          <button
+            className="session-item"
+            key={s.id}
+            title={`resume ${s.id}`}
+            onClick={() => onResume(s.id)}
+          >
             <div className="session-title">{s.title || '(untitled)'}</div>
             <div className="session-meta">
-              {s.model} · {s.message_count} msgs
+              {s.model || 'default'} · {s.message_count} msgs
             </div>
-          </div>
+          </button>
         ))}
       </div>
     </aside>
