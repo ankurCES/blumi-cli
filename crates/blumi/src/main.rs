@@ -103,6 +103,12 @@ enum GatewayCmd {
         #[arg(long)]
         app_token: Option<String>,
     },
+    /// WhatsApp Cloud API bot (runs an inbound webhook server).
+    Whatsapp {
+        /// Webhook port (overrides gateway.whatsapp.webhook_port; default 8080).
+        #[arg(long)]
+        port: Option<u16>,
+    },
 }
 
 #[derive(Subcommand)]
@@ -249,6 +255,7 @@ async fn main() -> anyhow::Result<()> {
                 bot_token,
                 app_token,
             } => gateway::run_slack(config, bot_token, app_token).await,
+            GatewayCmd::Whatsapp { port } => gateway::run_whatsapp(config, port).await,
         },
     }
 }

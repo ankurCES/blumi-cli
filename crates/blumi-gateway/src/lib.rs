@@ -10,10 +10,12 @@
 mod discord;
 mod slack;
 mod telegram;
+mod whatsapp;
 
 pub use discord::{run_discord, DiscordOptions};
 pub use slack::{run_slack, SlackOptions};
 pub use telegram::{run_telegram, TelegramOptions};
+pub use whatsapp::{run_whatsapp, WhatsappOptions};
 
 use blumi_core::SessionHandle;
 use blumi_protocol::{ApprovalScope, Command, Decision, Event};

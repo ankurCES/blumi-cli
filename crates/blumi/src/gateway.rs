@@ -5,7 +5,9 @@ use crate::engine::build_session;
 use async_trait::async_trait;
 use blumi_config::BlumiConfig;
 use blumi_core::SessionHandle;
-use blumi_gateway::{DiscordOptions, GatewayCore, SessionSpawner, SlackOptions, TelegramOptions};
+use blumi_gateway::{
+    DiscordOptions, GatewayCore, SessionSpawner, SlackOptions, TelegramOptions, WhatsappOptions,
+};
 use std::sync::Arc;
 
 /// Spawns headless sessions for the gateway over `build_session`.
@@ -120,6 +122,39 @@ pub async fn run_slack(
         SlackOptions {
             bot_token,
             app_token,
+        },
+    )
+    .await
+}
+
+pub async fn run_whatsapp(config: BlumiConfig, port: Option<u16>) -> anyhow::Result<()> {
+    config.paths.ensure_dirs().ok();
+    let wa = config.gateway.whatsapp.clone();
+    let token = resolve_token(None, &wa.token, "whatsapp token")?;
+    if wa.phone_number_id.trim().is_empty() {
+        anyhow::bail!("no whatsapp phone_number_id (set gateway.whatsapp.phone_number_id)");
+    }
+    if wa.verify_token.trim().is_empty() {
+        anyhow::bail!("no whatsapp verify_token (set gateway.whatsapp.verify_token)");
+    }
+    // Flag > config > 8080 default.
+    let port = port
+        .or(Some(wa.webhook_port).filter(|p| *p != 0))
+        .unwrap_or(8080);
+    let yolo = config.gateway.yolo;
+
+    crate::branding::banner();
+    eprintln!("  blumi whatsapp gateway — webhook on :{port}/webhook  (Ctrl+C to stop)");
+
+    let spawner = Arc::new(GatewaySpawner { config, yolo });
+    let core = Arc::new(GatewayCore::new(spawner, yolo));
+    blumi_gateway::run_whatsapp(
+        core,
+        WhatsappOptions {
+            token,
+            phone_number_id: wa.phone_number_id,
+            verify_token: wa.verify_token,
+            port,
         },
     )
     .await
