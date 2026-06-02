@@ -1,0 +1,72 @@
+[workspace]
+resolver = "2"
+members = ["crates/*"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.85"
+license = "MIT"
+repository = "https://github.com/ankur/lumi-cli"
+authors = ["Ankur <ankur.nairit@gmail.com>"]
+
+[workspace.dependencies]
+# Internal crates
+lumi-protocol = { path = "crates/lumi-protocol" }
+lumi-core = { path = "crates/lumi-core" }
+lumi-llm = { path = "crates/lumi-llm" }
+lumi-tools = { path = "crates/lumi-tools" }
+lumi-exec = { path = "crates/lumi-exec" }
+lumi-mcp = { path = "crates/lumi-mcp" }
+lumi-lsp = { path = "crates/lumi-lsp" }
+lumi-persist = { path = "crates/lumi-persist" }
+lumi-skills = { path = "crates/lumi-skills" }
+lumi-cron = { path = "crates/lumi-cron" }
+lumi-gateway = { path = "crates/lumi-gateway" }
+lumi-config = { path = "crates/lumi-config" }
+lumi-tui = { path = "crates/lumi-tui" }
+lumi-web = { path = "crates/lumi-web" }
+
+# Async runtime
+tokio = { version = "1", features = ["full"] }
+tokio-util = { version = "0.7", features = ["rt"] }
+tokio-stream = { version = "0.1", features = ["sync"] }
+futures = "0.3"
+async-trait = "0.1"
+
+# Serde / data
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+schemars = "0.8"
+jsonschema = "0.26"
+uuid = { version = "1", features = ["v4", "serde"] }
+time = { version = "0.3", features = ["serde", "formatting", "macros"] }
+
+# HTTP / SSE client
+reqwest = { version = "0.12", default-features = false, features = ["json", "stream", "rustls-tls"] }
+eventsource-stream = "0.2"
+
+# Persistence
+sqlx = { version = "0.8", default-features = false, features = ["runtime-tokio", "sqlite", "macros", "migrate"] }
+
+# Config / CLI
+figment = { version = "0.10", features = ["json", "env"] }
+clap = { version = "4", features = ["derive", "env"] }
+
+# Errors / logging
+anyhow = "1"
+thiserror = "2"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+# Utility
+dirs = "5"
+regex = "1"
+glob = "0.3"
+similar = "2"
+
+[profile.release]
+opt-level = 3
+lto = "thin"
+codegen-units = 1
+strip = true

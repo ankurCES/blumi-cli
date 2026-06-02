@@ -1,0 +1,14 @@
+[package]
+name = "lumi"
+description = "lumi — local-first, provider-agnostic agentic coding assistant."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+default-run = "lumi"
+
+[[bin]]
+name = "lumi"
+path = "src/main.rs"
+
+[dependencies]

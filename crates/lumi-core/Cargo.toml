@@ -1,0 +1,9 @@
+[package]
+name = "lumi-core"
+description = "the brain: traits, session actor (agent loop), context mgmt, permissions"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]

@@ -1,0 +1,19 @@
+/target
+**/*.rs.bk
+*.pdb
+
+# lumi runtime data (never commit)
+/.lumi/
+lumi.db
+lumi.db-*
+
+# Frontend (lumi-web)
+crates/lumi-web/frontend/node_modules/
+crates/lumi-web/frontend/dist/
+crates/lumi-web/frontend/.vite/
+
+# Editor / OS
+.DS_Store
+.idea/
+.vscode/
+*.swp

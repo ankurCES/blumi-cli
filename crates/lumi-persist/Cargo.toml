@@ -1,0 +1,9 @@
+[package]
+name = "lumi-persist"
+description = "SQLite (sqlx) persistence: sessions, messages, checkpoints, FTS5 search."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]
