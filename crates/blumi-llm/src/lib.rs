@@ -5,12 +5,14 @@
 //! provider config; [`MockLlmClient`] scripts responses for tests/offline use.
 
 mod anthropic;
+mod gemini;
 mod mock;
 mod openai;
 mod registry;
 mod retry;
 
 pub use anthropic::AnthropicClient;
+pub use gemini::GeminiClient;
 pub use mock::MockLlmClient;
 pub use openai::OpenAiCompatClient;
 pub use registry::build_client;

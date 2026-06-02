@@ -1,6 +1,6 @@
 //! Build a concrete [`LlmClient`] from a [`ProviderConfig`].
 
-use crate::{AnthropicClient, OpenAiCompatClient};
+use crate::{AnthropicClient, GeminiClient, OpenAiCompatClient};
 use blumi_config::{ProviderConfig, ProviderKind};
 use blumi_core::{LlmClient, LlmError};
 use std::sync::Arc;
@@ -18,9 +18,7 @@ pub fn build_client(provider: &ProviderConfig) -> Result<Arc<dyn LlmClient>, Llm
         ProviderKind::OpenaiCompat => Ok(Arc::new(OpenAiCompatClient::new(base_url, api_key))),
         ProviderKind::Anthropic => Ok(Arc::new(AnthropicClient::new(base_url, api_key))),
         ProviderKind::AnthropicFoundry => Ok(Arc::new(AnthropicClient::foundry(base_url, api_key))),
-        ProviderKind::Gemini => Err(LlmError::Other(anyhow::anyhow!(
-            "the Gemini client lands in Phase 3"
-        ))),
+        ProviderKind::Gemini => Ok(Arc::new(GeminiClient::new(base_url, api_key))),
     }
 }
 
@@ -51,13 +49,13 @@ mod tests {
     }
 
     #[test]
-    fn gemini_not_yet_supported() {
+    fn builds_gemini() {
         let cfg = ProviderConfig {
             kind: ProviderKind::Gemini,
-            base_url: Some("https://x".into()),
-            api_key: None,
+            base_url: Some("https://generativelanguage.googleapis.com".into()),
+            api_key: Some("k".into()),
             api_key_env: None,
         };
-        assert!(build_client(&cfg).is_err());
+        assert!(build_client(&cfg).is_ok());
     }
 }

@@ -38,10 +38,11 @@ pub async fn ensure_configured(
 
 fn provider_choices(config: &BlumiConfig) -> Vec<ProviderChoice> {
     // Curated display order; only providers present in config (gemini/mock omitted).
-    const ORDER: [&str; 9] = [
+    const ORDER: [&str; 10] = [
         "anthropic",
         "azure-foundry",
         "openai",
+        "gemini",
         "openrouter",
         "deepseek",
         "minimax",
@@ -77,6 +78,7 @@ fn label_for(name: &str) -> &str {
         "anthropic" => "Anthropic (Claude)",
         "azure-foundry" => "Azure AI Foundry (Claude)",
         "openai" => "OpenAI",
+        "gemini" => "Google Gemini",
         "openrouter" => "OpenRouter",
         "deepseek" => "DeepSeek",
         "minimax" => "MiniMax",
@@ -92,6 +94,7 @@ fn hint_for(name: &str) -> &str {
         "anthropic" => "claude-sonnet-4-5",
         "azure-foundry" => "your Claude deployment name",
         "openai" => "gpt-4o, o4-mini",
+        "gemini" => "gemini-2.0-flash",
         "openrouter" => "anthropic/claude-3.7-sonnet",
         "deepseek" => "deepseek-chat",
         "minimax" => "MiniMax-Text-01",
