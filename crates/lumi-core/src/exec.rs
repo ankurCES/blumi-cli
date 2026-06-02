@@ -46,6 +46,14 @@ impl ExecRequest {
     }
 }
 
+/// One entry from a directory listing.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DirEntry {
+    pub name: String,
+    pub is_dir: bool,
+    pub size: u64,
+}
+
 /// The result of running a command.
 #[derive(Debug, Clone)]
 pub struct ExecOutput {
@@ -82,6 +90,9 @@ pub trait Executor: Send + Sync {
 
     /// Whether a path exists in the backend.
     async fn exists(&self, path: &Path) -> Result<bool, ExecError>;
+
+    /// List the entries of a directory.
+    async fn list_dir(&self, path: &Path) -> Result<Vec<DirEntry>, ExecError>;
 
     /// Tear down the environment. Default is a no-op.
     async fn cleanup(&self) -> Result<(), ExecError> {

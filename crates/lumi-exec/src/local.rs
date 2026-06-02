@@ -1,7 +1,7 @@
 //! The local-host execution backend.
 
 use async_trait::async_trait;
-use lumi_core::{ExecError, ExecOutput, ExecRequest, Executor};
+use lumi_core::{DirEntry, ExecError, ExecOutput, ExecRequest, Executor};
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
 use tokio::io::AsyncReadExt;
@@ -128,6 +128,22 @@ impl Executor for LocalExecutor {
 
     async fn exists(&self, path: &Path) -> Result<bool, ExecError> {
         tokio::fs::try_exists(path).await.map_err(ExecError::from)
+    }
+
+    async fn list_dir(&self, path: &Path) -> Result<Vec<DirEntry>, ExecError> {
+        let mut entries = Vec::new();
+        let mut rd = tokio::fs::read_dir(path).await.map_err(ExecError::from)?;
+        while let Some(entry) = rd.next_entry().await.map_err(ExecError::from)? {
+            let meta = entry.metadata().await.map_err(ExecError::from)?;
+            entries.push(DirEntry {
+                name: entry.file_name().to_string_lossy().into_owned(),
+                is_dir: meta.is_dir(),
+                size: meta.len(),
+            });
+        }
+        // Directories first, then alphabetical.
+        entries.sort_by(|a, b| (!a.is_dir, &a.name).cmp(&(!b.is_dir, &b.name)));
+        Ok(entries)
     }
 
     fn working_dir(&self) -> &Path {
