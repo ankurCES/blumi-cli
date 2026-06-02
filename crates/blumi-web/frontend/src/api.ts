@@ -23,6 +23,7 @@ export const api = {
     getJSON<{ personas: Persona[]; active: string }>('/api/personas'),
   newSession: () => postJSON('/api/session/new'),
   resumeSession: (id: string) => postJSON('/api/session/resume', { id }),
+  reload: () => postJSON('/api/session/reload'),
   send: (text: string) => postJSON('/api/chat/send', { text }),
   cancel: () => postJSON('/api/chat/cancel'),
   compact: () => postJSON('/api/compact'),
@@ -54,5 +55,6 @@ export const SSE_EVENTS = [
   'compaction',
   'done',
   'notice',
+  'reload',
   'error',
 ] as const

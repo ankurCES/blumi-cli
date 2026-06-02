@@ -45,6 +45,9 @@ pub struct SessionInfo {
 pub trait SessionProvider: Send + Sync {
     async fn create(&self) -> anyhow::Result<SessionHandle>;
     async fn resume(&self, id: &str) -> anyhow::Result<SessionHandle>;
+    /// Rebuild the agent in place (self-evolution): re-read config + re-scan
+    /// skills, seeded with the live snapshot so the conversation is preserved.
+    async fn reload(&self, snapshot: blumi_core::SessionSnapshot) -> anyhow::Result<SessionHandle>;
     async fn list(&self) -> Vec<SessionInfo>;
     async fn save(&self, handle: &SessionHandle);
 }
@@ -70,6 +73,16 @@ impl AppState {
         *self.session.write().await = next;
     }
 
+    /// Rebuild the current session in place (self-evolution): snapshot it, ask
+    /// the provider to reload (fresh config + skills) seeded from that snapshot,
+    /// then swap. The conversation is preserved.
+    pub(crate) async fn reload_current(&self) -> anyhow::Result<()> {
+        let snapshot = self.current().await.snapshot().await;
+        let next = self.provider.reload(snapshot).await?;
+        self.swap(next).await;
+        Ok(())
+    }
+
     pub(crate) fn provider(&self) -> &Arc<dyn SessionProvider> {
         &self.provider
     }
@@ -87,6 +100,7 @@ pub fn router(state: AppState) -> Router {
         .route("/api/sessions", get(api::sessions))
         .route("/api/session/new", post(api::session_new))
         .route("/api/session/resume", post(api::session_resume))
+        .route("/api/session/reload", post(api::session_reload))
         .route("/api/messages", get(api::messages))
         .route("/api/chat/send", post(api::chat_send))
         .route("/api/chat/cancel", post(api::chat_cancel))

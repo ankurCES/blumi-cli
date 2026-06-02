@@ -44,6 +44,27 @@ impl blumi_web::SessionProvider for WebSessionProvider {
         build_session(&self.config, false, Some(state)).await
     }
 
+    async fn reload(&self, snapshot: blumi_core::SessionSnapshot) -> anyhow::Result<SessionHandle> {
+        // Re-read config from disk so the agent's own `self_config` edits take
+        // effect; fall back to the startup config if it can't be loaded.
+        let config = BlumiConfig::load(
+            &self.config.paths.working_dir,
+            Some(self.config.paths.home.clone()),
+        )
+        .unwrap_or_else(|_| self.config.clone());
+
+        // Seed from the live snapshot so the conversation is preserved; skills
+        // are re-scanned inside build_session.
+        let mut state = SessionState::new(snapshot.id, snapshot.model);
+        state.messages = snapshot.messages;
+        state.todos = snapshot.todos;
+        state.total_input_tokens = snapshot.total_input_tokens;
+        state.total_output_tokens = snapshot.total_output_tokens;
+        state.turn_count = snapshot.turn_count;
+
+        build_session(&config, false, Some(state)).await
+    }
+
     async fn list(&self) -> Vec<blumi_web::SessionInfo> {
         match &self.store {
             Some(store) => store
