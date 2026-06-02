@@ -59,6 +59,10 @@ pub struct Model {
     pub skills: Vec<(String, String)>,
     /// Recent sessions (id, title) from history — dashboard + `/sessions`.
     pub recent_sessions: Vec<(String, String)>,
+    /// Available personas (name, description) for `/persona`.
+    pub personas: Vec<(String, String)>,
+    /// The active persona name.
+    pub persona: String,
     /// Directory where `/export` writes transcripts.
     pub export_dir: PathBuf,
 
@@ -113,6 +117,8 @@ impl Model {
             user_md: PathBuf::new(),
             skills: Vec::new(),
             recent_sessions: Vec::new(),
+            personas: Vec::new(),
+            persona: "default".into(),
             export_dir: PathBuf::new(),
             entries: Vec::new(),
             streaming: None,

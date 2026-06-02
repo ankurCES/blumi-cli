@@ -22,11 +22,18 @@ pub async fn run(config: BlumiConfig) -> anyhow::Result<()> {
         .ok()
         .map(Arc::new);
 
+    let personas = crate::engine::resolve_personas(&config)
+        .into_iter()
+        .map(|p| (p.name, p.description))
+        .collect();
+
     let web = blumi_web::WebConfig {
         model: config.llm.model.clone(),
         models: vec![config.llm.model.clone()],
         working_dir: config.paths.working_dir.display().to_string(),
         version: env!("CARGO_PKG_VERSION").to_string(),
+        personas,
+        persona: crate::engine::active_persona_name(&config),
     };
 
     // Discovery lock file (analog of OpenMono's ACP lock writer) so other tools

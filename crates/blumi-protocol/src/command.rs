@@ -57,6 +57,8 @@ pub enum Command {
     Compact,
     /// Revert the most recent file change (manual `/undo`).
     Undo,
+    /// Switch the active agent persona by name (manual `/persona`).
+    SetPersona { name: String },
 }
 
 #[cfg(test)]

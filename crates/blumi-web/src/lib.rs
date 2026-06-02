@@ -22,6 +22,10 @@ pub struct WebConfig {
     pub models: Vec<String>,
     pub working_dir: String,
     pub version: String,
+    /// Available personas as (name, description).
+    pub personas: Vec<(String, String)>,
+    /// The active persona name at startup.
+    pub persona: String,
 }
 
 /// Shared server state — cheaply cloneable (a handle + Arcs).
@@ -39,9 +43,12 @@ pub fn router(state: AppState) -> Router {
         .route("/api/config", get(api::config))
         .route("/api/models", get(api::models))
         .route("/api/model/set", post(api::set_model))
+        .route("/api/personas", get(api::personas))
+        .route("/api/persona/set", post(api::set_persona))
         .route("/api/sessions", get(api::sessions))
         .route("/api/chat/send", post(api::chat_send))
         .route("/api/chat/cancel", post(api::chat_cancel))
+        .route("/api/yolo", post(api::set_yolo))
         .route("/api/chat/stream", get(api::chat_stream))
         .route("/api/approval/respond", post(api::approval_respond))
         .route("/api/clarify/respond", post(api::clarify_respond))

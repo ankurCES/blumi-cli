@@ -94,8 +94,23 @@ pub async fn build_session(config: &BlumiConfig, yolo: bool) -> anyhow::Result<S
     let perms = Arc::new(PermissionEngine::new(perm_cfg));
     let executor = Arc::new(LocalExecutor::new(&config.paths.working_dir));
 
+    // Personas: built-ins merged with config; the active one seeds the model and
+    // is layered onto the system prompt by the runner.
+    let personas = resolve_personas(config);
+    let active = active_persona_name(config);
+    let active_persona = personas
+        .iter()
+        .find(|p| p.name == active)
+        .cloned()
+        .unwrap_or_default();
+    let model = active_persona
+        .model
+        .clone()
+        .filter(|m| !m.is_empty())
+        .unwrap_or_else(|| config.llm.model.clone());
+
     let options = LlmOptions {
-        model: config.llm.model.clone(),
+        model: model.clone(),
         max_output_tokens: config.llm.max_output_tokens,
         temperature: config.llm.temperature,
         top_p: config.llm.top_p,
@@ -154,12 +169,38 @@ pub async fn build_session(config: &BlumiConfig, yolo: bool) -> anyhow::Result<S
             system_prompt,
             config.paths.working_dir.clone(),
         )
-        .with_spawner(spawner),
+        .with_spawner(spawner)
+        .with_personas(personas, &active),
     );
 
-    Ok(spawn_session(
-        SessionId::new(),
-        config.llm.model.clone(),
-        runner,
-    ))
+    Ok(spawn_session(SessionId::new(), model, runner))
+}
+
+/// Built-in personas merged with any configured in settings (config entries
+/// override or add by name).
+pub fn resolve_personas(config: &BlumiConfig) -> Vec<blumi_core::Persona> {
+    let mut personas = blumi_core::builtin_personas();
+    for (name, pc) in &config.personas {
+        let p = blumi_core::Persona {
+            name: name.clone(),
+            description: pc.description.clone(),
+            instructions: pc.instructions.clone(),
+            model: pc.model.clone(),
+            temperature: pc.temperature,
+        };
+        match personas.iter_mut().find(|x| x.name == *name) {
+            Some(slot) => *slot = p,
+            None => personas.push(p),
+        }
+    }
+    personas
+}
+
+/// The active persona name (falling back to `default`).
+pub fn active_persona_name(config: &BlumiConfig) -> String {
+    if config.persona.is_empty() {
+        "default".into()
+    } else {
+        config.persona.clone()
+    }
 }

@@ -64,4 +64,11 @@ pub trait TurnRunner: Send + Sync {
     async fn undo(&self) -> Option<String> {
         None
     }
+
+    /// Switch the active persona by name (the `/persona` command). Returns the
+    /// resolved [`Persona`] so the caller can apply its model, or `None` if the
+    /// name is unknown. Default: `None`.
+    fn set_persona(&self, _name: &str) -> Option<crate::Persona> {
+        None
+    }
 }

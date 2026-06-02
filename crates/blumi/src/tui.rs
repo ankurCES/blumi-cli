@@ -32,6 +32,12 @@ pub async fn run(config: BlumiConfig) -> anyhow::Result<()> {
         Err(_) => Vec::new(),
     };
 
+    // Personas (built-ins + configured) for the `/persona` command.
+    let personas = crate::engine::resolve_personas(&config)
+        .into_iter()
+        .map(|p| (p.name, p.description))
+        .collect();
+
     let cfg = blumi_tui::TuiConfig {
         model_name: config.llm.model.clone(),
         working_dir: config.paths.working_dir.display().to_string(),
@@ -39,6 +45,8 @@ pub async fn run(config: BlumiConfig) -> anyhow::Result<()> {
         user_md: config.paths.user_md(),
         skills,
         recent_sessions,
+        personas,
+        persona: crate::engine::active_persona_name(&config),
         export_dir: config.paths.sessions.clone(),
     };
 

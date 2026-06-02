@@ -43,9 +43,12 @@ export type SessionMeta = {
   output_tokens: number
 }
 
+export type Persona = { name: string; description: string }
+
 export type Config = {
   model: string
   models: string[]
   working_dir: string
   version: string
+  persona: string
 }

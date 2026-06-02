@@ -80,6 +80,22 @@ fn default_true() -> bool {
     true
 }
 
+/// A configurable agent persona (keyed by name in [`BlumiConfig::personas`]).
+/// Merged over the built-in roster, so this can override a built-in or add new.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct PersonaConfig {
+    pub description: String,
+    /// Instructions appended to the base system prompt.
+    pub instructions: String,
+    /// Optional model id to switch to when this persona activates.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub model: Option<String>,
+    /// Optional sampling temperature override.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub temperature: Option<f32>,
+}
+
 /// An external MCP (Model Context Protocol) server launched over stdio.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct McpServerConfig {
@@ -106,6 +122,11 @@ pub struct BlumiConfig {
     /// Enable sending images to vision-capable models.
     pub vision_enabled: bool,
     pub verbose: bool,
+    /// Active agent persona name (must exist in built-ins or [`Self::personas`]).
+    pub persona: String,
+    /// Configured personas, merged over the built-in roster, keyed by name.
+    #[serde(default)]
+    pub personas: BTreeMap<String, PersonaConfig>,
     /// Resolved at load time; never serialized to/from files.
     #[serde(skip)]
     pub paths: Paths,
@@ -120,6 +141,8 @@ impl Default for BlumiConfig {
             mcp_servers: BTreeMap::new(),
             vision_enabled: false,
             verbose: false,
+            persona: "default".into(),
+            personas: BTreeMap::new(),
             paths: Paths::default(),
         }
     }
