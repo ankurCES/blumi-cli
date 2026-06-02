@@ -1,14 +1,77 @@
-//! `blumi tui` — interactive terminal UI over a live session.
+//! `blumi tui` — interactive terminal UI with live session switch/resume.
 
 use crate::engine::build_session;
+use async_trait::async_trait;
 use blumi_config::BlumiConfig;
+use blumi_core::{SessionHandle, SessionState};
+use blumi_persist::Store;
+use blumi_protocol::SessionId;
+use std::sync::Arc;
+
+/// Creates / resumes / lists / saves sessions for the TUI, over the engine +
+/// the persistence store.
+struct TuiSessionFactory {
+    config: BlumiConfig,
+    store: Option<Arc<Store>>,
+}
+
+#[async_trait]
+impl blumi_tui::SessionFactory for TuiSessionFactory {
+    async fn create(&self) -> anyhow::Result<SessionHandle> {
+        // Interactive: approvals handled by the TUI dialog, so no yolo.
+        build_session(&self.config, false, None).await
+    }
+
+    async fn resume(&self, id: &str) -> anyhow::Result<SessionHandle> {
+        let store = self
+            .store
+            .as_ref()
+            .ok_or_else(|| anyhow::anyhow!("session history is unavailable"))?;
+        let stored = store
+            .load_session(id)
+            .await?
+            .ok_or_else(|| anyhow::anyhow!("session {id} not found"))?;
+
+        let model = if stored.meta.model.is_empty() {
+            self.config.llm.model.clone()
+        } else {
+            stored.meta.model.clone()
+        };
+        let mut state = SessionState::new(SessionId::from(stored.meta.id.clone()), model);
+        state.messages = stored.messages;
+        state.total_input_tokens = stored.meta.input_tokens.max(0) as u32;
+        state.total_output_tokens = stored.meta.output_tokens.max(0) as u32;
+
+        build_session(&self.config, false, Some(state)).await
+    }
+
+    async fn list(&self) -> Vec<(String, String)> {
+        match &self.store {
+            Some(store) => store
+                .list_sessions(12)
+                .await
+                .unwrap_or_default()
+                .into_iter()
+                .map(|m| (m.id, m.title))
+                .collect(),
+            None => Vec::new(),
+        }
+    }
+
+    async fn save(&self, handle: &SessionHandle) {
+        if let Some(store) = &self.store {
+            let snapshot = handle.snapshot().await;
+            if let Err(e) = store.save_snapshot(&snapshot).await {
+                tracing::warn!("could not save session: {e}");
+            }
+        }
+    }
+}
 
 pub async fn run(config: BlumiConfig) -> anyhow::Result<()> {
     config.paths.ensure_dirs().ok();
 
-    // Interactive: approvals are handled by the TUI dialog, so no yolo.
-    let session = build_session(&config, false).await?;
-    let persist = session.clone();
+    let store = Store::open(&config.paths.db).await.ok().map(Arc::new);
 
     // Skills listing for the `/skills` command + dashboard.
     let skills = blumi_skills::SkillCatalog::load(&[
@@ -21,15 +84,15 @@ pub async fn run(config: BlumiConfig) -> anyhow::Result<()> {
     .collect();
 
     // Recent sessions for the dashboard + `/sessions` (best-effort).
-    let recent_sessions = match blumi_persist::Store::open(&config.paths.db).await {
-        Ok(store) => store
-            .list_sessions(8)
+    let recent_sessions = match &store {
+        Some(s) => s
+            .list_sessions(12)
             .await
             .unwrap_or_default()
             .into_iter()
             .map(|m| (m.id, m.title))
             .collect(),
-        Err(_) => Vec::new(),
+        None => Vec::new(),
     };
 
     // Personas (built-ins + configured) for the `/persona` command.
@@ -59,14 +122,6 @@ pub async fn run(config: BlumiConfig) -> anyhow::Result<()> {
         cron_jobs,
     };
 
-    blumi_tui::run(session, cfg).await?;
-
-    // Persist the session on exit (best-effort).
-    if let Ok(store) = blumi_persist::Store::open(&config.paths.db).await {
-        let snapshot = persist.snapshot().await;
-        if let Err(e) = store.save_snapshot(&snapshot).await {
-            tracing::warn!("could not save session: {e}");
-        }
-    }
-    Ok(())
+    let factory = Arc::new(TuiSessionFactory { config, store });
+    blumi_tui::run(factory, cfg).await
 }

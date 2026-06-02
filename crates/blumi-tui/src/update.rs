@@ -79,6 +79,13 @@ async fn handle_term(model: &mut Model, ev: TermEvent, session: &SessionHandle) 
                 return;
             }
 
+            // Ctrl+S opens the session switcher.
+            if ctrl && matches!(key.code, KeyCode::Char('s')) {
+                model.dialog = Some(Picker::session_picker(&model.recent_sessions));
+                model.mark_dirty();
+                return;
+            }
+
             // Slash-command popup navigation (while typing a "/..." command).
             if model.slash_active() && handle_slash_key(model, key, session).await {
                 model.mark_dirty();
@@ -142,6 +149,28 @@ async fn handle_term(model: &mut Model, ev: TermEvent, session: &SessionHandle) 
                 }
             }
             model.mark_dirty();
+        }
+        TermEvent::Mouse(me) => {
+            use crossterm::event::MouseEventKind;
+            match me.kind {
+                MouseEventKind::ScrollUp => {
+                    if let Some(d) = model.dialog.as_mut() {
+                        d.move_up();
+                    } else {
+                        model.scrollback = model.scrollback.saturating_add(3);
+                    }
+                    model.mark_dirty();
+                }
+                MouseEventKind::ScrollDown => {
+                    if let Some(d) = model.dialog.as_mut() {
+                        d.move_down();
+                    } else {
+                        model.scrollback = model.scrollback.saturating_sub(3);
+                    }
+                    model.mark_dirty();
+                }
+                _ => {}
+            }
         }
         _ => {}
     }
@@ -446,6 +475,8 @@ fn perform_action(model: &mut Model, action: Action) {
         Action::Quit => model.should_quit = true,
         Action::ClearTranscript => model.clear_transcript(),
         Action::CycleTheme => model.cycle_theme(),
+        Action::NewSession => model.request_new_session(),
+        Action::ResumeSession(id) => model.request_resume(id),
     }
 }
 

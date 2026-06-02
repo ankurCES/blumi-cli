@@ -50,6 +50,15 @@ pub enum Msg {
     Tick,
 }
 
+/// A request to switch the active session, handled by the app loop.
+#[derive(Debug, Clone)]
+pub enum SessionRequest {
+    /// Start a brand-new session.
+    New,
+    /// Resume a stored session by id.
+    Resume(String),
+}
+
 pub struct Model {
     pub model_name: String,
     pub working_dir: String,
@@ -114,6 +123,8 @@ pub struct Model {
     pub memory_view: Option<String>,
     /// Rendered usage analytics when the `/usage` overlay is open.
     pub usage_view: Option<String>,
+    /// A pending session switch for the app loop to perform.
+    pub session_request: Option<SessionRequest>,
 
     pub theme: Theme,
     pub theme_idx: usize,
@@ -167,6 +178,7 @@ impl Model {
             dialog: None,
             memory_view: None,
             usage_view: None,
+            session_request: None,
             theme: Theme::default(),
             theme_idx: 0,
             input_tokens: 0,
@@ -242,6 +254,80 @@ impl Model {
             Entry::User(t) => Some(t.clone()),
             _ => None,
         })
+    }
+
+    /// Request a brand-new session (handled by the app loop).
+    pub fn request_new_session(&mut self) {
+        self.session_request = Some(SessionRequest::New);
+    }
+
+    /// Request resuming a stored session by id (handled by the app loop).
+    pub fn request_resume(&mut self, id: impl Into<String>) {
+        self.session_request = Some(SessionRequest::Resume(id.into()));
+    }
+
+    pub fn take_session_request(&mut self) -> Option<SessionRequest> {
+        self.session_request.take()
+    }
+
+    /// Reset all per-session state (keeps theme, personas, skills, paths).
+    pub fn reset_for_session(&mut self) {
+        self.entries.clear();
+        self.streaming = None;
+        self.thinking = None;
+        self.todos.clear();
+        self.busy = false;
+        self.scrollback = 0;
+        self.turn_count = 0;
+        self.input_tokens = 0;
+        self.output_tokens = 0;
+        self.context_tokens = 0;
+        self.active_ms = 0;
+        self.started = Instant::now();
+        self.goal.clear();
+        self.session_title.clear();
+        self.pending = None;
+        self.dialog = None;
+        self.memory_view = None;
+        self.usage_view = None;
+        self.clear_input();
+    }
+
+    /// Rebuild the transcript view from a resumed session's snapshot.
+    pub fn load_snapshot(&mut self, snap: blumi_core::SessionSnapshot) {
+        self.reset_for_session();
+        self.input_tokens = snap.total_input_tokens;
+        self.output_tokens = snap.total_output_tokens;
+        self.turn_count = snap.turn_count;
+        self.todos = snap.todos;
+        if !snap.model.is_empty() {
+            self.model_name = snap.model;
+        }
+        for m in snap.messages {
+            match m.role {
+                blumi_protocol::Role::User => self.entries.push(Entry::User(m.text())),
+                blumi_protocol::Role::Assistant => {
+                    let t = m.text();
+                    if !t.trim().is_empty() {
+                        self.entries.push(Entry::Assistant(t));
+                    }
+                }
+                blumi_protocol::Role::Tool => {
+                    let name = m.tool_name.clone().unwrap_or_else(|| "tool".into());
+                    let preview = m.text().lines().next().unwrap_or("").to_string();
+                    self.entries.push(Entry::Tool {
+                        id: ToolCallId::new(),
+                        name,
+                        summary: String::new(),
+                        ok: Some(true),
+                        preview: Some(preview),
+                        diff_stat: None,
+                        diff: None,
+                    });
+                }
+                blumi_protocol::Role::System => {}
+            }
+        }
     }
 
     /// Seconds since the session started.

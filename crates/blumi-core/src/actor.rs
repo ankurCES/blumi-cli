@@ -74,7 +74,14 @@ pub fn spawn_session(
     model: impl Into<String>,
     runner: Arc<dyn TurnRunner>,
 ) -> SessionHandle {
-    let state = Arc::new(Mutex::new(SessionState::new(id.clone(), model)));
+    spawn_session_seeded(SessionState::new(id, model), runner)
+}
+
+/// Spawn a session actor seeded with an existing [`SessionState`] (e.g. a
+/// resumed conversation). The actor adopts the state's id, model, and messages.
+pub fn spawn_session_seeded(seed: SessionState, runner: Arc<dyn TurnRunner>) -> SessionHandle {
+    let id = seed.id.clone();
+    let state = Arc::new(Mutex::new(seed));
     let log = Arc::new(StdMutex::new(EventLog::new(id.clone())));
 
     let (command_tx, command_rx) = mpsc::channel(COMMAND_BUFFER);

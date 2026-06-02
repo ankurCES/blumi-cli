@@ -4,8 +4,8 @@
 use crate::prompt::build_system_prompt;
 use blumi_config::BlumiConfig;
 use blumi_core::{
-    builtin_agents, spawn_session, AgentSpawner, AgentTurnRunner, LlmClient, LlmOptions,
-    PermissionEngine, SessionHandle, ToolRegistry,
+    builtin_agents, AgentSpawner, AgentTurnRunner, LlmClient, LlmOptions, PermissionEngine,
+    SessionHandle, ToolRegistry,
 };
 use blumi_exec::LocalExecutor;
 use blumi_llm::{build_client, MockLlmClient};
@@ -39,8 +39,13 @@ fn mock_demo() -> Vec<StreamChunk> {
 
 /// Build and spawn a session actor from config. `yolo` forces auto-approval
 /// (used by headless `run`); the TUI passes `false` so approvals are interactive.
-/// Async because connecting MCP servers spawns child processes.
-pub async fn build_session(config: &BlumiConfig, yolo: bool) -> anyhow::Result<SessionHandle> {
+/// `seed` resumes an existing conversation (its messages become the new actor's
+/// state). Async because connecting MCP servers spawns child processes.
+pub async fn build_session(
+    config: &BlumiConfig,
+    yolo: bool,
+    seed: Option<blumi_core::SessionState>,
+) -> anyhow::Result<SessionHandle> {
     let llm: Arc<dyn LlmClient> = if config.llm.provider == "mock" {
         Arc::new(MockLlmClient::new(mock_demo()))
     } else {
@@ -173,7 +178,9 @@ pub async fn build_session(config: &BlumiConfig, yolo: bool) -> anyhow::Result<S
         .with_personas(personas, &active),
     );
 
-    Ok(spawn_session(SessionId::new(), model, runner))
+    let state =
+        seed.unwrap_or_else(|| blumi_core::SessionState::new(SessionId::new(), model.clone()));
+    Ok(blumi_core::spawn_session_seeded(state, runner))
 }
 
 /// Built-in personas merged with any configured in settings (config entries

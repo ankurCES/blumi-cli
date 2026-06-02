@@ -18,11 +18,15 @@ pub const COMMANDS: &[CommandDef] = &[
     },
     CommandDef {
         name: "/clear",
-        desc: "clear the transcript",
+        desc: "clear the view (keep session)",
     },
     CommandDef {
         name: "/new",
-        desc: "start a fresh transcript",
+        desc: "start a fresh session",
+    },
+    CommandDef {
+        name: "/resume",
+        desc: "resume a session: /resume [id]",
     },
     CommandDef {
         name: "/retry",
@@ -50,7 +54,7 @@ pub const COMMANDS: &[CommandDef] = &[
     },
     CommandDef {
         name: "/sessions",
-        desc: "list recent sessions",
+        desc: "switch session (ctrl+s)",
     },
     CommandDef {
         name: "/export",
@@ -141,7 +145,17 @@ pub async fn run(model: &mut Model, session: &SessionHandle, line: &str) {
 
     match cmd {
         "/help" => model.entries.push(Entry::Notice(help_text())),
-        "/clear" | "/new" => model.clear_transcript(),
+        "/clear" => model.clear_transcript(),
+        "/new" => model.request_new_session(),
+        "/resume" => {
+            if arg.is_empty() {
+                model.dialog = Some(crate::dialog::Picker::session_picker(
+                    &model.recent_sessions,
+                ));
+            } else {
+                model.request_resume(arg);
+            }
+        }
         "/retry" => {
             if model.busy {
                 model
@@ -179,23 +193,9 @@ pub async fn run(model: &mut Model, session: &SessionHandle, line: &str) {
             }
         }
         "/sessions" => {
-            if model.recent_sessions.is_empty() {
-                model
-                    .entries
-                    .push(Entry::Notice("no past sessions yet".into()));
-            } else {
-                let mut s = String::from("recent sessions:");
-                for (id, title) in &model.recent_sessions {
-                    let title = if title.is_empty() {
-                        "(untitled)"
-                    } else {
-                        title
-                    };
-                    s.push_str(&format!("\n- {title}  [{id}]"));
-                }
-                s.push_str("\n(ask blumi to `SessionSearch` to search their contents)");
-                model.entries.push(Entry::Notice(s));
-            }
+            model.dialog = Some(crate::dialog::Picker::session_picker(
+                &model.recent_sessions,
+            ))
         }
         "/export" => match model.export_transcript() {
             Ok(path) => model.entries.push(Entry::Notice(format!(

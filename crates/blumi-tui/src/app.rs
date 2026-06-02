@@ -1,11 +1,12 @@
 //! The TUI event loop: terminal setup/teardown and the select loop bridging
 //! crossterm input, the core's event stream, and an animation tick.
 
-use crate::model::{Model, Msg};
+use crate::model::{Entry, Model, Msg, SessionRequest};
 use crate::{update, view};
 use blumi_core::SessionHandle;
 use crossterm::event::{
-    DisableBracketedPaste, EnableBracketedPaste, EnableFocusChange, EventStream,
+    DisableBracketedPaste, DisableMouseCapture, EnableBracketedPaste, EnableFocusChange,
+    EnableMouseCapture, EventStream,
 };
 use crossterm::execute;
 use crossterm::terminal::{
@@ -16,9 +17,25 @@ use ratatui::backend::CrosstermBackend;
 use ratatui::Terminal;
 use std::io::{self, Stdout};
 use std::path::PathBuf;
+use std::sync::Arc;
 use std::time::Duration;
 
 pub(crate) type Term = Terminal<CrosstermBackend<Stdout>>;
+
+/// Creates, resumes, lists, and saves sessions on the TUI's behalf. The binary
+/// implements this over `build_session` + the persistence store — the seam that
+/// lets the TUI switch live sessions without knowing how they're wired.
+#[async_trait::async_trait]
+pub trait SessionFactory: Send + Sync {
+    /// Spawn a fresh session.
+    async fn create(&self) -> anyhow::Result<SessionHandle>;
+    /// Resume a stored session by id, seeded with its prior messages.
+    async fn resume(&self, id: &str) -> anyhow::Result<SessionHandle>;
+    /// Recent sessions as (id, title), newest first.
+    async fn list(&self) -> Vec<(String, String)>;
+    /// Persist the given session (best-effort).
+    async fn save(&self, handle: &SessionHandle);
+}
 
 /// Everything the TUI needs besides the session handle.
 pub struct TuiConfig {
@@ -42,11 +59,11 @@ pub struct TuiConfig {
     pub cron_jobs: Vec<(String, String)>,
 }
 
-/// Run the interactive TUI against an already-spawned session. Restores the
+/// Run the interactive TUI, sourcing sessions from `factory`. Restores the
 /// terminal on exit (including on error).
-pub async fn run(session: SessionHandle, cfg: TuiConfig) -> anyhow::Result<()> {
+pub async fn run(factory: Arc<dyn SessionFactory>, cfg: TuiConfig) -> anyhow::Result<()> {
     let mut terminal = setup_terminal()?;
-    let result = run_loop(&mut terminal, session, cfg).await;
+    let result = run_loop(&mut terminal, factory, cfg).await;
     let _ = teardown_terminal(&mut terminal);
     result
 }
@@ -58,7 +75,8 @@ pub(crate) fn setup_terminal() -> anyhow::Result<Term> {
         stdout,
         EnterAlternateScreen,
         EnableBracketedPaste,
-        EnableFocusChange
+        EnableFocusChange,
+        EnableMouseCapture
     )?;
     Ok(Terminal::new(CrosstermBackend::new(stdout))?)
 }
@@ -68,7 +86,8 @@ pub(crate) fn teardown_terminal(terminal: &mut Term) -> anyhow::Result<()> {
     execute!(
         terminal.backend_mut(),
         LeaveAlternateScreen,
-        DisableBracketedPaste
+        DisableBracketedPaste,
+        DisableMouseCapture
     )?;
     terminal.show_cursor()?;
     Ok(())
@@ -76,7 +95,7 @@ pub(crate) fn teardown_terminal(terminal: &mut Term) -> anyhow::Result<()> {
 
 async fn run_loop(
     terminal: &mut Term,
-    session: SessionHandle,
+    factory: Arc<dyn SessionFactory>,
     cfg: TuiConfig,
 ) -> anyhow::Result<()> {
     let mut model = Model::new(cfg.model_name, cfg.working_dir);
@@ -89,6 +108,8 @@ async fn run_loop(
     model.export_dir = cfg.export_dir;
     model.context_size = cfg.context_size;
     model.cron_jobs = cfg.cron_jobs;
+
+    let mut session = factory.create().await?;
     let mut events = session.subscribe();
     let mut input = EventStream::new();
     let mut tick = tokio::time::interval(Duration::from_millis(50)); // ~20fps
@@ -116,10 +137,37 @@ async fn run_loop(
         let Some(msg) = msg else { continue };
         update::update(&mut model, msg, &session).await;
 
+        // A command may have requested a new/resumed session — the loop owns the
+        // handle + subscription, so we swap them here (saving the current one).
+        if let Some(req) = model.take_session_request() {
+            factory.save(&session).await;
+            let next = match &req {
+                SessionRequest::New => factory.create().await,
+                SessionRequest::Resume(id) => factory.resume(id).await,
+            };
+            match next {
+                Ok(handle) => {
+                    if let SessionRequest::Resume(_) = req {
+                        model.load_snapshot(handle.snapshot().await);
+                    } else {
+                        model.reset_for_session();
+                    }
+                    session = handle;
+                    events = session.subscribe();
+                    model.recent_sessions = factory.list().await;
+                }
+                Err(e) => model
+                    .entries
+                    .push(Entry::Notice(format!("session switch failed: {e}"))),
+            }
+            model.mark_dirty();
+        }
+
         if model.take_dirty() {
             terminal.draw(|f| view::render(&mut model, f))?;
         }
     }
 
+    factory.save(&session).await; // persist on exit
     Ok(())
 }
