@@ -3,6 +3,7 @@
 mod branding;
 mod cron;
 mod engine;
+mod gateway;
 mod onboarding;
 mod playbook;
 mod prompt;
@@ -71,6 +72,42 @@ enum Commands {
     Playbook {
         #[command(subcommand)]
         action: PlaybookCmd,
+    },
+    /// Run blumi as a messaging bot (Telegram/Discord/Slack/WhatsApp).
+    Gateway {
+        #[command(subcommand)]
+        action: GatewayCmd,
+    },
+}
+
+#[derive(Subcommand)]
+enum GatewayCmd {
+    /// Telegram bot (long-poll; needs a @BotFather token).
+    Telegram {
+        /// Bot token (overrides gateway.telegram.token in settings.json).
+        #[arg(long)]
+        token: Option<String>,
+    },
+    /// Discord bot (Gateway WebSocket; needs the MESSAGE CONTENT intent on).
+    Discord {
+        /// Bot token (overrides gateway.discord.token in settings.json).
+        #[arg(long)]
+        token: Option<String>,
+    },
+    /// Slack bot (Socket Mode; needs a bot token + an app-level token).
+    Slack {
+        /// Bot token `xoxb-…` (overrides gateway.slack.bot_token).
+        #[arg(long)]
+        bot_token: Option<String>,
+        /// App-level token `xapp-…` (overrides gateway.slack.app_token).
+        #[arg(long)]
+        app_token: Option<String>,
+    },
+    /// WhatsApp Cloud API bot (runs an inbound webhook server).
+    Whatsapp {
+        /// Webhook port (overrides gateway.whatsapp.webhook_port; default 8080).
+        #[arg(long)]
+        port: Option<u16>,
     },
 }
 
@@ -210,6 +247,15 @@ async fn main() -> anyhow::Result<()> {
         Some(Commands::Playbook { action }) => match action {
             PlaybookCmd::Run { file, restart } => playbook::run(config, file, restart).await,
             PlaybookCmd::List => playbook::list(config),
+        },
+        Some(Commands::Gateway { action }) => match action {
+            GatewayCmd::Telegram { token } => gateway::run_telegram(config, token).await,
+            GatewayCmd::Discord { token } => gateway::run_discord(config, token).await,
+            GatewayCmd::Slack {
+                bot_token,
+                app_token,
+            } => gateway::run_slack(config, bot_token, app_token).await,
+            GatewayCmd::Whatsapp { port } => gateway::run_whatsapp(config, port).await,
         },
     }
 }

@@ -121,6 +121,65 @@ impl Default for ExecutorConfig {
     }
 }
 
+/// Messaging-gateway settings (run blumi as a bot). Tokens may also be passed
+/// on the command line, which override these.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(default)]
+pub struct GatewayConfig {
+    /// Auto-approve tool calls in gateway sessions. Off by default: a bot has no
+    /// human to approve, so write/exec tools are denied unless this is on. Turn
+    /// it on only with a sandboxed executor (e.g. docker).
+    pub yolo: bool,
+    pub telegram: TelegramGatewayConfig,
+    pub discord: DiscordGatewayConfig,
+    pub slack: SlackGatewayConfig,
+    pub whatsapp: WhatsappGatewayConfig,
+}
+
+/// Telegram bot settings.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(default)]
+pub struct TelegramGatewayConfig {
+    /// Bot token from @BotFather.
+    pub token: String,
+    /// If non-empty, only these chat ids are served (an allow-list).
+    pub allowed_chats: Vec<i64>,
+}
+
+/// Discord bot settings.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(default)]
+pub struct DiscordGatewayConfig {
+    /// Bot token from the Discord developer portal.
+    pub token: String,
+    /// If non-empty, only these channel ids are served.
+    pub allowed_channels: Vec<String>,
+}
+
+/// Slack bot settings (Socket Mode).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(default)]
+pub struct SlackGatewayConfig {
+    /// Bot token (`xoxb-…`).
+    pub bot_token: String,
+    /// App-level token (`xapp-…`) for Socket Mode.
+    pub app_token: String,
+}
+
+/// WhatsApp Cloud API settings (webhook-based).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(default)]
+pub struct WhatsappGatewayConfig {
+    /// Permanent access token for the WhatsApp Cloud API.
+    pub token: String,
+    /// Phone-number id to send from.
+    pub phone_number_id: String,
+    /// Token used to verify the webhook subscription (you choose this).
+    pub verify_token: String,
+    /// Port the inbound webhook server listens on.
+    pub webhook_port: u16,
+}
+
 /// A language server for code-intelligence, keyed by name in
 /// [`BlumiConfig::lsp_servers`].
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -172,6 +231,9 @@ pub struct BlumiConfig {
     /// Language servers for the `Lsp` code-intel tool, keyed by name.
     #[serde(default)]
     pub lsp_servers: BTreeMap<String, LspServerConfig>,
+    /// Messaging gateways (Telegram/Discord/Slack/WhatsApp bots).
+    #[serde(default)]
+    pub gateway: GatewayConfig,
     /// Resolved at load time; never serialized to/from files.
     #[serde(skip)]
     pub paths: Paths,
@@ -190,6 +252,7 @@ impl Default for BlumiConfig {
             personas: BTreeMap::new(),
             executor: ExecutorConfig::default(),
             lsp_servers: BTreeMap::new(),
+            gateway: GatewayConfig::default(),
             paths: Paths::default(),
         }
     }
