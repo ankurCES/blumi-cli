@@ -378,6 +378,11 @@ async fn handle_core(model: &mut Model, event: Event, session: &SessionHandle) {
         Event::Notice { message } => {
             model.entries.push(Entry::Notice(message));
         }
+        Event::Reload { reason } => {
+            // The agent asked to reload itself; the app loop performs the
+            // in-place rebuild once the turn goes idle (keeps the transcript).
+            model.request_reload(reason);
+        }
         Event::Error { message, .. } => {
             model
                 .entries

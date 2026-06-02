@@ -440,10 +440,12 @@ name = "blumi-skills"
 version = "0.1.0"
 dependencies = [
  "async-trait",
+ "blumi-config",
  "blumi-core",
  "blumi-protocol",
  "schemars 0.8.22",
  "serde",
+ "serde_json",
  "tempfile",
  "tokio",
  "tokio-util",

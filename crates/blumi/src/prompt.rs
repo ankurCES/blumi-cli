@@ -18,6 +18,23 @@ Guidelines:
 unless asked.
 - When a task has multiple steps, track them with TodoWrite.";
 
+const SELF_EVOLUTION: &str = "\
+# Self-evolution
+
+You can extend and reconfigure yourself, then reload to apply the changes:
+- `manage_skill` — author reusable skills (SKILL.md) for tasks you expect to \
+recur. When you find yourself working out a non-obvious procedure, capture it as \
+a skill so future sessions can load it via the `skill` tool.
+- `self_config` — read and edit your own settings.json (e.g. tune sampling, add \
+a persona). Edits are validated before they're saved, so a bad value is rejected \
+rather than breaking you.
+- `reload_self` — rebuild yourself so newly written skills and config edits take \
+effect, keeping the current conversation. Call it after a `manage_skill` or \
+`self_config` change.
+
+Evolve deliberately: prefer small, well-described skills and minimal config \
+changes, and tell the user what you changed and why.";
+
 /// Build the full system prompt for a session. `skills_section` is the
 /// available-skills listing (empty when there are none).
 pub fn build_system_prompt(
@@ -27,6 +44,8 @@ pub fn build_system_prompt(
 ) -> String {
     let mut s = String::with_capacity(2048);
     s.push_str(BASE);
+    s.push_str("\n\n");
+    s.push_str(SELF_EVOLUTION);
     s.push_str(&format!(
         "\n\nWorking directory: {}\n",
         config.paths.working_dir.display()
@@ -53,4 +72,24 @@ pub fn build_system_prompt(
         s.push_str(&mem);
     }
     s
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::path::PathBuf;
+
+    #[test]
+    fn advertises_self_evolution() {
+        let config = BlumiConfig::default();
+        let memory = MemorySnapshot::load(
+            &PathBuf::from("/nonexistent/MEMORY.md"),
+            &PathBuf::from("/nonexistent/USER.md"),
+        );
+        let prompt = build_system_prompt(&config, &memory, "");
+        assert!(prompt.contains("# Self-evolution"));
+        assert!(prompt.contains("manage_skill"));
+        assert!(prompt.contains("self_config"));
+        assert!(prompt.contains("reload_self"));
+    }
 }

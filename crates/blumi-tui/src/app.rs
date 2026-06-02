@@ -31,6 +31,9 @@ pub trait SessionFactory: Send + Sync {
     async fn create(&self) -> anyhow::Result<SessionHandle>;
     /// Resume a stored session by id, seeded with its prior messages.
     async fn resume(&self, id: &str) -> anyhow::Result<SessionHandle>;
+    /// Rebuild the agent in place (self-evolution): re-read config + re-scan
+    /// skills, seeded with the live snapshot so the conversation is preserved.
+    async fn reload(&self, snapshot: blumi_core::SessionSnapshot) -> anyhow::Result<SessionHandle>;
     /// Recent sessions as (id, title), newest first.
     async fn list(&self) -> Vec<(String, String)>;
     /// Persist the given session (best-effort).
@@ -161,6 +164,30 @@ async fn run_loop(
                     .push(Entry::Notice(format!("session switch failed: {e}"))),
             }
             model.mark_dirty();
+        }
+
+        // Self-evolution: the agent asked to reload. We wait until the turn is
+        // idle, then rebuild the session (fresh config + skills) seeded with the
+        // live snapshot so the conversation is preserved — the transcript stays.
+        if !model.busy {
+            if let Some(reason) = model.reload_pending.take() {
+                let snapshot = session.snapshot().await;
+                factory.save(&session).await;
+                match factory.reload(snapshot).await {
+                    Ok(handle) => {
+                        session = handle;
+                        events = session.subscribe();
+                        model.recent_sessions = factory.list().await;
+                        model.entries.push(Entry::Notice(format!(
+                            "✿ reloaded — skills + config refreshed ({reason})"
+                        )));
+                    }
+                    Err(e) => model
+                        .entries
+                        .push(Entry::Notice(format!("reload failed: {e}"))),
+                }
+                model.mark_dirty();
+            }
         }
 
         if model.take_dirty() {

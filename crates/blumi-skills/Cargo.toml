@@ -9,11 +9,13 @@ license.workspace = true
 [dependencies]
 blumi-core.workspace = true
 blumi-protocol.workspace = true
+blumi-config.workspace = true
 
 tokio = { workspace = true }
 tokio-util.workspace = true
 async-trait.workspace = true
 serde.workspace = true
+serde_json.workspace = true
 schemars.workspace = true
 tracing.workspace = true
 
