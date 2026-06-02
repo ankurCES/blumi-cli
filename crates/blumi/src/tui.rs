@@ -20,12 +20,26 @@ pub async fn run(config: BlumiConfig) -> anyhow::Result<()> {
     .map(|m| (m.name, m.description))
     .collect();
 
+    // Recent sessions for the dashboard + `/sessions` (best-effort).
+    let recent_sessions = match blumi_persist::Store::open(&config.paths.db).await {
+        Ok(store) => store
+            .list_sessions(8)
+            .await
+            .unwrap_or_default()
+            .into_iter()
+            .map(|m| (m.id, m.title))
+            .collect(),
+        Err(_) => Vec::new(),
+    };
+
     let cfg = blumi_tui::TuiConfig {
         model_name: config.llm.model.clone(),
         working_dir: config.paths.working_dir.display().to_string(),
         memory_md: config.paths.memory_md(),
         user_md: config.paths.user_md(),
         skills,
+        recent_sessions,
+        export_dir: config.paths.sessions.clone(),
     };
 
     blumi_tui::run(session, cfg).await?;

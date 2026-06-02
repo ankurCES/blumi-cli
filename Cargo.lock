@@ -368,6 +368,7 @@ dependencies = [
  "async-trait",
  "blumi-core",
  "blumi-exec",
+ "blumi-persist",
  "blumi-protocol",
  "glob",
  "regex",

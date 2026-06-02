@@ -5,28 +5,23 @@
 use std::io::{IsTerminal, Write};
 use std::time::Duration;
 
-const PINK: &str = "\x1b[1;38;2;255;79;135m"; // rose-pink, bold
 const DIM: &str = "\x1b[2m";
 const RESET: &str = "\x1b[0m";
-
-fn wordmark() -> String {
-    format!("{PINK}   b l u m i{RESET}")
-}
 
 /// A one-line hint shown under the banner.
 pub fn hint() -> String {
     format!("{DIM}  try: blumi run \"<prompt>\"   ·   blumi login   ·   blumi --help{RESET}")
 }
 
-/// Animated rose: plays a short color sweep in place (rewinding the cursor each
-/// frame), then leaves the final frame + wordmark. Falls back to a single
-/// static frame when stdout isn't a TTY. No trailing hint (used as a splash).
+/// The brand splash: the animated rose sweeps in place, then the bold gradient
+/// block wordmark + tagline land beneath it. Falls back to a static frame when
+/// stdout isn't a TTY. Used as the interactive greeting (no hint).
 pub fn greeting() {
     let mut out = std::io::stdout();
     let _ = writeln!(out);
 
     if out.is_terminal() {
-        const FRAMES: usize = 18;
+        const FRAMES: usize = 16;
         for t in 0..FRAMES {
             print!("{}", blumi_tui::banner_frame(t * 2));
             let _ = out.flush();
@@ -40,15 +35,17 @@ pub fn greeting() {
         print!("{}", blumi_tui::banner_frame(0));
     }
 
-    println!("{}", wordmark());
+    println!();
+    print!("{}", blumi_tui::wordmark_ansi(0));
+    println!("{DIM}  {}{RESET}", blumi_tui::TAGLINE);
     println!();
 }
 
-/// Static rose + wordmark + hint (non-interactive / `web`).
+/// Static gradient block wordmark + tagline + hint (non-interactive / `web`).
 pub fn banner() {
     println!();
-    print!("{}", blumi_tui::banner_frame(0));
-    println!("{}", wordmark());
+    print!("{}", blumi_tui::wordmark_ansi(0));
+    println!("{DIM}  {}{RESET}", blumi_tui::TAGLINE);
     println!();
     println!("{}", hint());
 }

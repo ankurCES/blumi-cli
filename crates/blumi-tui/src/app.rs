@@ -28,6 +28,10 @@ pub struct TuiConfig {
     pub user_md: PathBuf,
     /// Available skills (name, description) for `/skills`.
     pub skills: Vec<(String, String)>,
+    /// Recent sessions (id, title) for the dashboard + `/sessions`.
+    pub recent_sessions: Vec<(String, String)>,
+    /// Directory `/export` writes transcripts into.
+    pub export_dir: PathBuf,
 }
 
 /// Run the interactive TUI against an already-spawned session. Restores the
@@ -71,6 +75,8 @@ async fn run_loop(
     model.memory_md = cfg.memory_md;
     model.user_md = cfg.user_md;
     model.skills = cfg.skills;
+    model.recent_sessions = cfg.recent_sessions;
+    model.export_dir = cfg.export_dir;
     let mut events = session.subscribe();
     let mut input = EventStream::new();
     let mut tick = tokio::time::interval(Duration::from_millis(50)); // ~20fps

@@ -64,21 +64,66 @@ pub fn render(model: &mut Model, f: &mut Frame) {
     }
 }
 
-/// The run dashboard: tasks (todos), token usage, and session info.
+/// The agent dashboard: live session state, tasks, recent tool activity, and
+/// recent sessions — the run turned into a terminal cockpit.
 fn render_dashboard(model: &Model, f: &mut Frame, area: Rect, theme: &Theme) {
     let block = Block::default()
         .borders(Borders::LEFT)
         .border_style(theme.dim())
         .title(Span::styled(
-            format!(" {} run ", icon::FLOWER),
+            format!(" {} agent ", icon::FLOWER),
             theme.bold_primary(),
         ));
     let inner = block.inner(area);
     f.render_widget(block, area);
+    let w = inner.width.saturating_sub(1) as usize;
 
     let mut lines: Vec<Line> = Vec::new();
 
-    lines.push(Line::from(Span::styled("Tasks", theme.accent())));
+    // ── Session ───────────────────────────────────────────────
+    lines.push(section("Session", theme));
+    let (status, sstyle) = if model.busy {
+        ("working", theme.accent())
+    } else {
+        ("idle", Style::default().fg(theme.success))
+    };
+    lines.push(Line::from(vec![
+        Span::styled(format!("{:>7} ", "status"), theme.dim()),
+        Span::styled(status.to_string(), sstyle),
+    ]));
+    let model_name = if model.model_name.is_empty() {
+        "default"
+    } else {
+        &model.model_name
+    };
+    lines.push(kv(
+        "model",
+        &truncate(model_name, w.saturating_sub(8)),
+        theme,
+    ));
+    lines.push(kv("turn", &model.turn_count.to_string(), theme));
+    lines.push(kv(
+        "tokens",
+        &format!("↑{} ↓{}", model.input_tokens, model.output_tokens),
+        theme,
+    ));
+    lines.push(kv(
+        "approve",
+        if model.yolo { "auto" } else { "ask" },
+        theme,
+    ));
+
+    // ── Tasks ─────────────────────────────────────────────────
+    let done = model
+        .todos
+        .iter()
+        .filter(|t| t.status == TodoStatus::Completed)
+        .count();
+    lines.push(Line::raw(""));
+    lines.push(section(
+        &format!("Tasks  {done}/{}", model.todos.len()),
+        theme,
+    ));
     if model.todos.is_empty() {
         lines.push(Line::from(Span::styled("  (none yet)", theme.dim())));
     } else {
@@ -88,45 +133,80 @@ fn render_dashboard(model: &Model, f: &mut Frame, area: Rect, theme: &Theme) {
                 TodoStatus::InProgress => ("→", theme.accent()),
                 TodoStatus::Pending => ("•", theme.subtle()),
             };
-            let text = truncate(&todo.content, inner.width.saturating_sub(3) as usize);
             lines.push(Line::from(vec![
                 Span::styled(format!("{mark} "), style),
-                Span::styled(text, theme.body()),
+                Span::styled(truncate(&todo.content, w.saturating_sub(2)), theme.body()),
             ]));
         }
     }
 
-    lines.push(Line::raw(""));
-    lines.push(Line::from(Span::styled("Usage", theme.accent())));
-    lines.push(Line::from(Span::styled(
-        format!("  ↑ {}  ↓ {}", model.input_tokens, model.output_tokens),
-        theme.subtle(),
-    )));
+    // ── Activity (recent tool calls) ──────────────────────────
+    let mut tools: Vec<(&str, Option<bool>)> = model
+        .entries
+        .iter()
+        .rev()
+        .filter_map(|e| match e {
+            Entry::Tool { name, ok, .. } => Some((name.as_str(), *ok)),
+            _ => None,
+        })
+        .take(5)
+        .collect();
+    tools.reverse();
+    if !tools.is_empty() {
+        lines.push(Line::raw(""));
+        lines.push(section("Activity", theme));
+        for (name, ok) in tools {
+            let (mark, style) = match ok {
+                Some(true) => (icon::OK, Style::default().fg(theme.success)),
+                Some(false) => (icon::ERR, Style::default().fg(theme.error)),
+                None => (icon::PENDING, theme.accent()),
+            };
+            lines.push(Line::from(vec![
+                Span::styled(format!("{mark} "), style),
+                Span::styled(truncate(name, w.saturating_sub(2)), theme.subtle()),
+            ]));
+        }
+    }
 
-    lines.push(Line::raw(""));
-    lines.push(Line::from(Span::styled("Session", theme.accent())));
-    let model_name = if model.model_name.is_empty() {
-        "default"
-    } else {
-        &model.model_name
-    };
-    lines.push(Line::from(Span::styled(
-        format!(
-            "  {}",
-            truncate(model_name, inner.width.saturating_sub(2) as usize)
-        ),
-        theme.subtle(),
-    )));
-    lines.push(Line::from(Span::styled(
-        format!("  turn {}", model.turn_count),
-        theme.dim(),
-    )));
+    // ── Sessions (recent history) ─────────────────────────────
+    if !model.recent_sessions.is_empty() {
+        lines.push(Line::raw(""));
+        lines.push(section("Sessions", theme));
+        for (_, title) in model.recent_sessions.iter().take(4) {
+            let title = if title.is_empty() {
+                "(untitled)"
+            } else {
+                title
+            };
+            lines.push(Line::from(vec![
+                Span::styled("· ", theme.dim()),
+                Span::styled(truncate(title, w.saturating_sub(2)), theme.subtle()),
+            ]));
+        }
+    }
+
     if model.busy {
         lines.push(Line::raw(""));
         lines.push(Line::from(crate::mascot::thinking(model.spinner_frame)));
     }
 
     f.render_widget(Paragraph::new(lines), inner);
+}
+
+/// A dashboard section header.
+fn section(title: &str, theme: &Theme) -> Line<'static> {
+    Line::from(Span::styled(
+        title.to_string(),
+        theme.accent().add_modifier(Modifier::BOLD),
+    ))
+}
+
+/// A right-aligned `key  value` dashboard row.
+fn kv(key: &str, val: &str, theme: &Theme) -> Line<'static> {
+    Line::from(vec![
+        Span::styled(format!("{key:>7} "), theme.dim()),
+        Span::styled(val.to_string(), theme.body()),
+    ])
 }
 
 /// The slash-command autocomplete popup, anchored above the editor.
@@ -287,15 +367,20 @@ fn render_landing(model: &Model, f: &mut Frame, area: Rect, theme: &Theme) {
             .map(|l| l.alignment(Alignment::Center)),
     );
     lines.push(Line::raw(""));
-    lines
-        .push(Line::from(Span::styled("blumi", theme.bold_primary())).alignment(Alignment::Center));
+    if area.width >= crate::logo::BLUMI_BLOCK_WIDTH + 4 {
+        lines.extend(
+            crate::mascot::wordmark(model.spinner_frame)
+                .into_iter()
+                .map(|l| l.alignment(Alignment::Center)),
+        );
+    } else {
+        lines.push(
+            Line::from(Span::styled("blumi", theme.bold_primary())).alignment(Alignment::Center),
+        );
+    }
     lines.push(Line::raw(""));
     lines.push(
-        Line::from(Span::styled(
-            "a local-first agentic coding assistant",
-            theme.subtle(),
-        ))
-        .alignment(Alignment::Center),
+        Line::from(Span::styled(crate::logo::TAGLINE, theme.subtle())).alignment(Alignment::Center),
     );
     lines.push(Line::raw(""));
     lines.push(

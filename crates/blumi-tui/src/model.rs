@@ -57,6 +57,10 @@ pub struct Model {
     pub user_md: PathBuf,
     /// Available skills (name, description) for `/skills`.
     pub skills: Vec<(String, String)>,
+    /// Recent sessions (id, title) from history — dashboard + `/sessions`.
+    pub recent_sessions: Vec<(String, String)>,
+    /// Directory where `/export` writes transcripts.
+    pub export_dir: PathBuf,
 
     pub entries: Vec<Entry>,
     pub streaming: Option<String>,
@@ -67,6 +71,8 @@ pub struct Model {
     pub busy: bool,
     pub spinner_frame: usize,
     pub turn_count: u32,
+    /// Auto-approve everything (yolo). Toggled by `/yolo`; shown in the dashboard.
+    pub yolo: bool,
 
     pub focus: Focus,
     /// Lines scrolled up from the bottom; 0 = following the latest output.
@@ -106,6 +112,8 @@ impl Model {
             memory_md: PathBuf::new(),
             user_md: PathBuf::new(),
             skills: Vec::new(),
+            recent_sessions: Vec::new(),
+            export_dir: PathBuf::new(),
             entries: Vec::new(),
             streaming: None,
             thinking: None,
@@ -113,6 +121,7 @@ impl Model {
             busy: false,
             spinner_frame: 0,
             turn_count: 0,
+            yolo: false,
             focus: Focus::Editor,
             scrollback: 0,
             show_dashboard: true,
@@ -220,5 +229,34 @@ impl Model {
             &user
         });
         self.memory_view = Some(s);
+    }
+
+    /// Write the current transcript to a markdown file under `export_dir`.
+    /// Returns the path written.
+    pub fn export_transcript(&self) -> std::io::Result<PathBuf> {
+        let mut md = String::from("# blumi session transcript\n\n");
+        for entry in &self.entries {
+            match entry {
+                Entry::User(t) => md.push_str(&format!("## You\n\n{t}\n\n")),
+                Entry::Assistant(t) => md.push_str(&format!("## blumi\n\n{t}\n\n")),
+                Entry::Tool {
+                    name, summary, ok, ..
+                } => {
+                    let mark = match ok {
+                        Some(true) => "ok",
+                        Some(false) => "failed",
+                        None => "running",
+                    };
+                    md.push_str(&format!("- `{name}` ({mark}) — {summary}\n"));
+                }
+                Entry::Notice(t) => md.push_str(&format!("> {t}\n\n")),
+            }
+        }
+        std::fs::create_dir_all(&self.export_dir)?;
+        let path = self
+            .export_dir
+            .join(format!("transcript-turn{}.md", self.turn_count));
+        std::fs::write(&path, md)?;
+        Ok(path)
     }
 }

@@ -96,6 +96,47 @@ pub fn rose_logo(tick: usize) -> Vec<Line<'static>> {
     out
 }
 
+/// Vertical-gradient base index for row `r` of `n`, spanning rose→mint without
+/// wrapping (so the wordmark reads top-pink to bottom-cyan).
+fn row_base(r: usize, n: usize) -> usize {
+    let span = (ANCHORS.len() - 1) * STEPS; // 0..=24 : rose → mint
+    if n <= 1 {
+        0
+    } else {
+        r * span / (n - 1)
+    }
+}
+
+/// The block wordmark ([`crate::logo::BLUMI_BLOCK`]) with a vertical rose→cyan
+/// gradient, gently swept by `tick` so the landing shimmers.
+pub fn wordmark(tick: usize) -> Vec<Line<'static>> {
+    let n = crate::logo::BLUMI_BLOCK.len();
+    crate::logo::BLUMI_BLOCK
+        .iter()
+        .enumerate()
+        .map(|(r, row)| {
+            Line::from(Span::styled(
+                (*row).to_string(),
+                Style::default()
+                    .fg(ramp_color(row_base(r, n) + tick / 2))
+                    .add_modifier(Modifier::BOLD),
+            ))
+        })
+        .collect()
+}
+
+/// The block wordmark as a truecolor ANSI string (for the CLI banner), with the
+/// same vertical rose→cyan gradient. Ends each row with a reset + newline.
+pub fn wordmark_ansi(tick: usize) -> String {
+    let n = crate::logo::BLUMI_BLOCK.len();
+    let mut out = String::new();
+    for (r, row) in crate::logo::BLUMI_BLOCK.iter().enumerate() {
+        let (rr, gg, bb) = ramp_rgb(row_base(r, n) + tick / 2);
+        out.push_str(&format!("\x1b[1;38;2;{rr};{gg};{bb}m{row}\x1b[0m\n"));
+    }
+    out
+}
+
 /// One frame of the rose mark as a truecolor ANSI string (for the CLI banner,
 /// which is not a ratatui surface). Ends each row with a reset + newline.
 pub fn banner_frame(tick: usize) -> String {
@@ -149,5 +190,23 @@ mod tests {
         assert_eq!(f.matches('\n').count(), ROSE_ROWS);
         assert!(f.contains("\x1b[1;38;2;")); // truecolor escape
         assert!(f.contains('◉'));
+    }
+
+    #[test]
+    fn wordmark_renders_all_block_rows() {
+        let lines = wordmark(0);
+        assert_eq!(lines.len(), crate::logo::BLUMI_BLOCK.len());
+        let ansi = wordmark_ansi(0);
+        assert_eq!(ansi.matches('\n').count(), crate::logo::BLUMI_BLOCK.len());
+        assert!(ansi.contains("\x1b[1;38;2;"));
+    }
+
+    #[test]
+    fn wordmark_gradient_top_differs_from_bottom() {
+        // Top row should be rosier, bottom row cyaner — distinct colors.
+        let lines = wordmark(0);
+        let top = lines.first().unwrap().spans[0].style.fg;
+        let bottom = lines.last().unwrap().spans[0].style.fg;
+        assert_ne!(top, bottom);
     }
 }

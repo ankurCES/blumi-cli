@@ -135,6 +135,10 @@ impl Executor for LocalExecutor {
             .map_err(ExecError::from)
     }
 
+    async fn remove_file(&self, path: &Path) -> Result<(), ExecError> {
+        tokio::fs::remove_file(path).await.map_err(ExecError::from)
+    }
+
     async fn exists(&self, path: &Path) -> Result<bool, ExecError> {
         tokio::fs::try_exists(path).await.map_err(ExecError::from)
     }
@@ -222,5 +226,16 @@ mod tests {
         assert!(exec.exists(&f).await.unwrap());
         let data = exec.read_file(&f).await.unwrap();
         assert_eq!(&data, b"hi there");
+    }
+
+    #[tokio::test]
+    async fn removes_files() {
+        let dir = tempfile::tempdir().unwrap();
+        let exec = LocalExecutor::new(dir.path());
+        let f = dir.path().join("gone.txt");
+        exec.write_file(&f, b"bye").await.unwrap();
+        assert!(exec.exists(&f).await.unwrap());
+        exec.remove_file(&f).await.unwrap();
+        assert!(!exec.exists(&f).await.unwrap());
     }
 }

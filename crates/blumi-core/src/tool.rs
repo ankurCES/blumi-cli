@@ -37,6 +37,48 @@ pub trait SubAgentSpawner: Send + Sync {
     ) -> Result<String, ToolError>;
 }
 
+/// A recorded file mutation, so `/undo` can revert it (LIFO).
+#[derive(Debug, Clone)]
+pub struct FileChange {
+    pub path: PathBuf,
+    /// Prior contents, or `None` if the file did not exist (a fresh create).
+    pub before: Option<Vec<u8>>,
+    /// Short operation label (e.g. `"write"`, `"edit"`).
+    pub op: String,
+}
+
+/// An in-session, last-in-first-out journal of file mutations backing `/undo`.
+/// File-writing tools push a [`FileChange`] before they mutate; the actor pops
+/// and reverts on `Command::Undo`.
+#[derive(Default)]
+pub struct ChangeJournal {
+    entries: std::sync::Mutex<Vec<FileChange>>,
+}
+
+impl ChangeJournal {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Record a mutation about to happen.
+    pub fn record(&self, change: FileChange) {
+        self.entries.lock().expect("journal poisoned").push(change);
+    }
+
+    /// Take the most recent mutation for reverting.
+    pub fn pop(&self) -> Option<FileChange> {
+        self.entries.lock().expect("journal poisoned").pop()
+    }
+
+    pub fn len(&self) -> usize {
+        self.entries.lock().expect("journal poisoned").len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.len() == 0
+    }
+}
+
 /// Everything a tool needs at execution time. Notably it carries an
 /// [`Executor`] (so file/shell ops respect the active backend) and channels to
 /// the user — never a concrete UI.
@@ -49,6 +91,8 @@ pub struct ToolContext {
     pub interactor: Interactor,
     /// Present when sub-agent delegation is available.
     pub spawner: Option<Arc<dyn SubAgentSpawner>>,
+    /// Present when undo journaling is active; file tools record prior state here.
+    pub journal: Option<Arc<ChangeJournal>>,
 }
 
 /// A tool the model can call. Object-safe (via `async_trait`) so the registry
@@ -216,5 +260,30 @@ mod tests {
     fn parse_input_rejects_bad_args() {
         let r = parse_input::<EchoInput>(serde_json::json!({ "wrong": 1 }));
         assert!(matches!(r, Err(ToolError::InvalidInput(_))));
+    }
+
+    #[test]
+    fn change_journal_is_lifo() {
+        let j = ChangeJournal::new();
+        assert!(j.is_empty());
+        j.record(FileChange {
+            path: PathBuf::from("a.txt"),
+            before: None,
+            op: "write".into(),
+        });
+        j.record(FileChange {
+            path: PathBuf::from("b.txt"),
+            before: Some(b"old".to_vec()),
+            op: "edit".into(),
+        });
+        assert_eq!(j.len(), 2);
+        // Last in, first out.
+        let top = j.pop().unwrap();
+        assert_eq!(top.path, PathBuf::from("b.txt"));
+        assert_eq!(top.before.as_deref(), Some(b"old".as_slice()));
+        let next = j.pop().unwrap();
+        assert_eq!(next.path, PathBuf::from("a.txt"));
+        assert!(next.before.is_none());
+        assert!(j.pop().is_none());
     }
 }

@@ -333,6 +333,9 @@ async fn handle_core(model: &mut Model, event: Event, session: &SessionHandle) {
             model.busy = false;
             model.turn_count += 1;
         }
+        Event::Notice { message } => {
+            model.entries.push(Entry::Notice(message));
+        }
         Event::Error { message, .. } => {
             model
                 .entries

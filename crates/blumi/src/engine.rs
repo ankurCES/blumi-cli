@@ -76,6 +76,17 @@ pub async fn build_session(config: &BlumiConfig, yolo: bool) -> anyhow::Result<S
         config.paths.user_md(),
     ))));
 
+    // Cross-session recall: full-text (FTS5) search over past sessions. Skipped
+    // if the history DB can't be opened — it must never block startup.
+    match blumi_persist::Store::open(&config.paths.db).await {
+        Ok(store) => {
+            registry.register(Arc::new(blumi_core::Typed(
+                blumi_tools::SessionSearch::new(Arc::new(store)),
+            )));
+        }
+        Err(e) => tracing::warn!("session history unavailable; SessionSearch disabled: {e}"),
+    }
+
     let mut perm_cfg = config.permissions.clone();
     if yolo {
         perm_cfg.yolo = true;

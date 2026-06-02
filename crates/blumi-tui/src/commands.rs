@@ -49,6 +49,26 @@ pub const COMMANDS: &[CommandDef] = &[
         desc: "list available skills",
     },
     CommandDef {
+        name: "/sessions",
+        desc: "list recent sessions",
+    },
+    CommandDef {
+        name: "/export",
+        desc: "save transcript to a file",
+    },
+    CommandDef {
+        name: "/compact",
+        desc: "compact the context now",
+    },
+    CommandDef {
+        name: "/undo",
+        desc: "undo the last file change",
+    },
+    CommandDef {
+        name: "/yolo",
+        desc: "toggle auto-approve (yolo)",
+    },
+    CommandDef {
         name: "/model",
         desc: "switch model: /model <id>",
     },
@@ -135,6 +155,68 @@ pub async fn run(model: &mut Model, session: &SessionHandle, line: &str) {
                 model.entries.push(Entry::Notice(s));
             }
         }
+        "/sessions" => {
+            if model.recent_sessions.is_empty() {
+                model
+                    .entries
+                    .push(Entry::Notice("no past sessions yet".into()));
+            } else {
+                let mut s = String::from("recent sessions:");
+                for (id, title) in &model.recent_sessions {
+                    let title = if title.is_empty() {
+                        "(untitled)"
+                    } else {
+                        title
+                    };
+                    s.push_str(&format!("\n- {title}  [{id}]"));
+                }
+                s.push_str("\n(ask blumi to `SessionSearch` to search their contents)");
+                model.entries.push(Entry::Notice(s));
+            }
+        }
+        "/export" => match model.export_transcript() {
+            Ok(path) => model.entries.push(Entry::Notice(format!(
+                "exported transcript → {}",
+                path.display()
+            ))),
+            Err(e) => model
+                .entries
+                .push(Entry::Notice(format!("export failed: {e}"))),
+        },
+        "/compact" => {
+            if model.busy {
+                model
+                    .entries
+                    .push(Entry::Notice("busy — press esc to cancel first".into()));
+            } else {
+                let _ = session.send(Command::Compact).await;
+                model
+                    .entries
+                    .push(Entry::Notice("compacting context…".into()));
+            }
+        }
+        "/undo" => {
+            if model.busy {
+                model
+                    .entries
+                    .push(Entry::Notice("busy — press esc to cancel first".into()));
+            } else {
+                // The core replies with a Notice describing what was reverted.
+                let _ = session.send(Command::Undo).await;
+            }
+        }
+        "/yolo" => {
+            model.yolo = !model.yolo;
+            let _ = session.send(Command::SetYolo { on: model.yolo }).await;
+            model.entries.push(Entry::Notice(
+                if model.yolo {
+                    "auto-approve ON — blumi will run tools without asking. /yolo again to undo"
+                } else {
+                    "auto-approve off — tools will ask for approval"
+                }
+                .into(),
+            ));
+        }
         "/model" => {
             if arg.is_empty() {
                 model
@@ -184,7 +266,7 @@ fn help_text() -> String {
 
 fn status_text(model: &Model) -> String {
     format!(
-        "session — model: {} · turns: {} · tokens ↑{} ↓{} · tasks: {} · dashboard: {}",
+        "session — model: {} · turns: {} · tokens ↑{} ↓{} · tasks: {} · approve: {} · dashboard: {}",
         if model.model_name.is_empty() {
             "default"
         } else {
@@ -194,6 +276,7 @@ fn status_text(model: &Model) -> String {
         model.input_tokens,
         model.output_tokens,
         model.todos.len(),
+        if model.yolo { "auto" } else { "ask" },
         if model.show_dashboard { "on" } else { "off" },
     )
 }
