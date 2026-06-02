@@ -9,6 +9,7 @@ mod dir;
 mod files;
 mod path;
 mod search;
+mod session_search;
 mod shell;
 mod todo;
 
@@ -16,6 +17,7 @@ pub use delegate::Delegate;
 pub use dir::ListDirectory;
 pub use files::{FileEdit, FileRead, FileWrite};
 pub use search::{Glob, Grep};
+pub use session_search::SessionSearch;
 pub use shell::Bash;
 pub use todo::TodoWrite;
 
@@ -55,6 +57,7 @@ pub(crate) mod testutil {
             events: EventEmitter::new(etx),
             interactor: Interactor::new(itx),
             spawner: None,
+            journal: None,
         }
     }
 }

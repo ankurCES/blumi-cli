@@ -13,7 +13,7 @@ use crate::pipeline::execute_tool_call;
 use crate::registry::ToolRegistry;
 use crate::runner::{TurnContext, TurnRunner};
 use crate::session::SessionState;
-use crate::tool::{SubAgentSpawner, ToolContext};
+use crate::tool::{ChangeJournal, SubAgentSpawner, ToolContext};
 use crate::Executor;
 use async_trait::async_trait;
 use blumi_protocol::{
@@ -42,6 +42,7 @@ pub struct AgentTurnRunner {
     working_dir: PathBuf,
     context: ContextManager,
     spawner: Option<Arc<dyn SubAgentSpawner>>,
+    journal: Arc<ChangeJournal>,
 }
 
 impl AgentTurnRunner {
@@ -68,6 +69,7 @@ impl AgentTurnRunner {
             working_dir,
             context: ContextManager::new(context_size),
             spawner: None,
+            journal: Arc::new(ChangeJournal::new()),
         }
     }
 
@@ -85,6 +87,7 @@ impl AgentTurnRunner {
             events: ctx.events.clone(),
             interactor: ctx.interactor.clone(),
             spawner: self.spawner.clone(),
+            journal: Some(self.journal.clone()),
         }
     }
 }
@@ -254,6 +257,42 @@ impl TurnRunner for AgentTurnRunner {
             "reached the maximum number of tool iterations for this turn",
         );
         DoneReason::MaxIterations
+    }
+
+    fn set_yolo(&self, on: bool) {
+        self.perms.set_yolo(on);
+    }
+
+    fn yolo(&self) -> bool {
+        self.perms.is_yolo()
+    }
+
+    async fn compact(
+        &self,
+        state: Arc<Mutex<SessionState>>,
+        events: &crate::emit::EventEmitter,
+        ct: CancellationToken,
+    ) -> bool {
+        self.context
+            .compact_now(&self.llm, &state, &self.options, events, &ct)
+            .await
+    }
+
+    async fn undo(&self) -> Option<String> {
+        let change = self.journal.pop()?;
+        let display = change.path.display().to_string();
+        let outcome = match &change.before {
+            Some(bytes) => self.executor.write_file(&change.path, bytes).await,
+            None => self.executor.remove_file(&change.path).await,
+        };
+        Some(match outcome {
+            Ok(()) if change.before.is_some() => format!("undid {} to {display}", change.op),
+            Ok(()) => format!(
+                "undid {} — removed {display} (was newly created)",
+                change.op
+            ),
+            Err(e) => format!("undo failed for {display}: {e}"),
+        })
     }
 }
 

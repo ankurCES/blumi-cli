@@ -134,6 +134,9 @@ pub enum Event {
     /// The turn is complete.
     #[serde(rename = "done")]
     TurnDone { reason: DoneReason },
+    /// An informational message from the core (e.g. `/undo` / `/compact`
+    /// confirmations). Rendered like a system note, not an error.
+    Notice { message: String },
     /// A turn-level error.
     Error {
         kind: String,
@@ -162,6 +165,7 @@ impl Event {
             Event::Usage { .. } => "usage",
             Event::Compaction { .. } => "compaction",
             Event::TurnDone { .. } => "done",
+            Event::Notice { .. } => "notice",
             Event::Error { .. } => "error",
         }
     }

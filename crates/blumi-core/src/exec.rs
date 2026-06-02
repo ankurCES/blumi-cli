@@ -88,6 +88,14 @@ pub trait Executor: Send + Sync {
     /// Write a file's raw bytes, creating parent directories as needed.
     async fn write_file(&self, path: &Path, contents: &[u8]) -> Result<(), ExecError>;
 
+    /// Remove a file. Used by `/undo` to revert a freshly-created file. Default:
+    /// unsupported (backends that allow writes should override this).
+    async fn remove_file(&self, _path: &Path) -> Result<(), ExecError> {
+        Err(ExecError::Unavailable(
+            "remove_file is not supported by this backend".into(),
+        ))
+    }
+
     /// Whether a path exists in the backend.
     async fn exists(&self, path: &Path) -> Result<bool, ExecError>;
 

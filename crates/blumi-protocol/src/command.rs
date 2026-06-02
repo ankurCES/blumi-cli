@@ -51,6 +51,12 @@ pub enum Command {
     },
     /// Switch the active model mid-session.
     SetModel { model: String },
+    /// Toggle auto-approve-all (yolo) at runtime.
+    SetYolo { on: bool },
+    /// Force a context compaction now (manual `/compact`).
+    Compact,
+    /// Revert the most recent file change (manual `/undo`).
+    Undo,
 }
 
 #[cfg(test)]

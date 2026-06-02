@@ -51,9 +51,34 @@ impl ContextManager {
         events: &EventEmitter,
         ct: &CancellationToken,
     ) -> bool {
+        self.compact(llm, state, options, events, ct, false).await
+    }
+
+    /// Force a compaction now regardless of the budget (the manual `/compact`).
+    /// Still keeps the recent tail and needs enough history to be worthwhile.
+    pub async fn compact_now(
+        &self,
+        llm: &Arc<dyn LlmClient>,
+        state: &Arc<Mutex<SessionState>>,
+        options: &LlmOptions,
+        events: &EventEmitter,
+        ct: &CancellationToken,
+    ) -> bool {
+        self.compact(llm, state, options, events, ct, true).await
+    }
+
+    async fn compact(
+        &self,
+        llm: &Arc<dyn LlmClient>,
+        state: &Arc<Mutex<SessionState>>,
+        options: &LlmOptions,
+        events: &EventEmitter,
+        ct: &CancellationToken,
+        force: bool,
+    ) -> bool {
         let messages = {
             let st = state.lock().await;
-            if Self::estimate_tokens(&st.messages) < self.budget() {
+            if !force && Self::estimate_tokens(&st.messages) < self.budget() {
                 return false;
             }
             if st.messages.len() <= self.keep_messages + 2 {
@@ -232,5 +257,30 @@ mod tests {
             )
             .await;
         assert!(!compacted);
+    }
+
+    #[tokio::test]
+    async fn force_compacts_even_under_budget() {
+        // Huge budget: maybe_compact would be a no-op, but compact_now forces it.
+        let cm = ContextManager::new(1_000_000);
+        let state = Arc::new(Mutex::new(SessionState::new(SessionId::from("s"), "m")));
+        {
+            let mut st = state.lock().await;
+            for i in 0..14 {
+                st.messages.push(Message::user(format!("message {i}")));
+            }
+        }
+        let (etx, _erx) = tokio::sync::mpsc::unbounded_channel();
+        let events = EventEmitter::new(etx);
+        let llm: Arc<dyn LlmClient> = Arc::new(SummaryLlm);
+
+        let opts = LlmOptions::default();
+        let ct = CancellationToken::new();
+        assert!(!cm.maybe_compact(&llm, &state, &opts, &events, &ct).await);
+        assert!(cm.compact_now(&llm, &state, &opts, &events, &ct).await);
+
+        let st = state.lock().await;
+        assert_eq!(st.messages.len(), 9); // summary + 8 kept
+        assert!(st.messages[0].text().contains("SUMMARY"));
     }
 }

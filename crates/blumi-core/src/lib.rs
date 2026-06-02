@@ -35,7 +35,10 @@ pub use registry::ToolRegistry;
 pub use runner::{TurnContext, TurnRunner};
 pub use session::{SessionSnapshot, SessionState};
 pub use subagent::{builtin_agents, AgentDef, AgentSpawner};
-pub use tool::{parse_input, schema_for, SubAgentSpawner, Tool, ToolContext, Typed, TypedTool};
+pub use tool::{
+    parse_input, schema_for, ChangeJournal, FileChange, SubAgentSpawner, Tool, ToolContext, Typed,
+    TypedTool,
+};
 
 // Re-export the protocol vocabulary so downstream crates can depend on just
 // `blumi-core` for the common types.

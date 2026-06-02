@@ -38,4 +38,30 @@ pub trait TurnRunner: Send + Sync {
         ctx: TurnContext,
         ct: CancellationToken,
     ) -> DoneReason;
+
+    /// Toggle auto-approve-all (yolo) at runtime. Default: no-op.
+    fn set_yolo(&self, _on: bool) {}
+
+    /// Whether auto-approve-all is currently on. Default: `false`.
+    fn yolo(&self) -> bool {
+        false
+    }
+
+    /// Force a context compaction now (the manual `/compact`). Emits a
+    /// `Compaction` event via `events` on success. Default: no-op → `false`.
+    async fn compact(
+        &self,
+        _state: Arc<Mutex<SessionState>>,
+        _events: &EventEmitter,
+        _ct: CancellationToken,
+    ) -> bool {
+        false
+    }
+
+    /// Revert the most recent file change (the manual `/undo`). Returns a short
+    /// description of what was reverted, or `None` if there was nothing to undo.
+    /// Default: `None`.
+    async fn undo(&self) -> Option<String> {
+        None
+    }
 }

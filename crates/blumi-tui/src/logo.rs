@@ -11,6 +11,24 @@ pub const MARK: &str = "✿ blumi";
 /// The wordmark on its own.
 pub const WORDMARK: &str = "blumi";
 
+/// A tagline shown beneath the wordmark on the splash / banner.
+pub const TAGLINE: &str = "the local-first agentic coding companion";
+
+/// Block-letter wordmark ("BLUMI", ANSI-Shadow figlet) for the landing splash
+/// and the CLI banner. Rendered with a vertical rose→cyan gradient by the
+/// mascot module — the bold gradient-block style, à la hermes' logo.
+pub const BLUMI_BLOCK: [&str; 6] = [
+    "██████╗ ██╗     ██╗   ██╗███╗   ███╗██╗",
+    "██╔══██╗██║     ██║   ██║████╗ ████║██║",
+    "██████╔╝██║     ██║   ██║██╔████╔██║██║",
+    "██╔══██╗██║     ██║   ██║██║╚██╔╝██║██║",
+    "██████╔╝███████╗╚██████╔╝██║ ╚═╝ ██║██║",
+    "╚═════╝ ╚══════╝ ╚═════╝ ╚═╝     ╚═╝╚═╝",
+];
+
+/// Visible width (columns) of every row in [`BLUMI_BLOCK`].
+pub const BLUMI_BLOCK_WIDTH: u16 = 39;
+
 /// Multi-line flower splash for the landing/onboarding screen.
 ///
 /// A four-petal bloom around a center, with the wordmark beneath:
@@ -35,5 +53,16 @@ mod tests {
         assert_eq!(lines.len(), 4);
         assert!(lines[3].replace(' ', "").contains("blumi"));
         assert_eq!(MARK, "✿ blumi");
+    }
+
+    #[test]
+    fn block_wordmark_rows_are_uniform_width() {
+        for row in BLUMI_BLOCK {
+            assert_eq!(
+                row.chars().count(),
+                BLUMI_BLOCK_WIDTH as usize,
+                "row: {row}"
+            );
+        }
     }
 }

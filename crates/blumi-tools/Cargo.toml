@@ -9,6 +9,7 @@ license.workspace = true
 [dependencies]
 blumi-core.workspace = true
 blumi-protocol.workspace = true
+blumi-persist.workspace = true
 
 tokio = { workspace = true }
 tokio-util.workspace = true

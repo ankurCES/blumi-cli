@@ -190,6 +190,49 @@ impl SessionActor {
             Command::SetModel { model } => {
                 self.state.lock().await.model = model;
             }
+            Command::SetYolo { on } => {
+                self.runner.set_yolo(on);
+            }
+            Command::Compact => {
+                if self.turn_token.is_some() {
+                    self.publish(Event::Error {
+                        kind: "busy".into(),
+                        message: "cannot compact while a turn is running".into(),
+                        hint: Some("press esc to cancel first".into()),
+                    });
+                } else {
+                    let events = EventEmitter::new(self.event_tx.clone());
+                    let did = self
+                        .runner
+                        .compact(self.state.clone(), &events, CancellationToken::new())
+                        .await;
+                    // Drain the Compaction event the runner emitted, if any.
+                    while let Ok(event) = self.event_rx.try_recv() {
+                        self.publish(event);
+                    }
+                    if !did {
+                        self.publish(Event::Notice {
+                            message: "nothing to compact yet — history is still small".into(),
+                        });
+                    }
+                }
+            }
+            Command::Undo => {
+                if self.turn_token.is_some() {
+                    self.publish(Event::Error {
+                        kind: "busy".into(),
+                        message: "cannot undo while a turn is running".into(),
+                        hint: Some("press esc to cancel first".into()),
+                    });
+                } else {
+                    let msg = self
+                        .runner
+                        .undo()
+                        .await
+                        .unwrap_or_else(|| "nothing to undo".to_string());
+                    self.publish(Event::Notice { message: msg });
+                }
+            }
         }
     }
 

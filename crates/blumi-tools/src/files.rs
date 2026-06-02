@@ -2,12 +2,26 @@
 
 use crate::path::resolve;
 use async_trait::async_trait;
-use blumi_core::{ToolContext, ToolError, TypedTool};
+use blumi_core::{FileChange, ToolContext, ToolError, TypedTool};
 use blumi_protocol::{Capability, SideEffect, ToolResult};
 use schemars::JsonSchema;
 use serde::Deserialize;
 use similar::TextDiff;
+use std::path::Path;
 use tokio_util::sync::CancellationToken;
+
+/// Record a file's prior contents in the undo journal before a mutation
+/// (best-effort; absent journal or unreadable file just records a create).
+async fn journal_before(ctx: &ToolContext, path: &Path, op: &str) {
+    if let Some(journal) = &ctx.journal {
+        let before = ctx.executor.read_file(path).await.ok();
+        journal.record(FileChange {
+            path: path.to_path_buf(),
+            before,
+            op: op.to_string(),
+        });
+    }
+}
 
 // ---------------------------------------------------------------------------
 // FileRead
@@ -119,6 +133,7 @@ impl TypedTool for FileWrite {
     ) -> Result<ToolResult, ToolError> {
         let path = resolve(&ctx.working_dir, &input.path);
         let bytes = input.content.as_bytes();
+        journal_before(ctx, &path, "write").await;
         ctx.executor.write_file(&path, bytes).await.map_err(|e| {
             ToolError::Execution(format!("could not write {}: {e}", path.display()))
         })?;
@@ -195,6 +210,15 @@ impl TypedTool for FileEdit {
             original.replacen(&input.old_string, &input.new_string, 1)
         };
 
+        // Record the original for /undo (we already have it in `bytes`).
+        if let Some(journal) = &ctx.journal {
+            journal.record(FileChange {
+                path: path.clone(),
+                before: Some(bytes.clone()),
+                op: "edit".to_string(),
+            });
+        }
+
         ctx.executor
             .write_file(&path, updated.as_bytes())
             .await
@@ -248,6 +272,43 @@ mod tests {
                 .unwrap();
         assert!(res.model_preview.contains("1\tline1"));
         assert!(res.model_preview.contains("2\tline2"));
+    }
+
+    #[tokio::test]
+    async fn journals_write_and_edit_for_undo() {
+        use std::sync::Arc;
+        let dir = tempfile::tempdir().unwrap();
+        let journal = Arc::new(blumi_core::ChangeJournal::new());
+        let mut c = ctx(dir.path());
+        c.journal = Some(journal.clone());
+
+        // Creating a new file records before = None (so undo deletes it).
+        let w = blumi_core::Typed(FileWrite);
+        blumi_core::Tool::execute(
+            &w,
+            json!({ "path": "n.txt", "content": "v1" }),
+            &c,
+            CancellationToken::new(),
+        )
+        .await
+        .unwrap();
+        // Editing records before = the prior contents (so undo restores them).
+        let e = blumi_core::Typed(FileEdit);
+        blumi_core::Tool::execute(
+            &e,
+            json!({ "path": "n.txt", "old_string": "v1", "new_string": "v2" }),
+            &c,
+            CancellationToken::new(),
+        )
+        .await
+        .unwrap();
+
+        let edit = journal.pop().unwrap();
+        assert_eq!(edit.op, "edit");
+        assert_eq!(edit.before.as_deref(), Some(b"v1".as_slice()));
+        let create = journal.pop().unwrap();
+        assert_eq!(create.op, "write");
+        assert!(create.before.is_none());
     }
 
     #[tokio::test]

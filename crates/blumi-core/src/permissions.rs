@@ -11,6 +11,7 @@ use blumi_config::PermissionConfig;
 use blumi_protocol::{ApprovalScope, Decision};
 use serde_json::Value;
 use std::collections::HashSet;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Mutex;
 
 /// The result of a permission check for one tool call.
@@ -29,16 +30,31 @@ enum Class {
 
 pub struct PermissionEngine {
     config: PermissionConfig,
+    /// Auto-approve everything (yolo). Seeded from config, toggleable at runtime
+    /// via [`set_yolo`](Self::set_yolo) (the `/yolo` command).
+    yolo: AtomicBool,
     /// Tools the user approved for the rest of the session.
     remembered: Mutex<HashSet<String>>,
 }
 
 impl PermissionEngine {
     pub fn new(config: PermissionConfig) -> Self {
+        let yolo = AtomicBool::new(config.yolo);
         PermissionEngine {
             config,
+            yolo,
             remembered: Mutex::new(HashSet::new()),
         }
+    }
+
+    /// Turn auto-approve-all on or off at runtime.
+    pub fn set_yolo(&self, on: bool) {
+        self.yolo.store(on, Ordering::Relaxed);
+    }
+
+    /// Whether auto-approve-all is currently on.
+    pub fn is_yolo(&self) -> bool {
+        self.yolo.load(Ordering::Relaxed)
     }
 
     /// Check a tool call, prompting the user if policy is inconclusive.
@@ -81,7 +97,7 @@ impl PermissionEngine {
     }
 
     fn classify(&self, tool_name: &str, is_read_only: bool, input: &Value) -> Class {
-        if self.config.yolo {
+        if self.is_yolo() {
             return Class::Allow;
         }
         // Reads never mutate; allow by default.
@@ -216,6 +232,27 @@ mod tests {
         assert!(matches!(
             e.classify("Bash", false, &json!({ "command": "rm -rf /" })),
             Class::Allow
+        ));
+    }
+
+    #[test]
+    fn yolo_toggles_at_runtime() {
+        let e = engine(); // starts off
+        assert!(matches!(
+            e.classify("FileWrite", false, &json!({ "path": "src/x.rs" })),
+            Class::Ask { .. }
+        ));
+        e.set_yolo(true);
+        assert!(e.is_yolo());
+        assert!(matches!(
+            e.classify("FileWrite", false, &json!({ "path": "src/x.rs" })),
+            Class::Allow
+        ));
+        e.set_yolo(false);
+        assert!(!e.is_yolo());
+        assert!(matches!(
+            e.classify("FileWrite", false, &json!({ "path": "src/x.rs" })),
+            Class::Ask { .. }
         ));
     }
 
