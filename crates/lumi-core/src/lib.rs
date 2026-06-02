@@ -6,6 +6,7 @@
 //! stream. UIs (TUI, web) are just subscribers; they never see internals.
 
 mod actor;
+mod agent;
 mod emit;
 mod error;
 mod eventlog;
@@ -19,6 +20,7 @@ mod session;
 mod tool;
 
 pub use actor::{spawn_session, SessionClosed, SessionHandle};
+pub use agent::AgentTurnRunner;
 pub use emit::{
     EventEmitter, InteractionKind, InteractionReply, InteractionRequest, Interactor,
 };
