@@ -7,3 +7,13 @@ rust-version.workspace = true
 license.workspace = true
 
 [dependencies]
+blumi-core.workspace = true
+blumi-protocol.workspace = true
+
+rmcp = { version = "1.7", features = ["client", "transport-child-process"] }
+tokio = { workspace = true }
+tokio-util.workspace = true
+async-trait.workspace = true
+serde_json.workspace = true
+anyhow.workspace = true
+tracing.workspace = true

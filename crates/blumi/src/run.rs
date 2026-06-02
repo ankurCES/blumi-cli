@@ -9,7 +9,7 @@ pub async fn run(config: BlumiConfig, prompt: String, yolo: bool) -> anyhow::Res
     let prompt = resolve_prompt(prompt)?;
     config.paths.ensure_dirs().ok();
 
-    let session = build_session(&config, yolo)?;
+    let session = build_session(&config, yolo).await?;
     let mut events = session.subscribe();
     session
         .send(Command::UserMessage {

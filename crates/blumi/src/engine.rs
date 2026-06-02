@@ -22,7 +22,7 @@ fn mock_demo() -> Vec<StreamChunk> {
         "Hello! This is the **mock** provider — no network or API key needed.\n\n",
         "It shows the v1 TUI: *markdown*, `inline code`, lists, and highlighted code.\n\n",
         "```rust\nfn main() {\n    let name = \"blumi\";\n    println!(\"hello, {name}\");\n}\n```\n\n",
-        "Things to try:\n\n- `Ctrl+P` command palette\n- `/theme` to cycle bloom / dark / mono\n- `/help` to list commands\n\n",
+        "Things to try:\n\n- `Ctrl+P` command palette\n- `/theme` to cycle rose / spatial / aurora / …\n- `/help` to list commands\n\n",
         "> Configure a real provider (anthropic, openai, ollama) to do real work.\n",
     ];
     let mut chunks: Vec<StreamChunk> = parts
@@ -39,7 +39,8 @@ fn mock_demo() -> Vec<StreamChunk> {
 
 /// Build and spawn a session actor from config. `yolo` forces auto-approval
 /// (used by headless `run`); the TUI passes `false` so approvals are interactive.
-pub fn build_session(config: &BlumiConfig, yolo: bool) -> anyhow::Result<SessionHandle> {
+/// Async because connecting MCP servers spawns child processes.
+pub async fn build_session(config: &BlumiConfig, yolo: bool) -> anyhow::Result<SessionHandle> {
     let llm: Arc<dyn LlmClient> = if config.llm.provider == "mock" {
         Arc::new(MockLlmClient::new(mock_demo()))
     } else {
@@ -54,6 +55,26 @@ pub fn build_session(config: &BlumiConfig, yolo: bool) -> anyhow::Result<Session
 
     let mut registry = ToolRegistry::new();
     blumi_tools::register_builtin_tools(&mut registry);
+
+    // Skills: discover SKILL.md under the user + project skills dirs; register
+    // the `skill` tool and advertise them in the system prompt.
+    let skill_dirs = [
+        config.paths.skills.clone(),
+        config.paths.working_dir.join(".blumi").join("skills"),
+    ];
+    let skills = blumi_skills::SkillCatalog::load(&skill_dirs);
+    let skills_section = skills.prompt_section();
+    if !skills.is_empty() {
+        registry.register(Arc::new(blumi_core::Typed(blumi_skills::SkillTool::new(
+            Arc::new(skills),
+        ))));
+    }
+
+    // Long-term memory: the agent can persist to MEMORY.md / USER.md.
+    registry.register(Arc::new(blumi_core::Typed(blumi_skills::MemoryTool::new(
+        config.paths.memory_md(),
+        config.paths.user_md(),
+    ))));
 
     let mut perm_cfg = config.permissions.clone();
     if yolo {
@@ -72,8 +93,29 @@ pub fn build_session(config: &BlumiConfig, yolo: bool) -> anyhow::Result<Session
         prompt_cache: true,
     };
 
+    // MCP: connect each enabled server and register its tools (mcp__server__tool).
+    // A failed connection is logged and skipped — it never blocks startup.
+    for (srv_name, srv) in &config.mcp_servers {
+        if !srv.enabled {
+            continue;
+        }
+        let env: Vec<(String, String)> = srv
+            .env
+            .iter()
+            .map(|(k, v)| (k.clone(), v.clone()))
+            .collect();
+        match blumi_mcp::connect_server(srv_name, &srv.command, &srv.args, &env).await {
+            Ok(tools) => {
+                for tool in tools {
+                    registry.register(tool);
+                }
+            }
+            Err(e) => tracing::warn!("MCP server '{srv_name}' failed to connect: {e}"),
+        }
+    }
+
     let memory = MemorySnapshot::load(&config.paths.memory_md(), &config.paths.user_md());
-    let system_prompt = build_system_prompt(config, &memory);
+    let system_prompt = build_system_prompt(config, &memory, &skills_section);
 
     let registry = Arc::new(registry);
 

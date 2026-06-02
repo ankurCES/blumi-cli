@@ -19,6 +19,7 @@ blumi-llm.workspace = true
 blumi-tools.workspace = true
 blumi-exec.workspace = true
 blumi-skills.workspace = true
+blumi-mcp.workspace = true
 blumi-persist.workspace = true
 blumi-tui.workspace = true
 

@@ -76,6 +76,23 @@ pub struct PermissionConfig {
     pub yolo: bool,
 }
 
+fn default_true() -> bool {
+    true
+}
+
+/// An external MCP (Model Context Protocol) server launched over stdio.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct McpServerConfig {
+    /// Executable to spawn, e.g. `npx`.
+    pub command: String,
+    #[serde(default)]
+    pub args: Vec<String>,
+    #[serde(default)]
+    pub env: BTreeMap<String, String>,
+    #[serde(default = "default_true")]
+    pub enabled: bool,
+}
+
 /// The full blumi configuration.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
@@ -83,6 +100,9 @@ pub struct BlumiConfig {
     pub llm: LlmConfig,
     pub providers: BTreeMap<String, ProviderConfig>,
     pub permissions: PermissionConfig,
+    /// External MCP servers to launch and expose as tools, keyed by name.
+    #[serde(default)]
+    pub mcp_servers: BTreeMap<String, McpServerConfig>,
     /// Enable sending images to vision-capable models.
     pub vision_enabled: bool,
     pub verbose: bool,
@@ -97,6 +117,7 @@ impl Default for BlumiConfig {
             llm: LlmConfig::default(),
             providers: default_providers(),
             permissions: PermissionConfig::default(),
+            mcp_servers: BTreeMap::new(),
             vision_enabled: false,
             verbose: false,
             paths: Paths::default(),
@@ -260,6 +281,26 @@ mod tests {
                 Some("https://r.services.ai.azure.com")
             );
             assert_eq!(p.resolve_api_key().as_deref(), Some("azkey"));
+            Ok(())
+        });
+    }
+
+    #[test]
+    #[allow(clippy::result_large_err)]
+    fn parses_mcp_servers() {
+        Jail::expect_with(|jail| {
+            jail.create_dir(".blumi")?;
+            jail.create_file(
+                ".blumi/settings.json",
+                r#"{ "mcp_servers": { "fs": { "command": "npx",
+                   "args": ["-y", "@modelcontextprotocol/server-filesystem", "/tmp"] } } }"#,
+            )?;
+            let cfg = BlumiConfig::load(jail.directory(), Some(jail.directory().join("home")))
+                .expect("load");
+            let fs = cfg.mcp_servers.get("fs").expect("fs server");
+            assert_eq!(fs.command, "npx");
+            assert_eq!(fs.args.len(), 3);
+            assert!(fs.enabled); // default
             Ok(())
         });
     }

@@ -2,11 +2,16 @@
 
 use crate::model::{Entry, Focus, Model};
 use crate::theme::{icon, Theme};
+use blumi_protocol::TodoStatus;
 use ratatui::layout::{Alignment, Constraint, Layout, Rect};
 use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Clear, Paragraph};
 use ratatui::Frame;
+
+/// Min terminal width to show the run dashboard sidebar.
+const DASHBOARD_MIN_WIDTH: u16 = 90;
+const DASHBOARD_WIDTH: u16 = 28;
 
 const MAX_CONTENT_WIDTH: u16 = 100;
 
@@ -24,6 +29,18 @@ pub fn render(model: &mut Model, f: &mut Frame) {
     .areas(area);
 
     render_header(model, f, header, &theme);
+
+    // Split the body into chat + run dashboard when there's room and a run.
+    let chat = if model.show_dashboard && chat.width >= DASHBOARD_MIN_WIDTH && !model.is_empty() {
+        let [main, side] =
+            Layout::horizontal([Constraint::Min(0), Constraint::Length(DASHBOARD_WIDTH)])
+                .areas(chat);
+        render_dashboard(model, f, side, &theme);
+        main
+    } else {
+        chat
+    };
+
     if model.is_empty() {
         render_landing(model, f, chat, &theme);
     } else {
@@ -38,6 +55,156 @@ pub fn render(model: &mut Model, f: &mut Frame) {
     if model.dialog.is_some() {
         render_dialog(model, f, area, &theme);
     }
+    if model.memory_view.is_some() {
+        render_memory(model, f, area, &theme);
+    }
+    // Slash-command popup floats just above the editor.
+    if model.slash_active() {
+        render_slash_popup(model, f, editor, &theme);
+    }
+}
+
+/// The run dashboard: tasks (todos), token usage, and session info.
+fn render_dashboard(model: &Model, f: &mut Frame, area: Rect, theme: &Theme) {
+    let block = Block::default()
+        .borders(Borders::LEFT)
+        .border_style(theme.dim())
+        .title(Span::styled(
+            format!(" {} run ", icon::FLOWER),
+            theme.bold_primary(),
+        ));
+    let inner = block.inner(area);
+    f.render_widget(block, area);
+
+    let mut lines: Vec<Line> = Vec::new();
+
+    lines.push(Line::from(Span::styled("Tasks", theme.accent())));
+    if model.todos.is_empty() {
+        lines.push(Line::from(Span::styled("  (none yet)", theme.dim())));
+    } else {
+        for todo in &model.todos {
+            let (mark, style) = match todo.status {
+                TodoStatus::Completed => (icon::OK, Style::default().fg(theme.success)),
+                TodoStatus::InProgress => ("→", theme.accent()),
+                TodoStatus::Pending => ("•", theme.subtle()),
+            };
+            let text = truncate(&todo.content, inner.width.saturating_sub(3) as usize);
+            lines.push(Line::from(vec![
+                Span::styled(format!("{mark} "), style),
+                Span::styled(text, theme.body()),
+            ]));
+        }
+    }
+
+    lines.push(Line::raw(""));
+    lines.push(Line::from(Span::styled("Usage", theme.accent())));
+    lines.push(Line::from(Span::styled(
+        format!("  ↑ {}  ↓ {}", model.input_tokens, model.output_tokens),
+        theme.subtle(),
+    )));
+
+    lines.push(Line::raw(""));
+    lines.push(Line::from(Span::styled("Session", theme.accent())));
+    let model_name = if model.model_name.is_empty() {
+        "default"
+    } else {
+        &model.model_name
+    };
+    lines.push(Line::from(Span::styled(
+        format!(
+            "  {}",
+            truncate(model_name, inner.width.saturating_sub(2) as usize)
+        ),
+        theme.subtle(),
+    )));
+    lines.push(Line::from(Span::styled(
+        format!("  turn {}", model.turn_count),
+        theme.dim(),
+    )));
+    if model.busy {
+        lines.push(Line::raw(""));
+        lines.push(Line::from(crate::mascot::thinking(model.spinner_frame)));
+    }
+
+    f.render_widget(Paragraph::new(lines), inner);
+}
+
+/// The slash-command autocomplete popup, anchored above the editor.
+fn render_slash_popup(model: &Model, f: &mut Frame, editor: Rect, theme: &Theme) {
+    let matches = crate::commands::matching(&model.input_text());
+    if matches.is_empty() {
+        return;
+    }
+    let shown = matches.len().min(8);
+    let height = shown as u16 + 2;
+    let width = editor.width.min(48);
+    let y = editor.y.saturating_sub(height);
+    let popup = Rect {
+        x: editor.x,
+        y,
+        width,
+        height,
+    };
+    f.render_widget(Clear, popup);
+
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .border_style(Style::default().fg(theme.primary))
+        .title(Span::styled(" commands ", theme.subtle()));
+    let inner = block.inner(popup);
+    f.render_widget(block, popup);
+
+    let sel = model.slash_sel.min(matches.len().saturating_sub(1));
+    let rows: Vec<Line> = matches
+        .iter()
+        .take(shown)
+        .enumerate()
+        .map(|(i, c)| {
+            let selected = i == sel;
+            let marker = if selected { "❯ " } else { "  " };
+            let name_style = if selected {
+                theme.bold_primary()
+            } else {
+                theme.body()
+            };
+            Line::from(vec![
+                Span::styled(marker, theme.accent()),
+                Span::styled(format!("{:<11}", c.name), name_style),
+                Span::styled(c.desc, theme.dim()),
+            ])
+        })
+        .collect();
+    f.render_widget(Paragraph::new(rows), inner);
+}
+
+/// The `/memory` overlay: shows MEMORY.md + USER.md.
+fn render_memory(model: &Model, f: &mut Frame, area: Rect, theme: &Theme) {
+    let Some(text) = &model.memory_view else {
+        return;
+    };
+    let popup = centered_rect(70, 60, area);
+    f.render_widget(Clear, popup);
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .border_style(Style::default().fg(theme.primary))
+        .title(Span::styled(
+            " memory — any key to close ",
+            theme.bold_primary(),
+        ));
+    let inner = block.inner(popup);
+    f.render_widget(block, popup);
+
+    let width = inner.width.saturating_sub(1) as usize;
+    let mut lines: Vec<Line> = Vec::new();
+    for raw in text.lines() {
+        let style = if raw.ends_with(')') && !raw.starts_with(' ') {
+            theme.accent() // section headers like "MEMORY.md (agent notes)"
+        } else {
+            theme.body()
+        };
+        lines.push(Line::from(Span::styled(truncate(raw, width), style)));
+    }
+    f.render_widget(Paragraph::new(lines), inner);
 }
 
 fn render_dialog(model: &Model, f: &mut Frame, area: Rect, theme: &Theme) {
