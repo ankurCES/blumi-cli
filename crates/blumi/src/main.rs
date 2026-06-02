@@ -34,6 +34,10 @@ struct Cli {
     /// Start with a named agent persona (e.g. architect, pair, reviewer).
     #[arg(long, global = true)]
     persona: Option<String>,
+
+    /// Execution sandbox: "local" (host) or "docker" (container).
+    #[arg(long, global = true)]
+    sandbox: Option<String>,
 }
 
 #[derive(Subcommand)]
@@ -127,6 +131,9 @@ async fn main() -> anyhow::Result<()> {
     }
     if let Some(p) = cli.persona {
         config.persona = p;
+    }
+    if let Some(s) = cli.sandbox {
+        config.executor.backend = s;
     }
 
     match cli.command {
