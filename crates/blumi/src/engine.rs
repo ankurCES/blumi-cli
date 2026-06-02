@@ -55,6 +55,20 @@ pub fn build_session(config: &BlumiConfig, yolo: bool) -> anyhow::Result<Session
     let mut registry = ToolRegistry::new();
     blumi_tools::register_builtin_tools(&mut registry);
 
+    // Skills: discover SKILL.md under the user + project skills dirs; register
+    // the `skill` tool and advertise them in the system prompt.
+    let skill_dirs = [
+        config.paths.skills.clone(),
+        config.paths.working_dir.join(".blumi").join("skills"),
+    ];
+    let skills = blumi_skills::SkillCatalog::load(&skill_dirs);
+    let skills_section = skills.prompt_section();
+    if !skills.is_empty() {
+        registry.register(Arc::new(blumi_core::Typed(blumi_skills::SkillTool::new(
+            Arc::new(skills),
+        ))));
+    }
+
     let mut perm_cfg = config.permissions.clone();
     if yolo {
         perm_cfg.yolo = true;
@@ -73,7 +87,7 @@ pub fn build_session(config: &BlumiConfig, yolo: bool) -> anyhow::Result<Session
     };
 
     let memory = MemorySnapshot::load(&config.paths.memory_md(), &config.paths.user_md());
-    let system_prompt = build_system_prompt(config, &memory);
+    let system_prompt = build_system_prompt(config, &memory, &skills_section);
 
     let registry = Arc::new(registry);
 

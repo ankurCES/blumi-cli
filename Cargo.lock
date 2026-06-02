@@ -328,8 +328,14 @@ dependencies = [
 name = "blumi-skills"
 version = "0.1.0"
 dependencies = [
+ "async-trait",
+ "blumi-core",
+ "blumi-protocol",
+ "schemars",
+ "serde",
  "tempfile",
  "tokio",
+ "tokio-util",
  "tracing",
 ]
 

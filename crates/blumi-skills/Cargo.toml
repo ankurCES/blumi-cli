@@ -7,7 +7,14 @@ rust-version.workspace = true
 license.workspace = true
 
 [dependencies]
+blumi-core.workspace = true
+blumi-protocol.workspace = true
+
 tokio = { workspace = true }
+tokio-util.workspace = true
+async-trait.workspace = true
+serde.workspace = true
+schemars.workspace = true
 tracing.workspace = true
 
 [dev-dependencies]

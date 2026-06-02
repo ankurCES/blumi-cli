@@ -18,8 +18,13 @@ Guidelines:
 unless asked.
 - When a task has multiple steps, track them with TodoWrite.";
 
-/// Build the full system prompt for a session.
-pub fn build_system_prompt(config: &BlumiConfig, memory: &MemorySnapshot) -> String {
+/// Build the full system prompt for a session. `skills_section` is the
+/// available-skills listing (empty when there are none).
+pub fn build_system_prompt(
+    config: &BlumiConfig,
+    memory: &MemorySnapshot,
+    skills_section: &str,
+) -> String {
     let mut s = String::with_capacity(2048);
     s.push_str(BASE);
     s.push_str(&format!(
@@ -35,6 +40,11 @@ pub fn build_system_prompt(config: &BlumiConfig, memory: &MemorySnapshot) -> Str
             s.push_str(content);
             s.push('\n');
         }
+    }
+
+    if !skills_section.is_empty() {
+        s.push('\n');
+        s.push_str(skills_section);
     }
 
     let mem = memory.to_prompt_section();
