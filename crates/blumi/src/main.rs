@@ -4,6 +4,7 @@ mod branding;
 mod cron;
 mod engine;
 mod onboarding;
+mod playbook;
 mod prompt;
 mod run;
 mod session;
@@ -66,6 +67,25 @@ enum Commands {
         #[command(subcommand)]
         action: CronCmd,
     },
+    /// Run a YAML playbook (multi-step workflow with gates + resume).
+    Playbook {
+        #[command(subcommand)]
+        action: PlaybookCmd,
+    },
+}
+
+#[derive(Subcommand)]
+enum PlaybookCmd {
+    /// Run a playbook file (resumes after the last completed step).
+    Run {
+        /// Path to the playbook .yaml.
+        file: PathBuf,
+        /// Ignore saved progress and run every step.
+        #[arg(long)]
+        restart: bool,
+    },
+    /// List playbooks found under ~/.blumi/playbooks and .blumi/playbooks.
+    List,
 }
 
 #[derive(Subcommand)]
@@ -186,6 +206,10 @@ async fn main() -> anyhow::Result<()> {
             CronCmd::List => cron::list(config),
             CronCmd::Rm { id } => cron::remove(config, id),
             CronCmd::Run { watch } => cron::run(config, watch).await,
+        },
+        Some(Commands::Playbook { action }) => match action {
+            PlaybookCmd::Run { file, restart } => playbook::run(config, file, restart).await,
+            PlaybookCmd::List => playbook::list(config),
         },
     }
 }
