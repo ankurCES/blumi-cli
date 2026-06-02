@@ -121,6 +121,21 @@ impl Default for ExecutorConfig {
     }
 }
 
+/// A language server for code-intelligence, keyed by name in
+/// [`BlumiConfig::lsp_servers`].
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct LspServerConfig {
+    /// Executable to spawn, e.g. `rust-analyzer`.
+    pub command: String,
+    #[serde(default)]
+    pub args: Vec<String>,
+    /// File extensions (without the dot) this server handles, e.g. `["rs"]`.
+    pub extensions: Vec<String>,
+    /// LSP languageId; defaults to the first extension if empty.
+    #[serde(default)]
+    pub language_id: String,
+}
+
 /// An external MCP (Model Context Protocol) server launched over stdio.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct McpServerConfig {
@@ -154,6 +169,9 @@ pub struct BlumiConfig {
     pub personas: BTreeMap<String, PersonaConfig>,
     /// Execution backend (host vs docker sandbox).
     pub executor: ExecutorConfig,
+    /// Language servers for the `Lsp` code-intel tool, keyed by name.
+    #[serde(default)]
+    pub lsp_servers: BTreeMap<String, LspServerConfig>,
     /// Resolved at load time; never serialized to/from files.
     #[serde(skip)]
     pub paths: Paths,
@@ -171,6 +189,7 @@ impl Default for BlumiConfig {
             persona: "default".into(),
             personas: BTreeMap::new(),
             executor: ExecutorConfig::default(),
+            lsp_servers: BTreeMap::new(),
             paths: Paths::default(),
         }
     }

@@ -92,6 +92,29 @@ pub async fn build_session(
         Err(e) => tracing::warn!("session history unavailable; SessionSearch disabled: {e}"),
     }
 
+    // Code intelligence: register the `Lsp` tool if any language servers are
+    // configured (language-agnostic, keyed by file extension).
+    if !config.lsp_servers.is_empty() {
+        let servers: Vec<blumi_lsp::LspServer> = config
+            .lsp_servers
+            .values()
+            .map(|s| blumi_lsp::LspServer {
+                command: s.command.clone(),
+                args: s.args.clone(),
+                extensions: s.extensions.clone(),
+                language_id: if s.language_id.is_empty() {
+                    s.extensions.first().cloned().unwrap_or_default()
+                } else {
+                    s.language_id.clone()
+                },
+            })
+            .collect();
+        registry.register(Arc::new(blumi_core::Typed(blumi_lsp::LspTool::new(
+            servers,
+            config.paths.working_dir.clone(),
+        ))));
+    }
+
     let mut perm_cfg = config.permissions.clone();
     if yolo {
         perm_cfg.yolo = true;

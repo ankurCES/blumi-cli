@@ -24,6 +24,7 @@ blumi-persist.workspace = true
 blumi-tui.workspace = true
 blumi-web.workspace = true
 blumi-cron.workspace = true
+blumi-lsp.workspace = true
 
 tokio = { workspace = true }
 clap.workspace = true

@@ -271,6 +271,7 @@ dependencies = [
  "blumi-cron",
  "blumi-exec",
  "blumi-llm",
+ "blumi-lsp",
  "blumi-mcp",
  "blumi-persist",
  "blumi-protocol",
@@ -368,6 +369,18 @@ dependencies = [
 [[package]]
 name = "blumi-lsp"
 version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "async-trait",
+ "blumi-core",
+ "blumi-protocol",
+ "schemars 0.8.22",
+ "serde",
+ "serde_json",
+ "tokio",
+ "tokio-util",
+ "tracing",
+]
 
 [[package]]
 name = "blumi-mcp"
