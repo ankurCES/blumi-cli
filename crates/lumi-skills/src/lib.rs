@@ -1,3 +1,5 @@
-//! SKILL.md skills + dual memory (MEMORY/USER).
-//!
-//! Dual memory in Phase 1; skills in Phase 3.
+//! Dual memory now; SKILL.md skills in Phase 3.
+
+mod memory;
+
+pub use memory::MemorySnapshot;
