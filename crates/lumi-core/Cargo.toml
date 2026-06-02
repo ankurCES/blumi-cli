@@ -19,6 +19,7 @@ async-trait.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 schemars.workspace = true
+time.workspace = true
 
 anyhow.workspace = true
 thiserror.workspace = true
