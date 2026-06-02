@@ -7,7 +7,7 @@ pub async fn run(config: BlumiConfig) -> anyhow::Result<()> {
     config.paths.ensure_dirs().ok();
 
     // Interactive: approvals are handled by the TUI dialog, so no yolo.
-    let session = build_session(&config, false)?;
+    let session = build_session(&config, false).await?;
     let persist = session.clone();
 
     let model_name = config.llm.model.clone();
