@@ -36,6 +36,10 @@ pub struct TuiConfig {
     pub persona: String,
     /// Directory `/export` writes transcripts into.
     pub export_dir: PathBuf,
+    /// Model context window size (for the usage bar).
+    pub context_size: u32,
+    /// Scheduled cron jobs (name, schedule) for `/cron`.
+    pub cron_jobs: Vec<(String, String)>,
 }
 
 /// Run the interactive TUI against an already-spawned session. Restores the
@@ -83,6 +87,8 @@ async fn run_loop(
     model.personas = cfg.personas;
     model.persona = cfg.persona;
     model.export_dir = cfg.export_dir;
+    model.context_size = cfg.context_size;
+    model.cron_jobs = cfg.cron_jobs;
     let mut events = session.subscribe();
     let mut input = EventStream::new();
     let mut tick = tokio::time::interval(Duration::from_millis(50)); // ~20fps

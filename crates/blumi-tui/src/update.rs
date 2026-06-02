@@ -10,9 +10,15 @@ use crossterm::event::{Event as TermEvent, KeyCode, KeyEventKind, KeyModifiers};
 pub async fn update(model: &mut Model, msg: Msg, session: &SessionHandle) {
     match msg {
         Msg::Tick => {
-            // Animate while the agent works, or while the landing rose shows.
-            if model.busy || model.is_empty() {
-                model.spinner_frame = model.spinner_frame.wrapping_add(1);
+            model.spinner_frame = model.spinner_frame.wrapping_add(1);
+            if model.busy {
+                // Accumulate active-with-bot time (tick is ~50ms).
+                model.active_ms += 50;
+                model.mark_dirty();
+            } else if model.is_empty() {
+                model.mark_dirty(); // animate the landing rose
+            } else if model.spinner_frame % 6 == 0 {
+                // ~3fps idle refresh so the uptime/active timers + live dot update.
                 model.mark_dirty();
             }
         }
@@ -40,9 +46,14 @@ async fn handle_term(model: &mut Model, ev: TermEvent, session: &SessionHandle) 
                 return;
             }
 
-            // The memory overlay closes on any key.
+            // Overlays close on any key.
             if model.memory_view.is_some() {
                 model.memory_view = None;
+                model.mark_dirty();
+                return;
+            }
+            if model.usage_view.is_some() {
+                model.usage_view = None;
                 model.mark_dirty();
                 return;
             }
@@ -318,6 +329,8 @@ async fn handle_core(model: &mut Model, event: Event, session: &SessionHandle) {
         Event::Usage { input, output, .. } => {
             model.input_tokens += input;
             model.output_tokens += output;
+            // The latest request's input size ≈ current context usage.
+            model.context_tokens = input;
         }
         Event::Compaction {
             messages_compressed,

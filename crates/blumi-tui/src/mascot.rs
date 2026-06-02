@@ -51,6 +51,26 @@ pub fn ramp_color(tick: usize) -> Color {
     Color::Rgb(r, g, b)
 }
 
+/// A braille spinner frame for in-flight work (terminal-friendly).
+pub fn spinner(tick: usize) -> char {
+    const FRAMES: [char; 10] = ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏'];
+    FRAMES[(tick / 2) % FRAMES.len()]
+}
+
+/// A brightness-pulsing variant of `(r,g,b)` for a "live" status dot — a
+/// triangle wave so it breathes between half and full intensity.
+pub fn pulse_color(r: u8, g: u8, b: u8, tick: usize) -> Color {
+    const PERIOD: usize = 16;
+    let phase = (tick % PERIOD) as f32 / PERIOD as f32;
+    let tri = 1.0 - (phase * 2.0 - 1.0).abs(); // 0 → 1 → 0
+    let scale = 0.45 + 0.55 * tri;
+    Color::Rgb(
+        (r as f32 * scale) as u8,
+        (g as f32 * scale) as u8,
+        (b as f32 * scale) as u8,
+    )
+}
+
 /// The tiny animated mascot for the thinking/working state: a morphing,
 /// color-sweeping flower followed by "thinking" and growing petals.
 pub fn thinking(tick: usize) -> Vec<Span<'static>> {

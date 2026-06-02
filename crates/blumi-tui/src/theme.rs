@@ -154,9 +154,18 @@ impl Theme {
 /// Icons — crush's glyph alphabet (from charmbracelet/crush styles.go), which
 /// project_mythara also adopts. Dingbats render at width 1 in most terminals.
 pub mod icon {
-    pub const FLOWER: &str = "✿";
+    pub const FLOWER: &str = "✿"; // the brand mark / agent
+    pub const USER: &str = "›"; // user prompt marker
+    pub const TOOL: &str = "▸"; // a tool call
     pub const OK: &str = "✓"; // success
     pub const ERR: &str = "×"; // failure (crush uses ×, not ✗)
-    pub const PENDING: &str = "●"; // active / running
-    pub const BAR: &str = "▌"; // vertical accent (crush's active-section bar)
+    pub const DOT: &str = "●"; // status / live dot
+                               // Rounded box-drawing for cards (widely supported in modern terminals).
+    pub const TL: &str = "╭";
+    pub const BL: &str = "╰";
+    pub const H: &str = "─";
+    pub const V: &str = "│";
+    // Progress-bar cells.
+    pub const BAR_FULL: &str = "█";
+    pub const BAR_EMPTY: &str = "░";
 }
