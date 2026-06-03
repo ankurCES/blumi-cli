@@ -1,11 +1,8 @@
 # blumi-cli
 
-```
-      ✿
-    ❀ ◉ ❀
-      ✿
-   b l u m i
-```
+<p align="center">
+  <img src="assets/blumi-logo.svg" alt="blumi" width="520">
+</p>
 
 `blumi` — a local-first, provider-agnostic agentic coding assistant. A single Rust binary with
 a crush-inspired terminal UI and a packaged React web UI, both driven by one shared, UI-agnostic
