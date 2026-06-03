@@ -38,14 +38,21 @@ pub struct GatewayCore {
     /// that need approval are denied — the agent still chats and does read-only
     /// work, but can't write/exec without a human in the loop.
     yolo: bool,
+    /// Voice config for transcribing inbound audio + speaking replies (optional).
+    voice: Option<Arc<blumi_voice::VoiceConfig>>,
 }
 
 impl GatewayCore {
-    pub fn new(spawner: Arc<dyn SessionSpawner>, yolo: bool) -> Self {
+    pub fn new(
+        spawner: Arc<dyn SessionSpawner>,
+        yolo: bool,
+        voice: Option<blumi_voice::VoiceConfig>,
+    ) -> Self {
         GatewayCore {
             spawner,
             sessions: Mutex::new(HashMap::new()),
             yolo,
+            voice: voice.map(Arc::new),
         }
     }
 
@@ -53,6 +60,33 @@ impl GatewayCore {
     pub async fn handle(&self, chat_id: &str, text: &str) -> anyhow::Result<String> {
         let session = self.session_for(chat_id).await?;
         run_turn(&session, text, self.yolo).await
+    }
+
+    /// Transcribe inbound audio to text, if STT is configured.
+    pub async fn transcribe(
+        &self,
+        audio: Vec<u8>,
+        filename: &str,
+        mime: &str,
+    ) -> anyhow::Result<String> {
+        let cfg = self
+            .voice
+            .as_ref()
+            .filter(|c| c.stt_ready())
+            .ok_or_else(|| anyhow::anyhow!("transcription not configured"))?;
+        blumi_voice::transcribe(cfg, audio, filename, mime).await
+    }
+
+    /// Synthesize speech for a reply, if TTS is configured (else `None`).
+    pub async fn synthesize(&self, text: &str) -> Option<Vec<u8>> {
+        let cfg = self.voice.as_ref().filter(|c| c.tts_ready())?;
+        match blumi_voice::synthesize(cfg, text).await {
+            Ok(bytes) => Some(bytes),
+            Err(e) => {
+                tracing::warn!("tts failed: {e}");
+                None
+            }
+        }
     }
 
     /// Forget a chat's session (e.g. on a `/reset` command).
@@ -222,7 +256,7 @@ mod tests {
 
     #[tokio::test]
     async fn collects_reply_and_keeps_a_session_per_chat() {
-        let core = GatewayCore::new(Arc::new(EchoSpawner), false);
+        let core = GatewayCore::new(Arc::new(EchoSpawner), false, None);
 
         let a = core.handle("chatA", "hi").await.unwrap();
         assert_eq!(a, "echo: hi");

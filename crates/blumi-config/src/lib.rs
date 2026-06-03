@@ -142,12 +142,16 @@ pub struct VoiceSettings {
     pub stt_base_url: String,
     /// Transcription model, e.g. `whisper-1`.
     pub stt_model: String,
-    /// Speech base URL.
+    /// TTS provider: `"openai"` (default) or `"elevenlabs"`.
+    pub tts_provider: String,
+    /// Speech base URL (provider default used when blank).
     pub tts_base_url: String,
-    /// Speech model, e.g. `tts-1`.
+    /// Speech model, e.g. `tts-1` (OpenAI) or `eleven_multilingual_v2`.
     pub tts_model: String,
-    /// Voice name, e.g. `alloy`.
+    /// Voice name (OpenAI, e.g. `alloy`) or voice id (ElevenLabs).
     pub tts_voice: String,
+    /// Separate key for TTS (falls back to `api_key`) — e.g. an ElevenLabs key.
+    pub tts_api_key: String,
 }
 
 /// Messaging-gateway settings (run blumi as a bot). Tokens may also be passed

@@ -285,14 +285,7 @@ pub async fn run(
 
     // Voice (speech-to-text + text-to-speech), if enabled.
     let voice = if config.voice.enabled {
-        Some(blumi_voice::VoiceConfig {
-            api_key: config.voice.api_key.clone(),
-            stt_base_url: config.voice.stt_base_url.clone(),
-            stt_model: config.voice.stt_model.clone(),
-            tts_base_url: config.voice.tts_base_url.clone(),
-            tts_model: config.voice.tts_model.clone(),
-            tts_voice: config.voice.tts_voice.clone(),
-        })
+        Some(voice_config(&config))
     } else {
         None
     };
@@ -324,6 +317,21 @@ pub async fn run(
     let result = blumi_web::serve(provider, mgmt, web, addr, auth, voice).await;
     let _ = std::fs::remove_file(&lock);
     result
+}
+
+/// Map the config's voice section to a `blumi_voice::VoiceConfig`. Shared by the
+/// web server and the messaging gateways.
+pub(crate) fn voice_config(config: &BlumiConfig) -> blumi_voice::VoiceConfig {
+    blumi_voice::VoiceConfig {
+        api_key: config.voice.api_key.clone(),
+        stt_base_url: config.voice.stt_base_url.clone(),
+        stt_model: config.voice.stt_model.clone(),
+        tts_provider: config.voice.tts_provider.clone(),
+        tts_base_url: config.voice.tts_base_url.clone(),
+        tts_model: config.voice.tts_model.clone(),
+        tts_voice: config.voice.tts_voice.clone(),
+        tts_api_key: config.voice.tts_api_key.clone(),
+    }
 }
 
 /// Load the 32-byte cookie-signing key, creating it (0600) on first use.

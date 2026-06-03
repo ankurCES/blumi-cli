@@ -9,6 +9,7 @@ license.workspace = true
 [dependencies]
 blumi-core.workspace = true
 blumi-protocol.workspace = true
+blumi-voice.workspace = true
 
 tokio = { workspace = true }
 reqwest.workspace = true

@@ -31,6 +31,18 @@ fn resolve_token(flag: Option<String>, configured: &str, what: &str) -> anyhow::
         .ok_or_else(|| anyhow::anyhow!("no {what} (pass --token or set it in settings.json)"))
 }
 
+/// Build the gateway core (a per-chat session map) from config, wiring voice
+/// (STT for inbound audio + TTS for replies) when it's enabled.
+fn build_core(config: BlumiConfig, yolo: bool) -> Arc<GatewayCore> {
+    let voice = if config.voice.enabled {
+        Some(crate::web::voice_config(&config))
+    } else {
+        None
+    };
+    let spawner = Arc::new(GatewaySpawner { config, yolo });
+    Arc::new(GatewayCore::new(spawner, yolo, voice))
+}
+
 pub async fn run_telegram(config: BlumiConfig, token: Option<String>) -> anyhow::Result<()> {
     config.paths.ensure_dirs().ok();
     let token = resolve_token(token, &config.gateway.telegram.token, "telegram token")?;
@@ -47,8 +59,7 @@ pub async fn run_telegram(config: BlumiConfig, token: Option<String>) -> anyhow:
         }
     );
 
-    let spawner = Arc::new(GatewaySpawner { config, yolo });
-    let core = Arc::new(GatewayCore::new(spawner, yolo));
+    let core = build_core(config, yolo);
     blumi_gateway::run_telegram(
         core,
         TelegramOptions {
@@ -75,8 +86,7 @@ pub async fn run_discord(config: BlumiConfig, token: Option<String>) -> anyhow::
         }
     );
 
-    let spawner = Arc::new(GatewaySpawner { config, yolo });
-    let core = Arc::new(GatewayCore::new(spawner, yolo));
+    let core = build_core(config, yolo);
     blumi_gateway::run_discord(
         core,
         DiscordOptions {
@@ -115,8 +125,7 @@ pub async fn run_slack(
         }
     );
 
-    let spawner = Arc::new(GatewaySpawner { config, yolo });
-    let core = Arc::new(GatewayCore::new(spawner, yolo));
+    let core = build_core(config, yolo);
     blumi_gateway::run_slack(
         core,
         SlackOptions {
@@ -146,8 +155,7 @@ pub async fn run_whatsapp(config: BlumiConfig, port: Option<u16>) -> anyhow::Res
     crate::branding::banner();
     eprintln!("  blumi whatsapp gateway — webhook on :{port}/webhook  (Ctrl+C to stop)");
 
-    let spawner = Arc::new(GatewaySpawner { config, yolo });
-    let core = Arc::new(GatewayCore::new(spawner, yolo));
+    let core = build_core(config, yolo);
     blumi_gateway::run_whatsapp(
         core,
         WhatsappOptions {

@@ -37,7 +37,21 @@ struct Update {
 struct Message {
     #[serde(default)]
     text: Option<String>,
+    #[serde(default)]
+    voice: Option<Voice>,
     chat: Chat,
+}
+
+#[derive(Deserialize)]
+struct Voice {
+    file_id: String,
+    #[serde(default)]
+    mime_type: Option<String>,
+}
+
+#[derive(Deserialize)]
+struct FileInfo {
+    file_path: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -70,16 +84,76 @@ pub async fn run_telegram(core: Arc<GatewayCore>, opts: TelegramOptions) -> anyh
         for update in updates {
             offset = offset.max(update.update_id + 1);
             let Some(msg) = update.message else { continue };
-            let (Some(text), chat_id) = (msg.text, msg.chat.id) else {
-                continue;
-            };
+            let chat_id = msg.chat.id;
             if !opts.allowed_chats.is_empty() && !opts.allowed_chats.contains(&chat_id) {
                 tracing::debug!("ignoring message from non-allowed chat {chat_id}");
                 continue;
             }
-            handle_message(&client, &base, &core, chat_id, text.trim()).await;
+            // Text directly, or transcribe a voice note into text.
+            let text = if let Some(t) = msg.text {
+                t.trim().to_string()
+            } else if let Some(voice) = msg.voice {
+                match transcribe_voice(&client, &base, &core, &voice).await {
+                    Ok(t) => {
+                        // Confirm what we heard so the user has context.
+                        let _ = send_message(&client, &base, chat_id, &format!("🎙 “{t}”")).await;
+                        t
+                    }
+                    Err(e) => {
+                        let _ = send_message(
+                            &client,
+                            &base,
+                            chat_id,
+                            &format!("⚠ couldn't transcribe: {e}"),
+                        )
+                        .await;
+                        continue;
+                    }
+                }
+            } else {
+                continue;
+            };
+            if text.is_empty() {
+                continue;
+            }
+            handle_message(&client, &base, &core, chat_id, &text).await;
         }
     }
+}
+
+/// Download a Telegram voice note and transcribe it.
+async fn transcribe_voice(
+    client: &reqwest::Client,
+    base: &str,
+    core: &Arc<GatewayCore>,
+    voice: &Voice,
+) -> anyhow::Result<String> {
+    // getFile → file_path
+    let resp: ApiResponse<FileInfo> = client
+        .get(format!("{base}/getFile"))
+        .query(&[("file_id", &voice.file_id)])
+        .send()
+        .await?
+        .json()
+        .await?;
+    let file_path = resp
+        .result
+        .and_then(|f| f.file_path)
+        .ok_or_else(|| anyhow::anyhow!("telegram getFile returned no path"))?;
+
+    // Download from the file endpoint (…/file/bot<token>/<path>).
+    let file_base = base.replacen("/bot", "/file/bot", 1);
+    let bytes = client
+        .get(format!("{file_base}/{file_path}"))
+        .send()
+        .await?
+        .error_for_status()?
+        .bytes()
+        .await?
+        .to_vec();
+
+    let mime = voice.mime_type.as_deref().unwrap_or("audio/ogg");
+    core.transcribe(bytes, "audio.ogg", mime).await
 }
 
 async fn handle_message(
@@ -135,6 +209,35 @@ async fn handle_message(
             break;
         }
     }
+
+    // Speak the reply too, if TTS is configured.
+    if let Some(audio) = core.synthesize(&reply).await {
+        if let Err(e) = send_audio(client, base, chat_id, audio).await {
+            tracing::warn!("telegram sendAudio failed: {e}");
+        }
+    }
+}
+
+/// Upload synthesized speech as an audio message.
+async fn send_audio(
+    client: &reqwest::Client,
+    base: &str,
+    chat_id: i64,
+    audio: Vec<u8>,
+) -> anyhow::Result<()> {
+    let part = reqwest::multipart::Part::bytes(audio)
+        .file_name("reply.mp3")
+        .mime_str("audio/mpeg")?;
+    let form = reqwest::multipart::Form::new()
+        .text("chat_id", chat_id.to_string())
+        .part("audio", part);
+    client
+        .post(format!("{base}/sendAudio"))
+        .multipart(form)
+        .send()
+        .await?
+        .error_for_status()?;
+    Ok(())
 }
 
 async fn get_me(client: &reqwest::Client, base: &str) -> anyhow::Result<String> {

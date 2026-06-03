@@ -377,6 +377,7 @@ dependencies = [
  "axum",
  "blumi-core",
  "blumi-protocol",
+ "blumi-voice",
  "futures",
  "reqwest",
  "serde",
