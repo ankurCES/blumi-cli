@@ -60,7 +60,31 @@ async fn handle_term(model: &mut Model, ev: TermEvent, session: &SessionHandle) 
 
             // A dialog (command palette) captures all keys.
             if model.dialog.is_some() {
-                handle_dialog_key(model, key.code);
+                handle_dialog_key(model, key.code, session).await;
+                model.mark_dirty();
+                return;
+            }
+
+            // Capturing an API key for a provider switch.
+            if model.provider_key_prompt.is_some() {
+                match key.code {
+                    KeyCode::Enter => {
+                        let api_key = model.input_text();
+                        let provider = model.provider_key_prompt.take().unwrap_or_default();
+                        model.clear_input(); // a fresh editor drops the mask
+                        if api_key.trim().is_empty() {
+                            model
+                                .entries
+                                .push(Entry::Notice("provider switch cancelled (no key)".into()));
+                        } else {
+                            model.request_provider(provider, Some(api_key));
+                        }
+                    }
+                    KeyCode::Esc => model.cancel_key_prompt(),
+                    _ => {
+                        model.input.input(key);
+                    }
+                }
                 model.mark_dirty();
                 return;
             }
@@ -441,7 +465,7 @@ fn history_next(model: &mut Model) {
     }
 }
 
-fn handle_dialog_key(model: &mut Model, code: KeyCode) {
+async fn handle_dialog_key(model: &mut Model, code: KeyCode, session: &SessionHandle) {
     match code {
         KeyCode::Esc => model.dialog = None,
         KeyCode::Up => {
@@ -468,20 +492,48 @@ fn handle_dialog_key(model: &mut Model, code: KeyCode) {
             let action = model.dialog.as_ref().and_then(|d| d.selected_action());
             model.dialog = None;
             if let Some(a) = action {
-                perform_action(model, a);
+                perform_action(model, a, session).await;
             }
         }
         _ => {}
     }
 }
 
-fn perform_action(model: &mut Model, action: Action) {
+async fn perform_action(model: &mut Model, action: Action, session: &SessionHandle) {
     match action {
         Action::Quit => model.should_quit = true,
         Action::ClearTranscript => model.clear_transcript(),
         Action::CycleTheme => model.cycle_theme(),
         Action::NewSession => model.request_new_session(),
         Action::ResumeSession(id) => model.request_resume(id),
+        Action::SetModel(m) => {
+            model.model_name = m.clone();
+            model.model_options.model = m.clone();
+            let _ = session.send(Command::SetModel { model: m.clone() }).await;
+            model.entries.push(Entry::Notice(format!("model → {m}")));
+        }
+        Action::SetProvider(name) => {
+            if name == model.model_options.provider {
+                return; // already active
+            }
+            let ready = model
+                .model_options
+                .providers
+                .iter()
+                .any(|p| p.name == name && p.ready);
+            if ready {
+                model.request_provider(name.clone(), None);
+                model
+                    .entries
+                    .push(Entry::Notice(format!("switching to {name}…")));
+            } else {
+                // Unready → capture an API key inline (masked editor).
+                model.entries.push(Entry::Notice(format!(
+                    "enter the {name} API key, then Enter (Esc to cancel)"
+                )));
+                model.start_key_prompt(name);
+            }
+        }
     }
 }
 
@@ -492,23 +544,71 @@ fn first_line(s: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::Arc;
+    use tokio::sync::Mutex;
+    use tokio_util::sync::CancellationToken;
 
-    #[test]
-    fn cycle_theme_changes_name() {
+    /// A turn runner that does nothing — just to get a `SessionHandle` in tests.
+    struct NoopRunner;
+    #[async_trait::async_trait]
+    impl blumi_core::TurnRunner for NoopRunner {
+        async fn run_turn(
+            &self,
+            _state: Arc<Mutex<blumi_core::SessionState>>,
+            _ctx: blumi_core::TurnContext,
+            _ct: CancellationToken,
+        ) -> blumi_protocol::DoneReason {
+            blumi_protocol::DoneReason::Completed
+        }
+    }
+    fn test_session() -> SessionHandle {
+        blumi_core::spawn_session(blumi_protocol::SessionId::new(), "m", Arc::new(NoopRunner))
+    }
+
+    #[tokio::test]
+    async fn cycle_theme_changes_name() {
         let mut m = Model::new("x".into(), "/".into());
+        let s = test_session();
         let first = m.theme.name;
-        perform_action(&mut m, Action::CycleTheme);
+        perform_action(&mut m, Action::CycleTheme, &s).await;
         assert_ne!(m.theme.name, first);
         assert_eq!(m.theme_idx, 1);
     }
 
-    #[test]
-    fn clear_transcript_empties() {
+    #[tokio::test]
+    async fn clear_transcript_empties() {
         let mut m = Model::new("x".into(), "/".into());
+        let s = test_session();
         m.entries.push(Entry::User("hi".into()));
         m.streaming = Some("partial".into());
-        perform_action(&mut m, Action::ClearTranscript);
+        perform_action(&mut m, Action::ClearTranscript, &s).await;
         assert!(m.entries.is_empty());
         assert!(m.streaming.is_none());
+    }
+
+    #[tokio::test]
+    async fn set_provider_ready_requests_switch_unready_prompts_key() {
+        let mut m = Model::new("x".into(), "/".into());
+        let s = test_session();
+        m.model_options.providers = vec![
+            crate::app::ProviderOpt {
+                name: "openai".into(),
+                label: "OpenAI".into(),
+                ready: true,
+            },
+            crate::app::ProviderOpt {
+                name: "groq".into(),
+                label: "Groq".into(),
+                ready: false,
+            },
+        ];
+        perform_action(&mut m, Action::SetProvider("openai".into()), &s).await;
+        assert_eq!(
+            m.take_provider_request(),
+            Some(("openai".to_string(), None))
+        );
+        // Unready → starts an inline key prompt instead.
+        perform_action(&mut m, Action::SetProvider("groq".into()), &s).await;
+        assert_eq!(m.provider_key_prompt.as_deref(), Some("groq"));
     }
 }

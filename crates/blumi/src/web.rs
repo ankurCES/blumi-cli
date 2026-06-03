@@ -287,53 +287,23 @@ impl Management for WebManagement {
     }
 
     fn model_options(&self) -> ModelOptions {
-        let c = self.fresh_config();
-        let provider = c.llm.provider.clone();
-        let model = c.llm.model.clone();
-        let mut models = suggested_models(&provider);
-        if !model.is_empty() && !models.iter().any(|m| m == &model) {
-            models.insert(0, model.clone());
-        }
-        let mut providers: Vec<ProviderOption> = c
-            .providers
-            .iter()
-            .filter(|(name, _)| name.as_str() != "mock")
-            .map(|(name, pc)| ProviderOption {
-                name: name.clone(),
-                label: provider_label(name),
-                ready: pc.resolve_api_key().is_some()
-                    || matches!(name.as_str(), "local" | "ollama"),
-            })
-            .collect();
-        // The active provider is always selectable, even if it looks unready.
-        if let Some(p) = providers.iter_mut().find(|p| p.name == provider) {
-            p.ready = true;
-        }
+        let (provider, model, models, providers) = crate::providers::options(&self.fresh_config());
         ModelOptions {
             provider,
             model,
             models,
-            providers,
+            providers: providers
+                .into_iter()
+                .map(|(name, label, ready)| ProviderOption { name, label, ready })
+                .collect(),
         }
     }
 
     fn set_provider(&self, provider: &str, api_key: Option<&str>) -> anyhow::Result<()> {
-        let c = self.fresh_config();
-        if !c.providers.contains_key(provider) {
+        if !self.fresh_config().providers.contains_key(provider) {
             anyhow::bail!("unknown provider '{provider}'");
         }
-        let default_model = suggested_models(provider)
-            .into_iter()
-            .next()
-            .unwrap_or_default();
-        let key = api_key.map(str::trim).filter(|k| !k.is_empty());
-        merge_settings_json(&self.config.paths.settings_json(), |root| {
-            set_path(root, &["llm", "provider"], json!(provider));
-            set_path(root, &["llm", "model"], json!(default_model));
-            if let Some(k) = key {
-                set_path(root, &["providers", provider, "api_key"], json!(k));
-            }
-        })
+        crate::providers::persist_provider(&self.config.paths.settings_json(), provider, api_key)
     }
 }
 
@@ -347,48 +317,6 @@ impl WebManagement {
         )
         .unwrap_or_else(|_| self.config.clone())
     }
-}
-
-/// A few suggested model ids per known provider (for the header picker).
-fn suggested_models(provider: &str) -> Vec<String> {
-    let m: &[&str] = match provider {
-        "anthropic" | "azure-foundry" => &[
-            "claude-sonnet-4-5",
-            "claude-opus-4-1",
-            "claude-3-5-haiku-latest",
-        ],
-        "openai" => &["gpt-4o", "gpt-4o-mini", "o4-mini"],
-        "gemini" => &["gemini-2.0-flash", "gemini-1.5-pro"],
-        "openrouter" => &[
-            "anthropic/claude-3.7-sonnet",
-            "openai/gpt-4o",
-            "google/gemini-2.0-flash-001",
-        ],
-        "deepseek" => &["deepseek-chat", "deepseek-reasoner"],
-        "groq" => &["llama-3.3-70b-versatile", "llama-3.1-8b-instant"],
-        "minimax" => &["MiniMax-Text-01"],
-        "ollama" => &["llama3.1", "qwen2.5-coder", "deepseek-r1"],
-        _ => &[],
-    };
-    m.iter().map(|s| s.to_string()).collect()
-}
-
-/// Human label for a provider name.
-fn provider_label(name: &str) -> String {
-    match name {
-        "anthropic" => "Anthropic (Claude)",
-        "azure-foundry" => "Azure AI Foundry",
-        "openai" => "OpenAI",
-        "gemini" => "Google Gemini",
-        "openrouter" => "OpenRouter",
-        "deepseek" => "DeepSeek",
-        "minimax" => "MiniMax",
-        "groq" => "Groq",
-        "ollama" => "Ollama (local)",
-        "local" => "Local (llama.cpp)",
-        other => other,
-    }
-    .to_string()
 }
 
 /// Set a nested JSON path, creating intermediate objects.

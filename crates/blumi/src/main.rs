@@ -7,6 +7,7 @@ mod gateway;
 mod onboarding;
 mod playbook;
 mod prompt;
+mod providers;
 mod run;
 mod session;
 mod tui;

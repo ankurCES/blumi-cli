@@ -534,6 +534,7 @@ dependencies = [
  "syntect",
  "textwrap",
  "tokio",
+ "tokio-util",
  "tracing",
  "tui-textarea",
 ]

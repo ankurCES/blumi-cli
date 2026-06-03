@@ -102,7 +102,11 @@ pub const COMMANDS: &[CommandDef] = &[
     },
     CommandDef {
         name: "/model",
-        desc: "switch model: /model <id>",
+        desc: "pick a model (or /model <id>)",
+    },
+    CommandDef {
+        name: "/provider",
+        desc: "pick an LLM provider (reloads the agent)",
     },
     CommandDef {
         name: "/theme",
@@ -342,14 +346,32 @@ pub async fn run(model: &mut Model, session: &SessionHandle, line: &str) {
             }
         }
         "/model" => {
-            if arg.is_empty() {
-                model
-                    .entries
-                    .push(Entry::Notice("usage: /model <id>".into()));
-            } else {
+            if !arg.is_empty() {
                 model.model_name = arg.clone();
+                model.model_options.model = arg.clone();
                 let _ = session.send(Command::SetModel { model: arg.clone() }).await;
                 model.entries.push(Entry::Notice(format!("model → {arg}")));
+            } else if model.model_options.models.is_empty() {
+                model.entries.push(Entry::Notice(
+                    "no suggested models for this provider — use /model <id>".into(),
+                ));
+            } else {
+                model.dialog = Some(crate::dialog::Picker::model_picker(
+                    &model.model_options.models,
+                    &model.model_options.model,
+                ));
+            }
+        }
+        "/provider" => {
+            if model.model_options.providers.is_empty() {
+                model
+                    .entries
+                    .push(Entry::Notice("no providers configured".into()));
+            } else {
+                model.dialog = Some(crate::dialog::Picker::provider_picker(
+                    &model.model_options.providers,
+                    &model.model_options.provider,
+                ));
             }
         }
         "/theme" => {
