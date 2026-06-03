@@ -819,6 +819,34 @@ fn render_editor(model: &mut Model, f: &mut Frame, area: Rect, theme: &Theme) {
 }
 
 fn render_status(model: &Model, f: &mut Frame, area: Rect, theme: &Theme) {
+    // The autonomous loop owns the status line while running/paused (ralph-style).
+    if model.loop_active || model.loop_current.is_some() {
+        let cur = model
+            .loop_current
+            .as_ref()
+            .map(|(_, t)| t.as_str())
+            .unwrap_or("");
+        let label = if model.loop_active {
+            format!(
+                "⟳ loop · iter {} · {cur}   (/loop to pause)",
+                model.loop_iter
+            )
+        } else {
+            format!(
+                "⏸ loop paused · iter {}   (/loop to resume)",
+                model.loop_iter
+            )
+        };
+        let width = area.width as usize;
+        f.render_widget(
+            Paragraph::new(Line::from(Span::styled(
+                truncate(&label, width),
+                theme.bold_primary(),
+            ))),
+            area,
+        );
+        return;
+    }
     let hint = if model.dialog.is_some() {
         "type to filter · ↑/↓ move · enter select · esc close"
     } else if model.pending.is_some() {
@@ -955,6 +983,23 @@ mod tests {
         assert!(out.contains("local-first"), "landing tagline");
         assert!(out.contains("quick commands"), "command table heading");
         assert!(out.contains("/help"), "command table entry");
+    }
+
+    #[test]
+    fn status_shows_loop_indicator() {
+        let mut model = Model::new("m".into(), "/tmp".into());
+        model.loop_active = true;
+        model.loop_iter = 3;
+        model.loop_current = Some(("t1".into(), "ship parser".into()));
+        let out = render_to_string(&mut model, 80, 24);
+        assert!(out.contains("⟳ loop"), "active loop badge");
+        assert!(out.contains("iter 3"), "iteration counter");
+        assert!(out.contains("ship parser"), "current task title");
+
+        // Paused: current task retained but inactive.
+        model.loop_active = false;
+        let out = render_to_string(&mut model, 80, 24);
+        assert!(out.contains("⏸ loop paused"), "paused loop badge");
     }
 
     #[test]

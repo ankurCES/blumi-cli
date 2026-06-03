@@ -49,6 +49,10 @@ pub const COMMANDS: &[CommandDef] = &[
         desc: "show the task board (blumi loop work queue)",
     },
     CommandDef {
+        name: "/loop",
+        desc: "start/pause the autonomous task loop (/loop review to toggle gate)",
+    },
+    CommandDef {
         name: "/memory",
         desc: "view saved memory",
     },
@@ -187,6 +191,35 @@ pub async fn run(model: &mut Model, session: &SessionHandle, line: &str) {
         "/tasks" | "/dashboard" => model.show_dashboard = !model.show_dashboard,
         "/usage" => model.open_usage(),
         "/board" => model.open_board(),
+        "/loop" => {
+            if arg.eq_ignore_ascii_case("review") {
+                model.loop_review = !model.loop_review;
+                model.entries.push(Entry::Notice(format!(
+                    "loop review-gate {}",
+                    if model.loop_review { "on" } else { "off" }
+                )));
+            } else if model.loop_active {
+                model.loop_active = false;
+                model
+                    .entries
+                    .push(Entry::Notice("⏸ loop paused — /loop to resume".into()));
+            } else if blumi_task::TaskBoard::load(&model.tasks_path)
+                .next_todo()
+                .is_none()
+            {
+                model.entries.push(Entry::Notice(
+                    "no todo tasks — add some with `blumi task add` from a shell".into(),
+                ));
+            } else {
+                if model.loop_current.is_none() {
+                    model.loop_iter = 0;
+                }
+                model.loop_active = true;
+                model.entries.push(Entry::Notice(
+                    "⟳ loop started — working the task board · /loop to pause".into(),
+                ));
+            }
+        }
         "/memory" => model.open_memory(),
         "/skills" => {
             if model.skills.is_empty() {

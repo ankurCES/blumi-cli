@@ -127,6 +127,14 @@ pub struct Model {
     pub board_view: Option<String>,
     /// Path to the persistent task board (`<project>/.blumi/tasks.json`).
     pub tasks_path: PathBuf,
+    /// Autonomous loop is running (drives the task board turn by turn).
+    pub loop_active: bool,
+    /// Loop sends finished tasks to "review" instead of "done".
+    pub loop_review: bool,
+    /// Loop iteration counter.
+    pub loop_iter: u32,
+    /// The task currently in flight under the loop (id, title).
+    pub loop_current: Option<(String, String)>,
     /// A pending session switch for the app loop to perform.
     pub session_request: Option<SessionRequest>,
     /// Set when the agent asked to reload itself (self-evolution). The app loop
@@ -194,6 +202,10 @@ impl Model {
             usage_view: None,
             board_view: None,
             tasks_path: PathBuf::new(),
+            loop_active: false,
+            loop_review: false,
+            loop_iter: 0,
+            loop_current: None,
             session_request: None,
             reload_pending: None,
             model_options: crate::app::ModelOptions::default(),
@@ -338,6 +350,9 @@ impl Model {
         self.memory_view = None;
         self.usage_view = None;
         self.board_view = None;
+        self.loop_active = false;
+        self.loop_current = None;
+        self.loop_iter = 0;
         self.clear_input();
     }
 
