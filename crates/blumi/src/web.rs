@@ -9,7 +9,11 @@ use blumi_cron::CronStore;
 use blumi_persist::Store;
 use blumi_protocol::SessionId;
 use blumi_skills::SkillCatalog;
-use blumi_web::{CronJobInfo, Management, ModelUsage, SkillInfo, UsageStats};
+use blumi_web::{
+    CronJobInfo, GatewayView, Management, ModelUsage, SettingsPatch, SettingsView, SkillInfo,
+    UsageStats, VoiceView,
+};
+use serde_json::{json, Value};
 use std::collections::BTreeMap;
 use std::net::SocketAddr;
 use std::sync::Arc;
@@ -213,6 +217,140 @@ impl Management for WebManagement {
         stats.by_model = by.into_values().collect();
         stats
     }
+
+    fn voice_config(&self) -> Option<blumi_voice::VoiceConfig> {
+        let c = self.fresh_config();
+        c.voice.enabled.then(|| to_voice_config(&c))
+    }
+
+    fn settings_view(&self) -> SettingsView {
+        let c = self.fresh_config();
+        let v = &c.voice;
+        let g = &c.gateway;
+        SettingsView {
+            voice: VoiceView {
+                enabled: v.enabled,
+                stt_base_url: v.stt_base_url.clone(),
+                stt_model: v.stt_model.clone(),
+                tts_provider: v.tts_provider.clone(),
+                tts_base_url: v.tts_base_url.clone(),
+                tts_model: v.tts_model.clone(),
+                tts_voice: v.tts_voice.clone(),
+                api_key_set: !v.api_key.trim().is_empty(),
+                tts_api_key_set: !v.tts_api_key.trim().is_empty(),
+            },
+            gateway: GatewayView {
+                yolo: g.yolo,
+                telegram_token_set: !g.telegram.token.trim().is_empty(),
+                discord_token_set: !g.discord.token.trim().is_empty(),
+                slack_bot_token_set: !g.slack.bot_token.trim().is_empty(),
+                slack_app_token_set: !g.slack.app_token.trim().is_empty(),
+                whatsapp_token_set: !g.whatsapp.token.trim().is_empty(),
+                whatsapp_phone_number_id: g.whatsapp.phone_number_id.clone(),
+                whatsapp_verify_token: g.whatsapp.verify_token.clone(),
+            },
+        }
+    }
+
+    fn settings_apply(&self, p: SettingsPatch) -> anyhow::Result<()> {
+        merge_settings_json(&self.config.paths.settings_json(), |root| {
+            if let Some(b) = p.voice_enabled {
+                set_path(root, &["voice", "enabled"], json!(b));
+            }
+            set_str(root, &["voice", "stt_base_url"], p.stt_base_url);
+            set_str(root, &["voice", "stt_model"], p.stt_model);
+            set_str(root, &["voice", "tts_provider"], p.tts_provider);
+            set_str(root, &["voice", "tts_base_url"], p.tts_base_url);
+            set_str(root, &["voice", "tts_model"], p.tts_model);
+            set_str(root, &["voice", "tts_voice"], p.tts_voice);
+            set_secret(root, &["voice", "api_key"], p.voice_api_key);
+            set_secret(root, &["voice", "tts_api_key"], p.tts_api_key);
+            if let Some(b) = p.gateway_yolo {
+                set_path(root, &["gateway", "yolo"], json!(b));
+            }
+            set_secret(root, &["gateway", "telegram", "token"], p.telegram_token);
+            set_secret(root, &["gateway", "discord", "token"], p.discord_token);
+            set_secret(root, &["gateway", "slack", "bot_token"], p.slack_bot_token);
+            set_secret(root, &["gateway", "slack", "app_token"], p.slack_app_token);
+            set_secret(root, &["gateway", "whatsapp", "token"], p.whatsapp_token);
+            set_str(
+                root,
+                &["gateway", "whatsapp", "phone_number_id"],
+                p.whatsapp_phone_number_id,
+            );
+            set_str(
+                root,
+                &["gateway", "whatsapp", "verify_token"],
+                p.whatsapp_verify_token,
+            );
+        })
+    }
+}
+
+impl WebManagement {
+    /// Re-read config from disk so edits made via the control center take effect
+    /// without a restart.
+    fn fresh_config(&self) -> BlumiConfig {
+        BlumiConfig::load(
+            &self.config.paths.working_dir,
+            Some(self.config.paths.home.clone()),
+        )
+        .unwrap_or_else(|_| self.config.clone())
+    }
+}
+
+/// Set a nested JSON path, creating intermediate objects.
+fn set_path(root: &mut Value, path: &[&str], val: Value) {
+    let mut cur = root;
+    for key in &path[..path.len() - 1] {
+        if !cur[*key].is_object() {
+            cur[*key] = json!({});
+        }
+        cur = &mut cur[*key];
+    }
+    cur[path[path.len() - 1]] = val;
+}
+
+/// Set a string field when provided (non-secret — empty is allowed).
+fn set_str(root: &mut Value, path: &[&str], v: Option<String>) {
+    if let Some(s) = v {
+        set_path(root, path, json!(s));
+    }
+}
+
+/// Set a secret field only when a non-empty value is provided (blank = keep).
+fn set_secret(root: &mut Value, path: &[&str], v: Option<String>) {
+    if let Some(s) = v {
+        if !s.trim().is_empty() {
+            set_path(root, path, json!(s));
+        }
+    }
+}
+
+/// Read settings.json (or `{}`), apply `edit`, write back atomically (0600).
+fn merge_settings_json(
+    path: &std::path::Path,
+    edit: impl FnOnce(&mut Value),
+) -> anyhow::Result<()> {
+    let mut root: Value = std::fs::read_to_string(path)
+        .ok()
+        .and_then(|s| serde_json::from_str(&s).ok())
+        .filter(Value::is_object)
+        .unwrap_or_else(|| json!({}));
+    edit(&mut root);
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent).ok();
+    }
+    let body = serde_json::to_string_pretty(&root)?;
+    let tmp = path.with_extension("json.tmp");
+    std::fs::write(&tmp, body.as_bytes())?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&tmp, std::fs::Permissions::from_mode(0o600))?;
+    }
+    std::fs::rename(&tmp, path)?;
+    Ok(())
 }
 
 pub async fn run(
@@ -283,13 +421,6 @@ pub async fn run(
         store: store.clone(),
     });
 
-    // Voice (speech-to-text + text-to-speech), if enabled.
-    let voice = if config.voice.enabled {
-        Some(voice_config(&config))
-    } else {
-        None
-    };
-
     let provider = Arc::new(WebSessionProvider { config, store });
 
     // Discovery lock file (analog of OpenMono's ACP lock writer) so other tools
@@ -314,14 +445,14 @@ pub async fn run(
         open_browser(&url);
     }
 
-    let result = blumi_web::serve(provider, mgmt, web, addr, auth, voice).await;
+    let result = blumi_web::serve(provider, mgmt, web, addr, auth).await;
     let _ = std::fs::remove_file(&lock);
     result
 }
 
 /// Map the config's voice section to a `blumi_voice::VoiceConfig`. Shared by the
 /// web server and the messaging gateways.
-pub(crate) fn voice_config(config: &BlumiConfig) -> blumi_voice::VoiceConfig {
+pub(crate) fn to_voice_config(config: &BlumiConfig) -> blumi_voice::VoiceConfig {
     blumi_voice::VoiceConfig {
         api_key: config.voice.api_key.clone(),
         stt_base_url: config.voice.stt_base_url.clone(),

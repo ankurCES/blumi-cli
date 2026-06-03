@@ -35,7 +35,7 @@ fn resolve_token(flag: Option<String>, configured: &str, what: &str) -> anyhow::
 /// (STT for inbound audio + TTS for replies) when it's enabled.
 fn build_core(config: BlumiConfig, yolo: bool) -> Arc<GatewayCore> {
     let voice = if config.voice.enabled {
-        Some(crate::web::voice_config(&config))
+        Some(crate::web::to_voice_config(&config))
     } else {
         None
     };

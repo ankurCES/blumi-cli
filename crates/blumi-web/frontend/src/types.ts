@@ -65,6 +65,30 @@ export type Usage = {
   by_model: ModelUsage[]
 }
 
+export type SettingsView = {
+  voice: {
+    enabled: boolean
+    stt_base_url: string
+    stt_model: string
+    tts_provider: string
+    tts_base_url: string
+    tts_model: string
+    tts_voice: string
+    api_key_set: boolean
+    tts_api_key_set: boolean
+  }
+  gateway: {
+    yolo: boolean
+    telegram_token_set: boolean
+    discord_token_set: boolean
+    slack_bot_token_set: boolean
+    slack_app_token_set: boolean
+    whatsapp_token_set: boolean
+    whatsapp_phone_number_id: string
+    whatsapp_verify_token: string
+  }
+}
+
 export type Config = {
   model: string
   models: string[]

@@ -1,4 +1,13 @@
-import type { Config, CronJob, Persona, ServerMessage, SessionMeta, SkillFull, Usage } from './types'
+import type {
+  Config,
+  CronJob,
+  Persona,
+  ServerMessage,
+  SessionMeta,
+  SettingsView,
+  SkillFull,
+  Usage,
+} from './types'
 
 async function getJSON<T>(path: string): Promise<T> {
   const r = await fetch(path)
@@ -45,6 +54,9 @@ export const api = {
   memorySet: (which: 'memory' | 'user', content: string) =>
     postJSON('/api/memory', { which, content }),
   usage: () => getJSON<{ usage: Usage }>('/api/usage').then((d) => d.usage),
+  settingsGet: () =>
+    getJSON<{ settings: SettingsView }>('/api/settings').then((d) => d.settings),
+  settingsSet: (patch: Record<string, unknown>) => postJSON('/api/settings', patch),
   // Voice.
   transcribe: async (blob: Blob): Promise<string> => {
     const r = await fetch('/api/voice/transcribe', {
