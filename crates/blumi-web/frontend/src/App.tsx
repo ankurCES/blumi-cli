@@ -117,6 +117,8 @@ function applyEvent(s: State, name: string, d: any): State {
     case 'compaction':
       return {
         ...s,
+        // Reset the meter to the post-compaction size immediately.
+        contextTokens: d.tokens_after && d.tokens_after > 0 ? d.tokens_after : s.contextTokens,
         entries: [
           ...s.entries,
           { kind: 'notice', text: `context compacted (${d.messages_compressed} messages)` },

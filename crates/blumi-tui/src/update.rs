@@ -544,8 +544,14 @@ async fn handle_core(model: &mut Model, event: Event, session: &SessionHandle) {
         }
         Event::Compaction {
             messages_compressed,
+            tokens_after,
             ..
         } => {
+            // Reset the context meter immediately to the post-compaction size
+            // (otherwise it stays pinned near 100% until the next request).
+            if tokens_after > 0 {
+                model.context_tokens = tokens_after;
+            }
             model.entries.push(Entry::Notice(format!(
                 "context compacted ({messages_compressed} messages)"
             )));

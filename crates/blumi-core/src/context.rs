@@ -111,7 +111,7 @@ impl ContextManager {
             return false;
         };
 
-        let compressed = {
+        let (compressed, tokens_after) = {
             let mut st = state.lock().await;
             // Re-check the cutoff against current length (the turn may have
             // appended since we cloned); clamp to be safe.
@@ -124,12 +124,18 @@ impl ContextManager {
                 "[Summary of the earlier conversation, condensed to save context]\n\n{summary}"
             ));
             st.messages = std::iter::once(summary_msg).chain(tail).collect();
-            cutoff
+            // The conversation just shrank: refresh the measured floor so the
+            // compaction decision (and the live meter) reflect the new size
+            // immediately, rather than staying pinned at the pre-compaction high.
+            let after = Self::estimate_tokens(&st.messages) as u32;
+            st.last_prompt_tokens = after;
+            (cutoff, after)
         };
 
         events.emit(Event::Compaction {
             messages_compressed: compressed as u32,
             checkpoint: 0,
+            tokens_after,
         });
         true
     }
@@ -287,7 +293,7 @@ mod tests {
                     .push(Message::user("word ".repeat(20) + &i.to_string()));
             }
         }
-        let (etx, _erx) = tokio::sync::mpsc::unbounded_channel();
+        let (etx, mut erx) = tokio::sync::mpsc::unbounded_channel();
         let events = EventEmitter::new(etx);
         let llm: Arc<dyn LlmClient> = Arc::new(SummaryLlm);
 
@@ -306,6 +312,16 @@ mod tests {
         // summary + kept tail (8) = 9
         assert_eq!(st.messages.len(), 9);
         assert!(st.messages[0].text().contains("SUMMARY"));
+        // The meter-reset signal: a Compaction event carrying the smaller size,
+        // and the measured floor refreshed to match (so it isn't pinned high).
+        let ev = erx.try_recv().expect("compaction event");
+        match ev {
+            Event::Compaction { tokens_after, .. } => {
+                assert!(tokens_after > 0, "post-compaction size reported");
+                assert_eq!(tokens_after, st.last_prompt_tokens, "floor refreshed");
+            }
+            _ => panic!("expected Compaction event"),
+        }
     }
 
     #[tokio::test]
