@@ -43,6 +43,8 @@ pub enum InteractionKind {
         question: String,
         choices: Vec<ClarifyChoice>,
     },
+    /// The agent proposes a plan and waits for approval (`ExitPlanMode`).
+    Plan { plan: String },
 }
 
 /// The user's reply to an interaction.
@@ -103,6 +105,28 @@ impl Interactor {
             Ok(InteractionReply::Approval { decision, scope }) => (decision, scope),
             _ => (Decision::Deny, ApprovalScope::Once),
         }
+    }
+
+    /// Present a plan and wait for approval (`ExitPlanMode`). Returns `true` if
+    /// the user approved (proceed), `false` if rejected or no UI responds —
+    /// fail closed, so an unanswered plan never silently proceeds to writes.
+    pub async fn review_plan(&self, plan: impl Into<String>) -> bool {
+        let (respond, rx) = oneshot::channel();
+        let req = InteractionRequest {
+            id: RequestId::new(),
+            kind: InteractionKind::Plan { plan: plan.into() },
+            respond,
+        };
+        if self.tx.send(req).is_err() {
+            return false;
+        }
+        matches!(
+            rx.await,
+            Ok(InteractionReply::Approval {
+                decision: Decision::Allow,
+                ..
+            })
+        )
     }
 
     /// Ask the user to disambiguate. Returns `None` if no UI responds.

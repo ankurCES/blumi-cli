@@ -6,6 +6,7 @@
 
 mod app;
 mod commands;
+mod cost;
 mod dialog;
 mod diff;
 mod highlight;

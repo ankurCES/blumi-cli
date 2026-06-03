@@ -14,6 +14,11 @@ pub enum Action {
     ResumeSession(String),
     SetModel(String),
     SetProvider(String),
+    // Menu entries that open a focused sub-picker.
+    OpenSessions,
+    OpenModels,
+    OpenProviders,
+    ToggleYolo,
 }
 
 pub struct PickerItem {
@@ -34,6 +39,31 @@ pub struct Picker {
 impl Picker {
     pub fn command_palette() -> Self {
         let items = vec![
+            PickerItem {
+                label: "Switch session".into(),
+                hint: "ctrl+s".into(),
+                action: Action::OpenSessions,
+            },
+            PickerItem {
+                label: "New session".into(),
+                hint: "/new".into(),
+                action: Action::NewSession,
+            },
+            PickerItem {
+                label: "Pick model".into(),
+                hint: "/model".into(),
+                action: Action::OpenModels,
+            },
+            PickerItem {
+                label: "Pick provider".into(),
+                hint: "/provider".into(),
+                action: Action::OpenProviders,
+            },
+            PickerItem {
+                label: "Toggle auto-approve (yolo)".into(),
+                hint: "ctrl+y".into(),
+                action: Action::ToggleYolo,
+            },
             PickerItem {
                 label: "Clear transcript".into(),
                 hint: "/clear".into(),
@@ -223,9 +253,11 @@ mod tests {
     #[test]
     fn palette_filters_fuzzily() {
         let mut p = Picker::command_palette();
-        assert_eq!(p.filtered.len(), 3);
+        assert_eq!(p.filtered.len(), 8);
         p.push_char('t');
         p.push_char('h');
+        p.push_char('e');
+        p.push_char('m');
         // "theme" should rank in; "Quit" should drop out
         let labels: Vec<&str> = p.rows().iter().map(|(l, _, _)| *l).collect();
         assert!(labels.iter().any(|l| l.contains("theme")));
@@ -235,7 +267,7 @@ mod tests {
     #[test]
     fn selection_action() {
         let p = Picker::command_palette();
-        assert_eq!(p.selected_action(), Some(Action::ClearTranscript));
+        assert_eq!(p.selected_action(), Some(Action::OpenSessions));
     }
 
     #[test]

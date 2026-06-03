@@ -45,6 +45,15 @@ pub struct PendingApproval {
     pub advice: Option<String>,
 }
 
+/// A plan awaiting the user's approval (the `ExitPlanMode` tool) — shown as a
+/// scrollable modal.
+pub struct PlanReview {
+    pub request_id: RequestId,
+    pub plan: String,
+    /// Vertical scroll offset (rows) within the plan body.
+    pub scroll: u16,
+}
+
 /// Messages that drive `update`.
 pub enum Msg {
     Term(crossterm::event::Event),
@@ -126,7 +135,16 @@ pub struct Model {
     pub slash_sel: usize,
 
     pub pending: Option<PendingApproval>,
+    /// A plan awaiting approval (the `ExitPlanMode` tool), shown as a scrollable
+    /// modal that captures keys until approved/rejected.
+    pub plan_review: Option<PlanReview>,
+    /// Whether planning mode is on (mutating tools blocked). Mirrors the core
+    /// flag for the header/dashboard indicator.
+    pub plan_mode: bool,
     pub dialog: Option<Picker>,
+    /// Screen rect (x, y, w, h) of the open dialog's row list, recorded at
+    /// render time so mouse clicks can be mapped to a row (click-to-select).
+    pub dialog_list_area: Option<(u16, u16, u16, u16)>,
     /// Rendered memory text when the `/memory` overlay is open.
     pub memory_view: Option<String>,
     /// Rendered usage analytics when the `/usage` overlay is open.
@@ -167,6 +185,8 @@ pub struct Model {
 
     pub input_tokens: u32,
     pub output_tokens: u32,
+    /// Estimated session spend in USD (from billed tokens × list price).
+    pub cost_usd: f64,
 
     pub should_quit: bool,
     dirty: bool,
@@ -212,7 +232,10 @@ impl Model {
             draft: String::new(),
             slash_sel: 0,
             pending: None,
+            plan_review: None,
+            plan_mode: false,
             dialog: None,
+            dialog_list_area: None,
             memory_view: None,
             usage_view: None,
             board_view: None,
@@ -233,6 +256,7 @@ impl Model {
             theme_idx: 0,
             input_tokens: 0,
             output_tokens: 0,
+            cost_usd: 0.0,
             should_quit: false,
             dirty: true,
         }
@@ -376,12 +400,15 @@ impl Model {
         self.turn_count = 0;
         self.input_tokens = 0;
         self.output_tokens = 0;
+        self.cost_usd = 0.0;
         self.context_tokens = 0;
         self.active_ms = 0;
         self.started = Instant::now();
         self.goal.clear();
         self.session_title.clear();
         self.pending = None;
+        self.plan_review = None;
+        self.plan_mode = false;
         self.dialog = None;
         self.memory_view = None;
         self.usage_view = None;

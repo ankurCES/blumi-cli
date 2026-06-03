@@ -118,6 +118,11 @@ pub enum Event {
         question: String,
         choices: Vec<ClarifyChoice>,
     },
+    /// The agent finished planning and is proposing a plan for approval (the
+    /// `ExitPlanMode` tool). The host shows it (a scrollable modal) and replies
+    /// with `Command::ApproveTool` — `Allow` approves (proceed), `Deny` rejects
+    /// (revise). The `plan` is markdown.
+    PlanReview { request_id: RequestId, plan: String },
 
     /// The todo/plan list changed.
     TodoUpdate { items: Vec<Todo> },
@@ -126,6 +131,13 @@ pub enum Event {
         input: u32,
         output: u32,
         total: u32,
+        /// The full prompt size of the latest request (input + cache read +
+        /// cache write) — i.e. how much is currently in the context window.
+        /// Distinct from `input`, which (with prompt caching on) counts only the
+        /// uncached tokens and so badly understates context usage. Drives the
+        /// context-progress meter. Defaults to `input` for old events.
+        #[serde(default)]
+        context: u32,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         cost_usd: Option<f64>,
     },
@@ -169,6 +181,7 @@ impl Event {
             Event::Diff { .. } => "diff",
             Event::ApprovalRequest { .. } => "approval_request",
             Event::ClarifyRequest { .. } => "clarify_request",
+            Event::PlanReview { .. } => "plan_review",
             Event::TodoUpdate { .. } => "todo_update",
             Event::Usage { .. } => "usage",
             Event::Compaction { .. } => "compaction",
@@ -223,6 +236,7 @@ mod tests {
                 input: 1,
                 output: 2,
                 total: 3,
+                context: 1,
                 cost_usd: None,
             },
         };

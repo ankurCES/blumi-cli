@@ -2,7 +2,7 @@
 
 use crate::commands;
 use crate::dialog::{Action, Picker};
-use crate::model::{Entry, Focus, Model, Msg, PendingApproval};
+use crate::model::{Entry, Focus, Model, Msg, PendingApproval, PlanReview};
 use blumi_core::SessionHandle;
 use blumi_protocol::{ApprovalScope, Command, Decision, Event};
 use crossterm::event::{Event as TermEvent, KeyCode, KeyEventKind, KeyModifiers};
@@ -90,6 +90,13 @@ async fn handle_term(model: &mut Model, ev: TermEvent, session: &SessionHandle) 
                         model.input.input(key);
                     }
                 }
+                model.mark_dirty();
+                return;
+            }
+
+            // A plan-review modal captures all keys (scroll + approve/reject).
+            if model.plan_review.is_some() {
+                handle_plan_key(model, key, session).await;
                 model.mark_dirty();
                 return;
             }
@@ -189,7 +196,9 @@ async fn handle_term(model: &mut Model, ev: TermEvent, session: &SessionHandle) 
             use crossterm::event::MouseEventKind;
             match me.kind {
                 MouseEventKind::ScrollUp => {
-                    if let Some(d) = model.dialog.as_mut() {
+                    if let Some(p) = model.plan_review.as_mut() {
+                        p.scroll = p.scroll.saturating_sub(3);
+                    } else if let Some(d) = model.dialog.as_mut() {
                         d.move_up();
                     } else {
                         model.scrollback = model.scrollback.saturating_add(3);
@@ -197,12 +206,38 @@ async fn handle_term(model: &mut Model, ev: TermEvent, session: &SessionHandle) 
                     model.mark_dirty();
                 }
                 MouseEventKind::ScrollDown => {
-                    if let Some(d) = model.dialog.as_mut() {
+                    if let Some(p) = model.plan_review.as_mut() {
+                        p.scroll = p.scroll.saturating_add(3);
+                    } else if let Some(d) = model.dialog.as_mut() {
                         d.move_down();
                     } else {
                         model.scrollback = model.scrollback.saturating_sub(3);
                     }
                     model.mark_dirty();
+                }
+                // Click a picker row to select + activate it (menu-style).
+                MouseEventKind::Down(crossterm::event::MouseButton::Left) => {
+                    let row = model.dialog_list_area.and_then(|(x, y, w, h)| {
+                        let hit = model.dialog.is_some()
+                            && me.column >= x
+                            && me.column < x + w
+                            && me.row >= y
+                            && me.row < y + h;
+                        hit.then(|| (me.row - y) as usize)
+                    });
+                    if let Some(row) = row {
+                        let action = model.dialog.as_mut().and_then(|d| {
+                            (row < d.filtered.len()).then(|| {
+                                d.selected = row;
+                                d.selected_action()
+                            })?
+                        });
+                        if let Some(a) = action {
+                            model.dialog = None;
+                            perform_action(model, a, session).await;
+                        }
+                        model.mark_dirty();
+                    }
                 }
                 _ => {}
             }
@@ -303,6 +338,71 @@ async fn handle_approval_key(model: &mut Model, code: KeyCode, session: &Session
     }
 }
 
+/// Keys while the plan-review modal is open: scroll, or approve/reject.
+async fn handle_plan_key(
+    model: &mut Model,
+    key: crossterm::event::KeyEvent,
+    session: &SessionHandle,
+) {
+    match key.code {
+        KeyCode::Char('a') | KeyCode::Enter => resolve_plan(model, session, true).await,
+        KeyCode::Char('d') | KeyCode::Char('r') | KeyCode::Esc => {
+            resolve_plan(model, session, false).await
+        }
+        KeyCode::Up | KeyCode::Char('k') => {
+            if let Some(p) = model.plan_review.as_mut() {
+                p.scroll = p.scroll.saturating_sub(1);
+            }
+        }
+        KeyCode::Down | KeyCode::Char('j') => {
+            if let Some(p) = model.plan_review.as_mut() {
+                p.scroll = p.scroll.saturating_add(1);
+            }
+        }
+        KeyCode::PageUp => {
+            if let Some(p) = model.plan_review.as_mut() {
+                p.scroll = p.scroll.saturating_sub(10);
+            }
+        }
+        KeyCode::PageDown => {
+            if let Some(p) = model.plan_review.as_mut() {
+                p.scroll = p.scroll.saturating_add(10);
+            }
+        }
+        _ => {}
+    }
+}
+
+/// Resolve a plan review: approve (proceed) or reject (revise). On approve the
+/// core also exits plan mode; we mirror the flag locally for the indicator.
+async fn resolve_plan(model: &mut Model, session: &SessionHandle, approve: bool) {
+    let Some(p) = model.plan_review.take() else {
+        return;
+    };
+    let decision = if approve {
+        Decision::Allow
+    } else {
+        Decision::Deny
+    };
+    let _ = session
+        .send(Command::ApproveTool {
+            request_id: p.request_id,
+            decision,
+            scope: ApprovalScope::Once,
+        })
+        .await;
+    if approve {
+        model.plan_mode = false;
+        model
+            .entries
+            .push(Entry::Notice("✓ plan approved — proceeding".into()));
+    } else {
+        model.entries.push(Entry::Notice(
+            "✗ plan rejected — still in plan mode; tell blumi what to change".into(),
+        ));
+    }
+}
+
 async fn handle_core(model: &mut Model, event: Event, session: &SessionHandle) {
     match event {
         Event::AssistantStarted { .. } => model.streaming = Some(String::new()),
@@ -376,6 +476,13 @@ async fn handle_core(model: &mut Model, event: Event, session: &SessionHandle) {
                 advice,
             });
         }
+        Event::PlanReview { request_id, plan } => {
+            model.plan_review = Some(PlanReview {
+                request_id,
+                plan,
+                scroll: 0,
+            });
+        }
         Event::ClarifyRequest {
             request_id,
             question,
@@ -392,11 +499,18 @@ async fn handle_core(model: &mut Model, event: Event, session: &SessionHandle) {
                 .await;
         }
         Event::TodoUpdate { items } => model.todos = items,
-        Event::Usage { input, output, .. } => {
+        Event::Usage {
+            input,
+            output,
+            context,
+            ..
+        } => {
             model.input_tokens += input;
             model.output_tokens += output;
-            // The latest request's input size ≈ current context usage.
-            model.context_tokens = input;
+            model.cost_usd += crate::cost::estimate(&model.model_name, input, output);
+            // `context` is the full prompt size (incl. cached tokens) — the real
+            // context-window usage. Fall back to `input` for old events.
+            model.context_tokens = if context > 0 { context } else { input };
         }
         Event::Compaction {
             messages_compressed,
@@ -525,6 +639,23 @@ async fn perform_action(model: &mut Model, action: Action, session: &SessionHand
             let _ = session.send(Command::SetModel { model: m.clone() }).await;
             model.entries.push(Entry::Notice(format!("model → {m}")));
         }
+        // Menu hub: open a focused sub-picker (clone first to avoid borrowing
+        // `model` while assigning `model.dialog`).
+        Action::OpenSessions => {
+            let sessions = model.recent_sessions.clone();
+            model.dialog = Some(Picker::session_picker(&sessions));
+        }
+        Action::OpenModels => {
+            let models = model.model_options.models.clone();
+            let current = model.model_options.model.clone();
+            model.dialog = Some(Picker::model_picker(&models, &current));
+        }
+        Action::OpenProviders => {
+            let providers = model.model_options.providers.clone();
+            let current = model.model_options.provider.clone();
+            model.dialog = Some(Picker::provider_picker(&providers, &current));
+        }
+        Action::ToggleYolo => commands::toggle_yolo(model, session).await,
         Action::SetProvider(name) => {
             if name == model.model_options.provider {
                 return; // already active
