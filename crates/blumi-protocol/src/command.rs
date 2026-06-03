@@ -53,6 +53,9 @@ pub enum Command {
     SetModel { model: String },
     /// Toggle auto-approve-all (yolo) at runtime.
     SetYolo { on: bool },
+    /// Set the local-LLM "brain" approval mode at runtime (`off`/`advisory`/
+    /// `auto`). Unknown values are ignored by the core.
+    SetBrainMode { mode: String },
     /// Force a context compaction now (manual `/compact`).
     Compact,
     /// Revert the most recent file change (manual `/undo`).

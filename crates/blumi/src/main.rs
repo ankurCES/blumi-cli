@@ -54,6 +54,9 @@ enum Commands {
         /// Auto-approve tool calls (otherwise denied in headless mode).
         #[arg(long)]
         yolo: bool,
+        /// Local-LLM approval brain mode: off | advisory | auto.
+        #[arg(long)]
+        brain: Option<String>,
     },
     /// Interactive terminal UI.
     Tui,
@@ -112,6 +115,9 @@ enum Commands {
         /// Desktop notification when the loop finishes.
         #[arg(long)]
         notify: bool,
+        /// Local-LLM approval brain mode: off | advisory | auto.
+        #[arg(long)]
+        brain: Option<String>,
     },
 }
 
@@ -256,7 +262,17 @@ async fn main() -> anyhow::Result<()> {
     }
 
     match cli.command {
-        Some(Commands::Run { prompt, yolo }) => run::run(config, prompt.join(" "), yolo).await,
+        Some(Commands::Run {
+            prompt,
+            yolo,
+            brain,
+        }) => {
+            let mut config = config;
+            if let Some(b) = brain {
+                config.brain.mode = b;
+            }
+            run::run(config, prompt.join(" "), yolo).await
+        }
         Some(Commands::Login) => {
             match onboarding::ensure_configured(config, true).await? {
                 Some(_) => {
@@ -341,7 +357,12 @@ async fn main() -> anyhow::Result<()> {
             yolo,
             review,
             notify,
+            brain,
         }) => {
+            let mut config = config;
+            if let Some(b) = brain {
+                config.brain.mode = b;
+            }
             loop_run::run(
                 config,
                 loop_run::LoopOptions {

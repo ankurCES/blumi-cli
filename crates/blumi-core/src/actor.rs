@@ -200,6 +200,11 @@ impl SessionActor {
             Command::SetYolo { on } => {
                 self.runner.set_yolo(on);
             }
+            Command::SetBrainMode { mode } => {
+                if let Some(m) = crate::brain::BrainMode::parse(&mode) {
+                    self.runner.set_brain_mode(m);
+                }
+            }
             Command::Compact => {
                 if self.turn_token.is_some() {
                     self.publish(Event::Error {
@@ -308,12 +313,14 @@ impl SessionActor {
                 summary,
                 dangerous,
                 diff,
+                advice,
             } => Event::ApprovalRequest {
                 request_id: ir.id.clone(),
                 tool: tool.clone(),
                 summary: summary.clone(),
                 dangerous: *dangerous,
                 diff: diff.clone(),
+                advice: advice.clone(),
             },
             InteractionKind::Clarify { question, choices } => Event::ClarifyRequest {
                 request_id: ir.id.clone(),
@@ -373,7 +380,10 @@ mod tests {
             ctx: TurnContext,
             _ct: CancellationToken,
         ) -> DoneReason {
-            let (decision, _scope) = ctx.interactor.approve("Bash", "run rm", true, None).await;
+            let (decision, _scope) = ctx
+                .interactor
+                .approve("Bash", "run rm", true, None, None)
+                .await;
             let text = format!("decision={decision:?}");
             state.lock().await.messages.push(Message::assistant(text));
             DoneReason::Completed

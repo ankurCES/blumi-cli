@@ -107,6 +107,10 @@ pub enum Event {
         dangerous: bool,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         diff: Option<String>,
+        /// An optional recommendation from the local-LLM "brain" (advisory mode),
+        /// e.g. "brain suggests allow — reads a project file".
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        advice: Option<String>,
     },
     /// The agent needs disambiguation from the user.
     ClarifyRequest {

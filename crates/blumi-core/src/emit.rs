@@ -36,6 +36,8 @@ pub enum InteractionKind {
         summary: String,
         dangerous: bool,
         diff: Option<String>,
+        /// Optional brain recommendation (advisory mode).
+        advice: Option<String>,
     },
     Clarify {
         question: String,
@@ -80,6 +82,7 @@ impl Interactor {
         summary: impl Into<String>,
         dangerous: bool,
         diff: Option<String>,
+        advice: Option<String>,
     ) -> (Decision, ApprovalScope) {
         let (respond, rx) = oneshot::channel();
         let req = InteractionRequest {
@@ -89,6 +92,7 @@ impl Interactor {
                 summary: summary.into(),
                 dangerous,
                 diff,
+                advice,
             },
             respond,
         };
@@ -147,7 +151,9 @@ mod tests {
                 .unwrap();
         });
 
-        let (decision, _scope) = interactor.approve("Bash", "run ls", false, None).await;
+        let (decision, _scope) = interactor
+            .approve("Bash", "run ls", false, None, None)
+            .await;
         assert_eq!(decision, Decision::Allow);
         actor.await.unwrap();
     }
@@ -157,7 +163,7 @@ mod tests {
         let (tx, rx) = mpsc::unbounded_channel::<InteractionRequest>();
         drop(rx); // no actor listening
         let interactor = Interactor::new(tx);
-        let (decision, _) = interactor.approve("Bash", "x", true, None).await;
+        let (decision, _) = interactor.approve("Bash", "x", true, None, None).await;
         assert_eq!(decision, Decision::Deny);
     }
 }

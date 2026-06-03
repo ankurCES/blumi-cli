@@ -81,6 +81,10 @@ pub const COMMANDS: &[CommandDef] = &[
         desc: "toggle auto-approve (yolo)",
     },
     CommandDef {
+        name: "/brain",
+        desc: "local-LLM approvals: /brain off|advisory|auto",
+    },
+    CommandDef {
         name: "/persona",
         desc: "switch persona: /persona [name]",
     },
@@ -281,6 +285,37 @@ pub async fn run(model: &mut Model, session: &SessionHandle, line: &str) {
                 }
                 .into(),
             ));
+        }
+        "/brain" => {
+            if arg.is_empty() {
+                model.entries.push(Entry::Notice(format!(
+                    "🧠 brain {} — a local LLM reviews tool approvals. usage: /brain off|advisory|auto",
+                    model.brain_mode
+                )));
+            } else if let Some(m) = blumi_core::BrainMode::parse(&arg) {
+                model.brain_mode = m.label().to_string();
+                let _ = session
+                    .send(Command::SetBrainMode {
+                        mode: m.label().into(),
+                    })
+                    .await;
+                model.entries.push(Entry::Notice(
+                    match m {
+                        blumi_core::BrainMode::Off => "🧠 brain off — approvals ask you as usual",
+                        blumi_core::BrainMode::Advisory => {
+                            "🧠 brain advisory — it recommends; you still confirm"
+                        }
+                        blumi_core::BrainMode::Auto => {
+                            "🧠 brain auto — it approves/denies for you (dangerous calls still ask)"
+                        }
+                    }
+                    .into(),
+                ));
+            } else {
+                model
+                    .entries
+                    .push(Entry::Notice("usage: /brain off|advisory|auto".into()));
+            }
         }
         "/persona" => {
             if arg.is_empty() {

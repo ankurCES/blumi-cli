@@ -134,6 +134,9 @@ fn render_dashboard(model: &Model, f: &mut Frame, area: Rect, theme: &Theme) {
         if model.yolo { "auto (yolo)" } else { "ask" },
         theme,
     ));
+    if model.brain_mode != "off" {
+        lines.push(kv("brain", &model.brain_mode, theme));
+    }
 
     // ── Context usage ─────────────────────────────────────────
     lines.push(Line::raw(""));
@@ -899,6 +902,11 @@ fn render_approval(model: &Model, f: &mut Frame, area: Rect, theme: &Theme) {
         Line::raw(""),
     ];
     push_wrapped(&mut lines, &p.summary, width, theme.body(), "");
+    // Brain recommendation (advisory mode / auto-mode escalation).
+    if let Some(advice) = &p.advice {
+        lines.push(Line::raw(""));
+        push_wrapped(&mut lines, advice, width, theme.accent(), "");
+    }
     if let Some(diff) = &p.diff {
         lines.push(Line::raw(""));
         lines.extend(crate::diff::render_unified(diff, theme, 12));
@@ -1072,10 +1080,12 @@ mod tests {
             summary: "rm -rf build".into(),
             dangerous: true,
             diff: None,
+            advice: Some("🧠 brain suggests deny — destroys build dir".into()),
         });
         let out = render_to_string(&mut model, 80, 24);
         assert!(out.contains("permission"));
         assert!(out.contains("rm -rf build"));
+        assert!(out.contains("brain suggests deny"), "advice shown on card");
         assert!(out.contains("allow once"));
     }
 

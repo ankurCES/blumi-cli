@@ -359,6 +359,7 @@ async fn handle_core(model: &mut Model, event: Event, session: &SessionHandle) {
             summary,
             dangerous,
             diff,
+            advice,
         } => {
             model.pending = Some(PendingApproval {
                 request_id,
@@ -366,6 +367,7 @@ async fn handle_core(model: &mut Model, event: Event, session: &SessionHandle) {
                 summary,
                 dangerous,
                 diff,
+                advice,
             });
         }
         Event::ClarifyRequest {

@@ -10,8 +10,8 @@ use blumi_persist::Store;
 use blumi_protocol::SessionId;
 use blumi_skills::SkillCatalog;
 use blumi_web::{
-    CronJobInfo, GatewayView, Management, ModelOptions, ModelUsage, ProviderOption, SettingsPatch,
-    SettingsView, SkillInfo, UsageStats, VoiceView,
+    BrainView, CronJobInfo, GatewayView, Management, ModelOptions, ModelUsage, ProviderOption,
+    SettingsPatch, SettingsView, SkillInfo, UsageStats, VoiceView,
 };
 use serde_json::{json, Value};
 use std::collections::BTreeMap;
@@ -228,6 +228,14 @@ impl Management for WebManagement {
         let v = &c.voice;
         let g = &c.gateway;
         SettingsView {
+            brain: BrainView {
+                mode: blumi_core::BrainMode::parse(&c.brain.mode)
+                    .unwrap_or_default()
+                    .label()
+                    .to_string(),
+                provider: c.brain.provider.clone(),
+                model: c.brain.model.clone(),
+            },
             voice: VoiceView {
                 enabled: v.enabled,
                 stt_base_url: v.stt_base_url.clone(),
@@ -254,6 +262,16 @@ impl Management for WebManagement {
 
     fn settings_apply(&self, p: SettingsPatch) -> anyhow::Result<()> {
         merge_settings_json(&self.config.paths.settings_json(), |root| {
+            // Brain (local-LLM approvals). Only accept a valid mode.
+            if let Some(m) = p
+                .brain_mode
+                .as_deref()
+                .and_then(blumi_core::BrainMode::parse)
+            {
+                set_path(root, &["brain", "mode"], json!(m.label()));
+            }
+            set_str(root, &["brain", "provider"], p.brain_provider);
+            set_str(root, &["brain", "model"], p.brain_model);
             if let Some(b) = p.voice_enabled {
                 set_path(root, &["voice", "enabled"], json!(b));
             }

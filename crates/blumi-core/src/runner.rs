@@ -47,6 +47,14 @@ pub trait TurnRunner: Send + Sync {
         false
     }
 
+    /// Set the local-LLM "brain" approval mode at runtime. Default: no-op.
+    fn set_brain_mode(&self, _mode: crate::brain::BrainMode) {}
+
+    /// The current brain approval mode. Default: `Off`.
+    fn brain_mode(&self) -> crate::brain::BrainMode {
+        crate::brain::BrainMode::Off
+    }
+
     /// Force a context compaction now (the manual `/compact`). Emits a
     /// `Compaction` event via `events` on success. Default: no-op → `false`.
     async fn compact(

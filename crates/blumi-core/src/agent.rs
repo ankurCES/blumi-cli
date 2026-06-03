@@ -298,6 +298,14 @@ impl TurnRunner for AgentTurnRunner {
         self.perms.is_yolo()
     }
 
+    fn set_brain_mode(&self, mode: crate::brain::BrainMode) {
+        self.perms.set_brain_mode(mode);
+    }
+
+    fn brain_mode(&self) -> crate::brain::BrainMode {
+        self.perms.brain_mode()
+    }
+
     async fn compact(
         &self,
         state: Arc<Mutex<SessionState>>,

@@ -129,7 +129,8 @@ pub async fn build_session(
     if yolo {
         perm_cfg.yolo = true;
     }
-    let perms = Arc::new(PermissionEngine::new(perm_cfg));
+    // The brain is attached below, once the active model is resolved.
+    let perm_engine = PermissionEngine::new(perm_cfg);
 
     // The agent's working directory. For ssh it's the remote workspace; for
     // local/docker it's the project dir (docker bind-mounts it).
@@ -227,6 +228,45 @@ pub async fn build_session(
     let system_prompt = build_system_prompt(config, &memory, &skills_section);
 
     let registry = Arc::new(registry);
+
+    // Brain: a local-LLM reviewer over the approval path (claudectl-style). It
+    // can reuse the main client or judge with a cheaper dedicated provider
+    // (e.g. a local `ollama` model) so auto-approval stays fast and free. We
+    // always attach it (starting in the configured mode, default `off`) so the
+    // `/brain` command can switch advisory/auto on live without a restart.
+    let brain_mode = blumi_core::BrainMode::parse(&config.brain.mode).unwrap_or_default();
+    let brain_llm: Arc<dyn LlmClient> = if config.brain.provider.is_empty() {
+        llm.clone()
+    } else if let Some(p) = config.providers.get(&config.brain.provider) {
+        build_client(p).unwrap_or_else(|e| {
+            tracing::warn!(
+                "brain provider '{}' failed ({e}); reusing main client",
+                config.brain.provider
+            );
+            llm.clone()
+        })
+    } else {
+        tracing::warn!(
+            "brain provider '{}' not configured; reusing main client",
+            config.brain.provider
+        );
+        llm.clone()
+    };
+    let brain_model = if config.brain.model.is_empty() {
+        model.clone()
+    } else {
+        config.brain.model.clone()
+    };
+    if brain_mode != blumi_core::BrainMode::Off {
+        tracing::info!(
+            "brain enabled: mode={} model={brain_model}",
+            brain_mode.label()
+        );
+    }
+    let perms = Arc::new(perm_engine.with_brain(
+        Arc::new(blumi_core::LocalBrain::new(brain_llm, brain_model)),
+        brain_mode,
+    ));
 
     // Sub-agent delegation: the spawner shares the same provider/registry/executor.
     let spawner = Arc::new(AgentSpawner::new(

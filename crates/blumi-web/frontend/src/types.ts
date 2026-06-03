@@ -24,6 +24,8 @@ export type Approval = {
   summary: string
   dangerous: boolean
   diff?: string | null
+  /** Local-LLM "brain" recommendation (advisory mode / auto-mode escalation). */
+  advice?: string | null
 }
 
 export type ClarifyChoice = { id: string; label: string }
@@ -74,6 +76,11 @@ export type Usage = {
 }
 
 export type SettingsView = {
+  brain: {
+    mode: string
+    provider: string
+    model: string
+  }
   voice: {
     enabled: boolean
     stt_base_url: string
