@@ -5,7 +5,7 @@ use async_trait::async_trait;
 use blumi_config::BlumiConfig;
 use blumi_core::{SessionHandle, SessionState};
 use blumi_persist::Store;
-use blumi_protocol::SessionId;
+use blumi_protocol::{Message, Role, SessionId};
 use std::sync::Arc;
 
 /// Creates / resumes / lists / saves sessions for the TUI, over the engine +
@@ -67,6 +67,81 @@ impl blumi_tui::SessionFactory for TuiSessionFactory {
         build_session(&config, false, Some(state)).await
     }
 
+    async fn rollover(
+        &self,
+        snapshot: blumi_core::SessionSnapshot,
+    ) -> anyhow::Result<SessionHandle> {
+        let config = self.fresh_config();
+        let model = if snapshot.model.is_empty() {
+            config.llm.model.clone()
+        } else {
+            snapshot.model.clone()
+        };
+
+        // Summarize the old session for the handoff (best-effort; skipped for the
+        // mock provider or if a client can't be built).
+        let summary = match (config.llm.provider.as_str(), config.active_provider()) {
+            ("mock", _) | (_, None) => None,
+            (_, Some(provider)) => match blumi_llm::build_client(provider) {
+                Ok(llm) => {
+                    let opts = blumi_core::LlmOptions {
+                        model: model.clone(),
+                        max_output_tokens: 1024,
+                        temperature: 0.0,
+                        top_p: 1.0,
+                        top_k: 0,
+                        thinking: false,
+                        prompt_cache: false,
+                    };
+                    blumi_core::summarize_history(
+                        &llm,
+                        &snapshot.messages,
+                        &opts,
+                        &tokio_util::sync::CancellationToken::new(),
+                    )
+                    .await
+                }
+                Err(_) => None,
+            },
+        };
+
+        // Carry the last few user/assistant turns verbatim (text only; dropping
+        // tool messages keeps the seeded history self-consistent / orphan-free).
+        let mut recent: Vec<Message> = snapshot
+            .messages
+            .iter()
+            .filter(|m| {
+                matches!(m.role, Role::User | Role::Assistant) && !m.text().trim().is_empty()
+            })
+            .rev()
+            .take(6)
+            .map(|m| {
+                if m.role == Role::Assistant {
+                    Message::assistant(m.text())
+                } else {
+                    Message::user(m.text())
+                }
+            })
+            .collect();
+        recent.reverse();
+
+        let mut seed: Vec<Message> = Vec::new();
+        if let Some(s) = summary {
+            seed.push(Message::user(format!(
+                "[Carryover from the previous session — the context window filled up. \
+                 Continue seamlessly from this summary.]\n\n{s}"
+            )));
+        }
+        seed.extend(recent);
+
+        if seed.is_empty() {
+            return build_session(&config, false, None).await;
+        }
+        let mut state = SessionState::new(SessionId::new(), model);
+        state.messages = seed;
+        build_session(&config, false, Some(state)).await
+    }
+
     async fn list(&self) -> Vec<(String, String)> {
         match &self.store {
             Some(store) => store
@@ -83,6 +158,11 @@ impl blumi_tui::SessionFactory for TuiSessionFactory {
     async fn save(&self, handle: &SessionHandle) {
         if let Some(store) = &self.store {
             let snapshot = handle.snapshot().await;
+            // Don't persist empty sessions (e.g. a fresh one the user skipped at
+            // the launch picker) — they'd just clutter the history list.
+            if snapshot.messages.is_empty() {
+                return;
+            }
             if let Err(e) = store.save_snapshot(&snapshot).await {
                 tracing::warn!("could not save session: {e}");
             }

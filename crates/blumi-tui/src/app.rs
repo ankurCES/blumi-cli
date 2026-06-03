@@ -1,6 +1,7 @@
 //! The TUI event loop: terminal setup/teardown and the select loop bridging
 //! crossterm input, the core's event stream, and an animation tick.
 
+use crate::dialog::Picker;
 use crate::model::{Entry, Model, Msg, SessionRequest};
 use crate::{update, view};
 use blumi_core::SessionHandle;
@@ -24,6 +25,10 @@ use std::time::Duration;
 use tokio::sync::broadcast;
 
 pub(crate) type Term = Terminal<CrosstermBackend<Stdout>>;
+
+/// Context fill at which we roll over to a fresh session (after in-place
+/// compaction has already done what it can lower down). Headroom for the handoff.
+const ROLLOVER_THRESHOLD: f64 = 0.92;
 
 /// A selectable provider for the TUI provider picker.
 #[derive(Clone)]
@@ -55,6 +60,17 @@ pub trait SessionFactory: Send + Sync {
     /// Rebuild the agent in place (self-evolution): re-read config + re-scan
     /// skills, seeded with the live snapshot so the conversation is preserved.
     async fn reload(&self, snapshot: blumi_core::SessionSnapshot) -> anyhow::Result<SessionHandle>;
+
+    /// Roll over to a *fresh* session when the context window is full: the new
+    /// session is seeded with a condensed handoff (a summary of the old session
+    /// plus its last few turns) so the agent keeps context with a near-empty
+    /// window. Default: fall back to an in-place reload (no reduction).
+    async fn rollover(
+        &self,
+        snapshot: blumi_core::SessionSnapshot,
+    ) -> anyhow::Result<SessionHandle> {
+        self.reload(snapshot).await
+    }
     /// Recent sessions as (id, title), newest first.
     async fn list(&self) -> Vec<(String, String)>;
     /// Persist the given session (best-effort).
@@ -180,6 +196,16 @@ async fn run_loop(
     let mut tab_views: Vec<Vec<Entry>> = vec![Vec::new()];
     let mut input = EventStream::new();
     let mut tick = tokio::time::interval(Duration::from_millis(50)); // ~20fps
+
+    // On launch, if there's history, offer the session picker (resume where you
+    // left off after a crash/kill, or esc for a fresh one).
+    if !model.recent_sessions.is_empty() {
+        model.dialog = Some(Picker::session_picker(&model.recent_sessions));
+    }
+
+    // Tracks the busy→idle edge so we persist (crash recovery) and consider a
+    // context rollover exactly once per finished turn.
+    let mut was_busy = false;
 
     terminal.draw(|f| view::render(&mut model, f))?;
 
@@ -381,6 +407,42 @@ async fn run_loop(
                 model.mark_dirty();
             }
         }
+
+        // Turn just finished (busy→idle): persist for crash recovery, and roll
+        // over to a fresh session if the context window is (near) full.
+        if was_busy && !model.busy {
+            let is_remote = model
+                .tabs
+                .get(model.active_tab)
+                .map(|(_, r)| *r)
+                .unwrap_or(false);
+            if !is_remote {
+                factory.save(&session).await;
+            }
+            // Only the local tab rolls over (workspace/remote tabs are left as-is).
+            if model.active_tab == 0 && !is_remote && model.context_frac() >= ROLLOVER_THRESHOLD {
+                let snapshot = session.snapshot().await;
+                match factory.rollover(snapshot).await {
+                    Ok(handle) => {
+                        handles[0] = handle.clone();
+                        session = handle;
+                        events = session.subscribe();
+                        model.context_tokens = 0; // fresh window
+                        model.recent_sessions = factory.list().await;
+                        model.entries.push(Entry::Notice(
+                            "↻ context window full — rolled over to a fresh session \
+                             (history carried forward)"
+                                .into(),
+                        ));
+                        model.mark_dirty();
+                    }
+                    Err(e) => model
+                        .entries
+                        .push(Entry::Notice(format!("rollover failed: {e}"))),
+                }
+            }
+        }
+        was_busy = model.busy;
 
         // Autonomous loop: when idle, advance the task board (ralph-style).
         advance_loop(&mut model, &session).await;
