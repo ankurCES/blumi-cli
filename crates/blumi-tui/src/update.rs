@@ -113,6 +113,22 @@ async fn handle_term(model: &mut Model, ev: TermEvent, session: &SessionHandle) 
                 return;
             }
 
+            // The /dashboard modal: a scrollable overlay; esc/q closes.
+            if model.dash_modal {
+                match key.code {
+                    KeyCode::Esc | KeyCode::Char('q') => model.dash_modal = false,
+                    KeyCode::Up | KeyCode::Char('k') => model.modal_pane.scroll_by(-1),
+                    KeyCode::Down | KeyCode::Char('j') => model.modal_pane.scroll_by(1),
+                    KeyCode::PageUp => model.modal_pane.scroll_by(-10),
+                    KeyCode::PageDown => model.modal_pane.scroll_by(10),
+                    KeyCode::Home | KeyCode::Char('g') => model.modal_pane.scroll_by(isize::MIN),
+                    KeyCode::End | KeyCode::Char('G') => model.modal_pane.scroll_by(isize::MAX),
+                    _ => {}
+                }
+                model.mark_dirty();
+                return;
+            }
+
             // A dialog (command palette) captures all keys.
             if model.dialog.is_some() {
                 handle_dialog_key(model, key.code, session).await;
@@ -205,11 +221,18 @@ async fn handle_term(model: &mut Model, ev: TermEvent, session: &SessionHandle) 
                 return;
             }
 
-            // Right dashboard focus: scroll the agent pane independently.
+            // Right dashboard focus: ←/→ pick the sub-panel (agents / tasks),
+            // the rest scroll the selected one independently.
             if model.focus == Focus::Dashboard {
                 match key.code {
                     KeyCode::Tab => model.focus = next_focus(model),
                     KeyCode::Esc => model.focus = Focus::Editor,
+                    KeyCode::Left
+                    | KeyCode::Right
+                    | KeyCode::Char('h')
+                    | KeyCode::Char('l')
+                    | KeyCode::Char('[')
+                    | KeyCode::Char(']') => model.cycle_dash_panel(),
                     KeyCode::Up | KeyCode::Char('k') => model.scroll_dashboard(-1),
                     KeyCode::Down | KeyCode::Char('j') => model.scroll_dashboard(1),
                     KeyCode::PageUp => model.scroll_dashboard(-10),
@@ -309,13 +332,15 @@ async fn handle_term(model: &mut Model, ev: TermEvent, session: &SessionHandle) 
                         }
                         model.mark_dirty();
                     } else if model.dialog.is_none() {
-                        // Click in the dashboard pane → focus it (for keyboard
-                        // scroll); otherwise treat it as a sidebar click.
-                        let in_dash = model.dash_area.is_some_and(|(x, y, w, h)| {
-                            me.column >= x && me.column < x + w && me.row >= y && me.row < y + h
-                        });
-                        if in_dash {
+                        // Click a dashboard sub-panel → focus it + select that
+                        // panel (for keyboard scroll); else treat as a sidebar click.
+                        if model.agents_pane.hit(me.column, me.row) {
                             model.focus = Focus::Dashboard;
+                            model.dash_panel = crate::model::DashPanel::Agents;
+                            model.mark_dirty();
+                        } else if model.tasks_pane.hit(me.column, me.row) {
+                            model.focus = Focus::Dashboard;
+                            model.dash_panel = crate::model::DashPanel::Tasks;
                             model.mark_dirty();
                         } else {
                             sidebar_click(model, me.column, me.row);
@@ -676,6 +701,12 @@ fn find_tool<'a>(model: &'a mut Model, id: &blumi_protocol::ToolCallId) -> Optio
 /// pane scrolls on its own. `dir` is -1 for up, +1 for down. Overlays (plan /
 /// dialog) capture the wheel wherever the cursor is.
 fn scroll_panes(model: &mut Model, col: u16, row: u16, dir: i32) {
+    let step = (dir * 3) as isize;
+    // The /dashboard modal captures the wheel while open.
+    if model.dash_modal {
+        model.modal_pane.scroll_by(step);
+        return;
+    }
     if let Some(p) = model.plan_review.as_mut() {
         p.scroll = if dir < 0 {
             p.scroll.saturating_sub(3)
@@ -692,19 +723,15 @@ fn scroll_panes(model: &mut Model, col: u16, row: u16, dir: i32) {
         }
         return;
     }
-    let hit = |a: Option<(u16, u16, u16, u16)>| {
-        a.is_some_and(|(x, y, w, h)| col >= x && col < x + w && row >= y && row < y + h)
-    };
-    if hit(model.dash_area) {
-        // Right dashboard pane: pan its content, clamped to its length.
-        let view_h = model.dash_area.map(|(_, _, _, h)| h as usize).unwrap_or(0);
-        let max = model.dash_lines.saturating_sub(view_h);
-        model.dash_scroll = if dir < 0 {
-            model.dash_scroll.saturating_sub(3)
-        } else {
-            (model.dash_scroll + 3).min(max)
-        };
-    } else if hit(model.sidebar_list_area) {
+    // Each dashboard sub-panel scrolls on its own when hovered.
+    if model.agents_pane.hit(col, row) {
+        model.agents_pane.scroll_by(step);
+    } else if model.tasks_pane.hit(col, row) {
+        model.tasks_pane.scroll_by(step);
+    } else if model
+        .sidebar_list_area
+        .is_some_and(|(x, y, w, h)| col >= x && col < x + w && row >= y && row < y + h)
+    {
         // Left explorer pane: scroll the active list via its selection.
         model.sidebar_move(dir as isize * 3);
     } else {
@@ -775,7 +802,7 @@ fn sidebar_click(model: &mut Model, col: u16, row: u16) {
 /// recorded while rendered).
 fn next_focus(model: &Model) -> Focus {
     let sidebar = model.sidebar_list_area.is_some();
-    let dash = model.dash_area.is_some();
+    let dash = model.agents_pane.area.is_some() || model.tasks_pane.area.is_some();
     match model.focus {
         Focus::Editor => Focus::Chat,
         Focus::Chat if sidebar => Focus::Sidebar,
@@ -940,29 +967,33 @@ mod tests {
     #[test]
     fn dashboard_keyboard_scroll_clamps() {
         let mut m = Model::new("m".into(), "/tmp".into());
-        m.dash_area = Some((50, 2, 30, 10)); // visible height 10
-        m.dash_lines = 25; // max scroll = 25 - 10 = 15
+        // The selected sub-panel (Tasks) scrolls, clamped to its content.
+        m.dash_panel = crate::model::DashPanel::Tasks;
+        m.tasks_pane.record(50, 2, 30, 10, 25); // height 10, 25 lines → max 15
         m.scroll_dashboard(100); // PgDn past the end → clamps
-        assert_eq!(m.dash_scroll, 15);
+        assert_eq!(m.tasks_pane.scroll, 15);
         m.scroll_dashboard(isize::MIN); // Home → top
-        assert_eq!(m.dash_scroll, 0);
+        assert_eq!(m.tasks_pane.scroll, 0);
         m.scroll_dashboard(isize::MAX); // End → bottom
-        assert_eq!(m.dash_scroll, 15);
+        assert_eq!(m.tasks_pane.scroll, 15);
     }
 
     #[test]
     fn wheel_scrolls_pane_under_cursor() {
         let mut m = Model::new("m".into(), "/tmp".into());
-        m.dash_area = Some((50, 2, 30, 10));
-        m.dash_lines = 100;
-        // Over the dashboard → pans it (clamped), leaves the chat alone.
+        m.agents_pane.record(50, 2, 30, 10, 100);
+        m.tasks_pane.record(50, 14, 30, 10, 100);
+        // Over the agents sub-panel → pans only it.
         scroll_panes(&mut m, 60, 5, 1);
-        assert_eq!(m.dash_scroll, 3);
+        assert_eq!(m.agents_pane.scroll, 3);
+        assert_eq!(m.tasks_pane.scroll, 0);
         assert_eq!(m.scrollback, 0);
-        // Elsewhere (the chat area) → scrolls the transcript, not the dashboard.
+        // Over the tasks sub-panel → pans only it.
+        scroll_panes(&mut m, 60, 16, 1);
+        assert_eq!(m.tasks_pane.scroll, 3);
+        // Elsewhere (the chat area) → scrolls the transcript.
         scroll_panes(&mut m, 10, 5, -1);
         assert_eq!(m.scrollback, 3);
-        assert_eq!(m.dash_scroll, 3);
     }
 
     #[test]
