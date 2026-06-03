@@ -12,6 +12,8 @@ pub enum Action {
     CycleTheme,
     NewSession,
     ResumeSession(String),
+    SetModel(String),
+    SetProvider(String),
 }
 
 pub struct PickerItem {
@@ -80,6 +82,58 @@ impl Picker {
         }
         let mut p = Picker {
             title: "Sessions".into(),
+            items,
+            filter: String::new(),
+            filtered: Vec::new(),
+            selected: 0,
+        };
+        p.refilter();
+        p
+    }
+
+    /// A picker over suggested models for the active provider.
+    pub fn model_picker(models: &[String], current: &str) -> Self {
+        let items = models
+            .iter()
+            .map(|m| PickerItem {
+                label: m.clone(),
+                hint: if m == current {
+                    "active".into()
+                } else {
+                    String::new()
+                },
+                action: Action::SetModel(m.clone()),
+            })
+            .collect();
+        let mut p = Picker {
+            title: "Model".into(),
+            items,
+            filter: String::new(),
+            filtered: Vec::new(),
+            selected: 0,
+        };
+        p.refilter();
+        p
+    }
+
+    /// A picker over providers (unready ones are marked "add key").
+    pub fn provider_picker(providers: &[crate::app::ProviderOpt], current: &str) -> Self {
+        let items = providers
+            .iter()
+            .map(|p| PickerItem {
+                label: p.label.clone(),
+                hint: if p.name == current {
+                    "active".into()
+                } else if !p.ready {
+                    "add key".into()
+                } else {
+                    String::new()
+                },
+                action: Action::SetProvider(p.name.clone()),
+            })
+            .collect();
+        let mut p = Picker {
+            title: "Provider".into(),
             items,
             filter: String::new(),
             filtered: Vec::new(),
@@ -182,5 +236,26 @@ mod tests {
     fn selection_action() {
         let p = Picker::command_palette();
         assert_eq!(p.selected_action(), Some(Action::ClearTranscript));
+    }
+
+    #[test]
+    fn model_picker_yields_set_model() {
+        let models = vec!["gpt-4o".to_string(), "o4-mini".to_string()];
+        let p = Picker::model_picker(&models, "gpt-4o");
+        assert_eq!(p.selected_action(), Some(Action::SetModel("gpt-4o".into())));
+    }
+
+    #[test]
+    fn provider_picker_yields_set_provider() {
+        let provs = vec![crate::app::ProviderOpt {
+            name: "openai".into(),
+            label: "OpenAI".into(),
+            ready: false,
+        }];
+        let p = Picker::provider_picker(&provs, "anthropic");
+        assert_eq!(
+            p.selected_action(),
+            Some(Action::SetProvider("openai".into()))
+        );
     }
 }

@@ -129,6 +129,12 @@ pub struct Model {
     /// rebuilds the session in place once the turn is idle, keeping the
     /// transcript. Holds the reason for the completion notice.
     pub reload_pending: Option<String>,
+    /// Provider/model catalog for the `/provider` + `/model` pickers (live).
+    pub model_options: crate::app::ModelOptions,
+    /// Pending provider switch (provider, optional key), applied by the app loop.
+    pub provider_request: Option<(String, Option<String>)>,
+    /// When set, the editor is capturing an API key for this (unready) provider.
+    pub provider_key_prompt: Option<String>,
 
     pub theme: Theme,
     pub theme_idx: usize,
@@ -184,6 +190,9 @@ impl Model {
             usage_view: None,
             session_request: None,
             reload_pending: None,
+            model_options: crate::app::ModelOptions::default(),
+            provider_request: None,
+            provider_key_prompt: None,
             theme: Theme::default(),
             theme_idx: 0,
             input_tokens: 0,
@@ -278,6 +287,28 @@ impl Model {
     /// Record an agent-requested self-reload (applied by the app loop when idle).
     pub fn request_reload(&mut self, reason: impl Into<String>) {
         self.reload_pending = Some(reason.into());
+    }
+
+    /// Request a provider switch (applied by the app loop: persist + reload).
+    pub fn request_provider(&mut self, provider: String, key: Option<String>) {
+        self.provider_request = Some((provider, key));
+    }
+
+    pub fn take_provider_request(&mut self) -> Option<(String, Option<String>)> {
+        self.provider_request.take()
+    }
+
+    /// Start capturing an API key for an unready provider (masks the editor).
+    pub fn start_key_prompt(&mut self, provider: String) {
+        self.clear_input();
+        self.input.set_mask_char('•');
+        self.provider_key_prompt = Some(provider);
+    }
+
+    /// Cancel the key prompt (drops the mask via a fresh editor).
+    pub fn cancel_key_prompt(&mut self) {
+        self.provider_key_prompt = None;
+        self.clear_input();
     }
 
     /// Reset all per-session state (keeps theme, personas, skills, paths).
@@ -462,5 +493,32 @@ pub fn fmt_dur(secs: u64) -> String {
         format!("{m}m {s}s")
     } else {
         format!("{s}s")
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn key_prompt_masks_then_clears() {
+        let mut m = Model::new("m".into(), "/".into());
+        m.start_key_prompt("openai".into());
+        assert_eq!(m.provider_key_prompt.as_deref(), Some("openai"));
+        assert_eq!(m.input.mask_char(), Some('•'));
+        m.cancel_key_prompt();
+        assert!(m.provider_key_prompt.is_none());
+        assert_eq!(m.input.mask_char(), None);
+    }
+
+    #[test]
+    fn provider_request_roundtrip() {
+        let mut m = Model::new("m".into(), "/".into());
+        m.request_provider("openai".into(), Some("sk".into()));
+        assert_eq!(
+            m.take_provider_request(),
+            Some(("openai".to_string(), Some("sk".to_string())))
+        );
+        assert!(m.take_provider_request().is_none());
     }
 }

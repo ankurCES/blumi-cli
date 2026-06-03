@@ -88,6 +88,41 @@ impl blumi_tui::SessionFactory for TuiSessionFactory {
             }
         }
     }
+
+    fn model_options(&self) -> blumi_tui::ModelOptions {
+        let (provider, model, models, providers) = crate::providers::options(&self.fresh_config());
+        blumi_tui::ModelOptions {
+            provider,
+            model,
+            models,
+            providers: providers
+                .into_iter()
+                .map(|(name, label, ready)| blumi_tui::ProviderOpt { name, label, ready })
+                .collect(),
+        }
+    }
+
+    async fn set_provider(&self, provider: &str, api_key: Option<String>) -> anyhow::Result<()> {
+        if !self.fresh_config().providers.contains_key(provider) {
+            anyhow::bail!("unknown provider '{provider}'");
+        }
+        crate::providers::persist_provider(
+            &self.config.paths.settings_json(),
+            provider,
+            api_key.as_deref(),
+        )
+    }
+}
+
+impl TuiSessionFactory {
+    /// Re-read config from disk so picker edits reflect the latest settings.
+    fn fresh_config(&self) -> BlumiConfig {
+        BlumiConfig::load(
+            &self.config.paths.working_dir,
+            Some(self.config.paths.home.clone()),
+        )
+        .unwrap_or_else(|_| self.config.clone())
+    }
 }
 
 pub async fn run(config: BlumiConfig) -> anyhow::Result<()> {

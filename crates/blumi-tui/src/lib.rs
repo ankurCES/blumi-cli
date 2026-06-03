@@ -18,7 +18,7 @@ mod update;
 mod view;
 mod wizard;
 
-pub use app::{run, SessionFactory, TuiConfig};
+pub use app::{run, ModelOptions, ProviderOpt, SessionFactory, TuiConfig};
 pub use logo::{BLUMI_BLOCK, BLUMI_BLOCK_WIDTH, LOGO, MARK, PETAL, TAGLINE, WORDMARK};
 pub use mascot::{banner_frame, wordmark_ansi, ROSE_ROWS};
 pub use wizard::{run_onboarding, ProviderChoice, WizardOutcome};

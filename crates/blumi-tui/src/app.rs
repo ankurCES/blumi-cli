@@ -22,6 +22,24 @@ use std::time::Duration;
 
 pub(crate) type Term = Terminal<CrosstermBackend<Stdout>>;
 
+/// A selectable provider for the TUI provider picker.
+#[derive(Clone)]
+pub struct ProviderOpt {
+    pub name: String,
+    pub label: String,
+    /// Has a usable key (or needs none); unready ones prompt for a key.
+    pub ready: bool,
+}
+
+/// Active provider/model + suggestions for the TUI pickers (read live).
+#[derive(Clone, Default)]
+pub struct ModelOptions {
+    pub provider: String,
+    pub model: String,
+    pub models: Vec<String>,
+    pub providers: Vec<ProviderOpt>,
+}
+
 /// Creates, resumes, lists, and saves sessions on the TUI's behalf. The binary
 /// implements this over `build_session` + the persistence store — the seam that
 /// lets the TUI switch live sessions without knowing how they're wired.
@@ -38,6 +56,11 @@ pub trait SessionFactory: Send + Sync {
     async fn list(&self) -> Vec<(String, String)>;
     /// Persist the given session (best-effort).
     async fn save(&self, handle: &SessionHandle);
+    /// Active provider/model + suggestions + selectable providers (read live).
+    fn model_options(&self) -> ModelOptions;
+    /// Persist a provider switch (+ an optional API key) to settings.json. The
+    /// app loop then reloads the session to apply it.
+    async fn set_provider(&self, provider: &str, api_key: Option<String>) -> anyhow::Result<()>;
 }
 
 /// Everything the TUI needs besides the session handle.
@@ -114,6 +137,7 @@ async fn run_loop(
 
     let mut session = factory.create().await?;
     let mut events = session.subscribe();
+    model.model_options = factory.model_options();
     let mut input = EventStream::new();
     let mut tick = tokio::time::interval(Duration::from_millis(50)); // ~20fps
 
@@ -177,6 +201,7 @@ async fn run_loop(
                     Ok(handle) => {
                         session = handle;
                         events = session.subscribe();
+                        model.model_options = factory.model_options();
                         model.recent_sessions = factory.list().await;
                         model.entries.push(Entry::Notice(format!(
                             "✿ reloaded — skills + config refreshed ({reason})"
@@ -185,6 +210,37 @@ async fn run_loop(
                     Err(e) => model
                         .entries
                         .push(Entry::Notice(format!("reload failed: {e}"))),
+                }
+                model.mark_dirty();
+            }
+        }
+
+        // Provider switch: persist the choice (+ key), then rebuild the session
+        // with the new provider's client, keeping the conversation.
+        if !model.busy {
+            if let Some((provider, key)) = model.take_provider_request() {
+                match factory.set_provider(&provider, key).await {
+                    Ok(()) => {
+                        let snapshot = session.snapshot().await;
+                        factory.save(&session).await;
+                        match factory.reload(snapshot).await {
+                            Ok(handle) => {
+                                session = handle;
+                                events = session.subscribe();
+                                model.model_options = factory.model_options();
+                                model.model_name = model.model_options.model.clone();
+                                model
+                                    .entries
+                                    .push(Entry::Notice(format!("✿ provider → {provider}")));
+                            }
+                            Err(e) => model
+                                .entries
+                                .push(Entry::Notice(format!("provider switch failed: {e}"))),
+                        }
+                    }
+                    Err(e) => model
+                        .entries
+                        .push(Entry::Notice(format!("provider switch failed: {e}"))),
                 }
                 model.mark_dirty();
             }
