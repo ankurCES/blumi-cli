@@ -1,0 +1,22 @@
+blumi — third-party notices
+===========================
+
+blumi bundles a curated snapshot of agent **skills** (SKILL.md files) from the
+following third-party projects, embedded into the binary and written to
+~/.blumi/skills on first run. Each is used under the MIT License; full license
+texts are in crates/blumi-skills/bundled/licenses/.
+
+- obra/superpowers            (prefix: sp-)     — MIT, Copyright (c) 2025 Jesse Vincent
+  https://github.com/obra/superpowers
+- leonxlnx/taste-skill        (prefix: taste-)  — MIT, Copyright (c) 2026 Leonxlnx
+  https://github.com/leonxlnx/taste-skill
+- jeffallan/claude-skills     (prefix: cs-)     — MIT, Copyright (c) 2025 Jeff Allan
+  https://github.com/jeffallan/claude-skills
+
+Skill folders are namespaced by the prefixes above to avoid collisions. To
+refresh the vendored snapshot, run scripts/vendor-skills.sh.
+
+The default MCP server set and catalog reference the Model Context Protocol
+reference servers (modelcontextprotocol/servers) and entries curated from
+punkpeye/awesome-mcp-servers; those run as separate processes via npx/uvx and
+are not redistributed here.

@@ -5,6 +5,7 @@ mod cron;
 mod engine;
 mod gateway;
 mod loop_run;
+mod mcp;
 mod onboarding;
 mod playbook;
 mod prompt;
@@ -100,6 +101,16 @@ enum Commands {
         #[command(subcommand)]
         action: TaskCmd,
     },
+    /// Manage skills (the bundled SKILL.md library + your own).
+    Skills {
+        #[command(subcommand)]
+        action: SkillsCmd,
+    },
+    /// Manage MCP servers (defaults + a catalog of configurable ones).
+    Mcp {
+        #[command(subcommand)]
+        action: McpCmd,
+    },
     /// Autonomously work the task board: select → run → advance, repeat.
     Loop {
         /// Stop after at most N iterations.
@@ -148,6 +159,32 @@ enum TaskCmd {
     Cancel { id: String },
     /// Remove a task from the board.
     Rm { id: String },
+}
+
+#[derive(Subcommand)]
+enum SkillsCmd {
+    /// List discovered skills (bundled + your own).
+    List,
+    /// Re-materialize the bundled skills into ~/.blumi/skills (restore/refresh).
+    Sync,
+}
+
+#[derive(Subcommand)]
+enum McpCmd {
+    /// List configured MCP servers (and whether each is enabled).
+    List,
+    /// Show the catalog of configurable (keyed) servers you can add.
+    Catalog,
+    /// Seed the default no-config servers into settings.json.
+    Defaults,
+    /// Add a server from the catalog by name.
+    Add { name: String },
+    /// Enable a configured server.
+    Enable { name: String },
+    /// Disable a configured server (keeps its config).
+    Disable { name: String },
+    /// Remove a configured server.
+    Remove { name: String },
 }
 
 #[derive(Subcommand)]
@@ -263,6 +300,13 @@ async fn main() -> anyhow::Result<()> {
         config.executor.backend = s;
     }
 
+    // Pre-bundled skills: materialize the binary's bundled SKILL.md collections
+    // into ~/.blumi/skills on first run (idempotent; never clobbers user skills).
+    config.paths.ensure_dirs().ok();
+    if let Err(e) = blumi_skills::sync_bundled_skills(&config.paths.skills, false) {
+        tracing::warn!("could not sync bundled skills: {e}");
+    }
+
     match cli.command {
         Some(Commands::Run {
             prompt,
@@ -353,6 +397,28 @@ async fn main() -> anyhow::Result<()> {
             }
             TaskCmd::Rm { id } => task::remove(config, id),
         },
+        Some(Commands::Skills { action }) => match action {
+            SkillsCmd::Sync => {
+                let n = blumi_skills::sync_bundled_skills(&config.paths.skills, true)?;
+                println!(
+                    "✿ synced {n} bundled skills → {}",
+                    config.paths.skills.display()
+                );
+                Ok(())
+            }
+            SkillsCmd::List => {
+                let dirs = [
+                    config.paths.skills.clone(),
+                    working_dir.join(".blumi").join("skills"),
+                ];
+                for m in blumi_skills::SkillCatalog::load(&dirs).list() {
+                    let desc = m.description.lines().next().unwrap_or("");
+                    println!("{:<30} {desc}", m.name);
+                }
+                Ok(())
+            }
+        },
+        Some(Commands::Mcp { action }) => mcp::run(action, &config),
         Some(Commands::Loop {
             max,
             budget,

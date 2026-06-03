@@ -3,6 +3,7 @@
 //! (rose → lavender → violet → cyan → mint), swept over time like crush's
 //! gradient spinner.
 
+use ratatui::layout::Alignment;
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
 
@@ -55,41 +56,57 @@ pub fn ramp_color(tick: usize) -> Color {
     Color::Rgb(r, g, b)
 }
 
-/// A compact 3-row brand logo for a side pane: a small animated flower bloom
-/// (slightly taller than the text, with a cyan ◉ nucleus) beside the small
-/// multicolor "blumi" wordmark on the middle row. Shimmers as `tick` advances.
-pub fn brand_logo(tick: usize) -> Vec<Line<'static>> {
-    let petal = |t: usize| {
-        Style::default()
-            .fg(ramp_color(t))
-            .add_modifier(Modifier::BOLD)
-    };
-    let nucleus = Style::default()
-        .fg(Color::Rgb(0x68, 0xFF, 0xD6))
-        .add_modifier(Modifier::BOLD);
-    let word: Vec<Span<'static>> = "blumi"
-        .chars()
-        .enumerate()
-        .map(|(i, ch)| {
-            Span::styled(
-                ch.to_string(),
+/// The pinned right-pane **app logo**: a small rasterized flower bloom above the
+/// compact BLUMI gradient block-wordmark, both centered in `inner_w` — the same
+/// rasterized flower + BLUMI font as the startup splash, sized down to sit at the
+/// top of the dashboard pane like an app icon. `flower_rows` is the bloom height
+/// (0 / 1 → wordmark only). Falls back to a single-line "blumi" when the pane is
+/// too narrow for the small block font.
+pub fn app_logo(tick: usize, flower_rows: usize, inner_w: usize) -> Vec<Line<'static>> {
+    let mut out: Vec<Line<'static>> = Vec::new();
+    if flower_rows >= 2 {
+        out.extend(
+            flower_raster(flower_rows)
+                .into_iter()
+                .map(|l| l.alignment(Alignment::Center)),
+        );
+    }
+    if inner_w >= crate::logo::BLUMI_BLOCK_SMALL_WIDTH as usize {
+        out.extend(
+            wordmark_small(tick)
+                .into_iter()
+                .map(|l| l.alignment(Alignment::Center)),
+        );
+    } else {
+        out.push(
+            Line::from(Span::styled(
+                "blumi".to_string(),
                 Style::default()
-                    .fg(ramp_color(tick + 6 + i * 2))
+                    .fg(ramp_color(tick))
                     .add_modifier(Modifier::BOLD),
-            )
-        })
-        .collect();
+            ))
+            .alignment(Alignment::Center),
+        );
+    }
+    out
+}
 
-    let top = Line::from(Span::styled(" ✿ ".to_string(), petal(tick)));
-    let mut mid = vec![
-        Span::styled("✿".to_string(), petal(tick + 2)),
-        Span::styled("◉".to_string(), nucleus),
-        Span::styled("✿".to_string(), petal(tick + 4)),
-        Span::raw("  "),
-    ];
-    mid.extend(word);
-    let bottom = Line::from(Span::styled(" ✿ ".to_string(), petal(tick + 8)));
-    vec![top, Line::from(mid), bottom]
+/// The compact block wordmark ([`crate::logo::BLUMI_BLOCK_SMALL`]) with the same
+/// vertical rose→cyan gradient as [`wordmark`], for the pinned right-pane logo.
+pub fn wordmark_small(tick: usize) -> Vec<Line<'static>> {
+    let n = crate::logo::BLUMI_BLOCK_SMALL.len();
+    crate::logo::BLUMI_BLOCK_SMALL
+        .iter()
+        .enumerate()
+        .map(|(r, row)| {
+            Line::from(Span::styled(
+                (*row).to_string(),
+                Style::default()
+                    .fg(ramp_color(row_base(r, n) + tick / 2))
+                    .add_modifier(Modifier::BOLD),
+            ))
+        })
+        .collect()
 }
 
 /// A braille spinner frame for in-flight work (terminal-friendly).
@@ -384,12 +401,30 @@ mod tests {
     }
 
     #[test]
-    fn brand_logo_has_flower_and_wordmark() {
-        let lines = brand_logo(0);
-        assert_eq!(lines.len(), 3, "3-row logo");
-        let mid: String = lines[1].spans.iter().map(|s| s.content.as_ref()).collect();
-        assert!(mid.contains('◉'), "nucleus on middle row");
-        assert!(mid.contains("blumi"), "wordmark beside the flower");
+    fn app_logo_has_flower_and_small_wordmark() {
+        // Roomy pane: flower bloom (5 rows) + the 4-row small block wordmark.
+        let lines = app_logo(0, 5, 24);
+        assert_eq!(lines.len(), 9, "5 flower rows + 4 wordmark rows");
+        let all: String = lines
+            .iter()
+            .flat_map(|l| l.spans.iter())
+            .map(|s| s.content.as_ref())
+            .collect();
+        assert!(all.contains('▀') || all.contains('▄'), "rasterized flower");
+        // The small wordmark uses the block figlet, gradient-colored.
+        assert!(
+            lines.iter().all(|l| l.alignment == Some(Alignment::Center)),
+            "logo is centered"
+        );
+
+        // Narrow pane: falls back to a single-line "blumi" wordmark.
+        let narrow = app_logo(0, 0, 8);
+        let txt: String = narrow
+            .iter()
+            .flat_map(|l| l.spans.iter())
+            .map(|s| s.content.as_ref())
+            .collect();
+        assert!(txt.contains("blumi"), "narrow fallback wordmark");
     }
 
     #[test]

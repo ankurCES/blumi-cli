@@ -11,11 +11,17 @@ use ratatui::Frame;
 
 /// Min terminal width to show the run dashboard sidebar.
 const DASHBOARD_MIN_WIDTH: u16 = 92;
-const DASHBOARD_WIDTH: u16 = 32;
+/// Right dashboard width. The full rounded border + the pinned 21-col app logo
+/// need a touch more room than the old left-border-only pane (was 32).
+const DASHBOARD_WIDTH: u16 = 34;
 /// Left sidebar (workspaces + sessions) width.
 const SIDEBAR_WIDTH: u16 = 26;
 
 const MAX_CONTENT_WIDTH: u16 = 100;
+
+/// Below this chat height the bordered chat box is dropped (borderless) so tiny
+/// terminals keep every row for the conversation.
+const MIN_PANELED_CHAT_H: u16 = 12;
 
 pub fn render(model: &mut Model, f: &mut Frame) {
     let theme = model.theme;
@@ -110,24 +116,30 @@ pub fn render(model: &mut Model, f: &mut Frame) {
     }
 }
 
-/// A rounded, titled pane block; border + title brighten when focused.
+/// A rounded, titled pane block (posting-style): a quiet border when idle; a
+/// bright border + `▍` title accent + raised surface fill when focused.
 fn pane_block(title: &str, focused: bool, theme: &Theme) -> Block<'static> {
-    Block::default()
+    let title = if focused {
+        Line::from(vec![
+            Span::styled("▍", theme.accent()),
+            Span::styled(format!("{title} "), theme.panel_focus()),
+        ])
+    } else {
+        Line::from(Span::styled(format!(" {title} "), theme.subtle()))
+    };
+    let mut block = Block::default()
         .borders(Borders::ALL)
         .border_type(BorderType::Rounded)
         .border_style(if focused {
-            theme.bold_primary()
+            theme.panel_focus()
         } else {
-            theme.dim()
+            theme.border()
         })
-        .title(Span::styled(
-            format!(" {title} "),
-            if focused {
-                theme.bold_primary()
-            } else {
-                theme.subtle()
-            },
-        ))
+        .title(title);
+    if focused {
+        block = block.style(theme.surface());
+    }
+    block
 }
 
 /// Render one selectable list into `inner`, windowed around `sel`. Returns the
@@ -256,23 +268,59 @@ fn render_sidebar(model: &mut Model, f: &mut Frame, area: Rect, theme: &Theme) {
 fn render_dashboard(model: &mut Model, f: &mut Frame, area: Rect, theme: &Theme) {
     let dot_color = dash_dot(model);
     let focused = model.focus == Focus::Dashboard;
-    let block = Block::default()
-        .borders(Borders::LEFT)
+    // A full rounded box (posting-style), with a live ● dot + "agent" title.
+    let title = Line::from(vec![
+        Span::styled(
+            format!(" {} ", icon::DOT),
+            Style::default().fg(dot_color).add_modifier(Modifier::BOLD),
+        ),
+        Span::styled(
+            "agent ",
+            if focused {
+                theme.panel_focus()
+            } else {
+                theme.subtle()
+            },
+        ),
+    ]);
+    let mut block = Block::default()
+        .borders(Borders::ALL)
+        .border_type(BorderType::Rounded)
         .border_style(if focused {
-            theme.bold_primary()
+            theme.panel_focus()
         } else {
-            theme.dim()
+            theme.border()
         })
-        .title(Line::from(vec![
-            Span::styled(
-                format!(" {} ", icon::DOT),
-                Style::default().fg(dot_color).add_modifier(Modifier::BOLD),
-            ),
-            Span::styled("agent ", theme.bold_primary()),
-        ]));
+        .title(title);
+    if focused {
+        block = block.style(theme.surface());
+    }
     let inner = block.inner(area);
     f.render_widget(block, area);
     let w = inner.width.saturating_sub(1) as usize;
+
+    // A pinned app-logo band at the very top (never scrolls): a small rasterized
+    // flower bloom above the compact BLUMI gradient wordmark — always visible,
+    // like an app icon. Height adapts to the pane; 0 hides it on a short pane.
+    let logo_h: u16 = if inner.height >= 22 {
+        9 // bloom (5 rows) + wordmark (4)
+    } else if inner.height >= 16 {
+        7 // bloom (3 rows) + wordmark (4)
+    } else if inner.height >= 12 {
+        4 // wordmark only
+    } else {
+        0
+    };
+    let [logo_area, body] =
+        Layout::vertical([Constraint::Length(logo_h), Constraint::Min(0)]).areas(inner);
+    if logo_h > 0 {
+        let logo = crate::mascot::app_logo(
+            model.spinner_frame,
+            logo_h.saturating_sub(4) as usize,
+            inner.width as usize,
+        );
+        f.render_widget(Paragraph::new(logo), logo_area);
+    }
 
     let metrics = metrics_lines(model, theme, w, dot_color);
     let agents = agent_lines(model, theme, w);
@@ -280,9 +328,9 @@ fn render_dashboard(model: &mut Model, f: &mut Frame, area: Rect, theme: &Theme)
 
     // Fixed metrics header; clips on a very short pane (the /dashboard modal
     // shows everything in full). The rest splits into two scroll panels.
-    let metrics_h = (metrics.len() as u16).min(inner.height.saturating_sub(6).max(1));
+    let metrics_h = (metrics.len() as u16).min(body.height.saturating_sub(6).max(1));
     let [m_area, rest] =
-        Layout::vertical([Constraint::Length(metrics_h), Constraint::Min(0)]).areas(inner);
+        Layout::vertical([Constraint::Length(metrics_h), Constraint::Min(0)]).areas(body);
     f.render_widget(Paragraph::new(metrics), m_area);
 
     let [a_area, t_area] =
@@ -355,18 +403,17 @@ fn render_sub_panel(
     selected: bool,
     pane: &mut crate::model::ScrollPane,
 ) {
-    let style = if selected {
-        theme.bold_primary()
-    } else {
-        theme.dim()
-    };
     let block = Block::default()
         .borders(Borders::TOP)
-        .border_style(style)
+        .border_style(if selected {
+            theme.panel_focus()
+        } else {
+            theme.border()
+        })
         .title(Span::styled(
             format!(" {title} "),
             if selected {
-                theme.bold_primary()
+                theme.panel_focus()
             } else {
                 theme.subtle()
             },
@@ -385,10 +432,6 @@ fn metrics_lines(model: &Model, theme: &Theme, w: usize, dot_color: Color) -> Ve
     } else {
         &model.model_name
     };
-    for line in crate::mascot::brand_logo(model.spinner_frame) {
-        lines.push(line);
-    }
-    lines.push(Line::raw(""));
     lines.push(section("Session", theme));
     lines.push(Line::from(vec![
         Span::styled(format!("{:>7} ", "status"), theme.dim()),
@@ -1063,14 +1106,24 @@ const LANDING_CMDS: [(&str, &str); 8] = [
 ];
 
 fn render_chat(model: &Model, f: &mut Frame, area: Rect, theme: &Theme) {
-    let width = area.width.min(MAX_CONTENT_WIDTH).saturating_sub(2) as usize;
+    // Give the conversation a titled box (posting-style); drop the border on a
+    // very short terminal so every row goes to the transcript.
+    let inner = if area.height >= MIN_PANELED_CHAT_H {
+        let block = pane_block("chat", model.focus == Focus::Chat, theme);
+        let i = block.inner(area);
+        f.render_widget(block, area);
+        i
+    } else {
+        area
+    };
+    let width = inner.width.min(MAX_CONTENT_WIDTH).saturating_sub(2) as usize;
     let lines = build_lines(model, width, theme);
     let total = lines.len() as u16;
-    let height = area.height;
+    let height = inner.height;
     let max_scroll = total.saturating_sub(height);
     let scroll_y = max_scroll.saturating_sub(model.scrollback.min(max_scroll));
     let para = Paragraph::new(lines).scroll((scroll_y, 0));
-    f.render_widget(para, area);
+    f.render_widget(para, inner);
 }
 
 fn build_lines(model: &Model, width: usize, theme: &Theme) -> Vec<Line<'static>> {
@@ -1421,19 +1474,48 @@ fn render_status(model: &Model, f: &mut Frame, area: Rect, theme: &Theme) {
         );
         return;
     }
-    let hint = if model.dialog.is_some() {
-        "type to filter · ↑/↓ move · enter select · esc close"
+    // Contextual key-chips (posting-style): a bright keycap + a subtle label,
+    // both on a raised surface, width-greedily packed (shed from the right when
+    // the terminal is narrow).
+    let chips: &[(&str, &str)] = if model.dialog.is_some() {
+        &[
+            ("↑↓", "move"),
+            ("enter", "select"),
+            ("esc", "close"),
+            ("type", "filter"),
+        ]
     } else if model.pending.is_some() {
-        "[a] allow once   [s] allow session   [d] deny"
+        &[("a", "allow"), ("s", "session"), ("d", "deny")]
     } else if model.busy {
-        "esc cancel · ctrl+c quit"
+        &[("esc", "cancel"), ("^c", "quit")]
     } else {
-        "enter send · / commands · ctrl+p palette · tab focus · ctrl+c quit"
+        &[
+            ("enter", "send"),
+            ("/", "cmd"),
+            ("^p", "palette"),
+            ("tab", "focus"),
+            ("^y", "yolo"),
+            ("^c", "quit"),
+        ]
     };
-    f.render_widget(
-        Paragraph::new(Line::from(Span::styled(hint, theme.dim()))),
-        area,
-    );
+    let avail = area.width as usize;
+    let mut spans: Vec<Span> = Vec::new();
+    let mut used = 0usize;
+    for (i, (k, l)) in chips.iter().enumerate() {
+        let chip_w = k.chars().count() + l.chars().count() + 3; // " k l "
+        let sep = usize::from(i > 0);
+        if used + sep + chip_w > avail {
+            break;
+        }
+        if i > 0 {
+            spans.push(Span::raw(" "));
+            used += 1;
+        }
+        spans.push(Span::styled(format!(" {k} "), theme.chip_key()));
+        spans.push(Span::styled(format!("{l} "), theme.chip_label()));
+        used += chip_w;
+    }
+    f.render_widget(Paragraph::new(Line::from(spans)), area);
 }
 
 /// The scrollable plan-review modal (the `ExitPlanMode` approval popup).

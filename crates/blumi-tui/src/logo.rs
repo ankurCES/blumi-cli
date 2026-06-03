@@ -29,6 +29,19 @@ pub const BLUMI_BLOCK: [&str; 6] = [
 /// Visible width (columns) of every row in [`BLUMI_BLOCK`].
 pub const BLUMI_BLOCK_WIDTH: u16 = 39;
 
+/// A compact 4-row block wordmark ("BLUMI") for the right-pane app logo, where
+/// the full [`BLUMI_BLOCK`] (39 cols) is too wide for the ~31-col pane. Rendered
+/// with the same vertical rose→cyan gradient by the mascot module.
+pub const BLUMI_BLOCK_SMALL: [&str; 4] = [
+    "██▖ █   █ █ █▖▟▌█  █▌",
+    "██▌ █   █ █ █▝█▘█  █▌",
+    "█▀▖ █   █ █ █ ▘ █  █▌",
+    "█▄▌ █▄▄ ▜▄▛ █   █  █▌",
+];
+
+/// Visible width (columns) of every row in [`BLUMI_BLOCK_SMALL`].
+pub const BLUMI_BLOCK_SMALL_WIDTH: u16 = 21;
+
 /// Multi-line flower splash for the landing/onboarding screen.
 ///
 /// A four-petal bloom around a center, with the wordmark beneath:
@@ -62,6 +75,13 @@ mod tests {
                 row.chars().count(),
                 BLUMI_BLOCK_WIDTH as usize,
                 "row: {row}"
+            );
+        }
+        for row in BLUMI_BLOCK_SMALL {
+            assert_eq!(
+                row.chars().count(),
+                BLUMI_BLOCK_SMALL_WIDTH as usize,
+                "small row: {row}"
             );
         }
     }
