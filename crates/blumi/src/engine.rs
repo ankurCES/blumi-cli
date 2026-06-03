@@ -178,6 +178,18 @@ pub async fn build_session(
         }
     };
 
+    // Stamp a default git identity on every command, so commits the agent makes
+    // via `git`/`gh` are authored consistently regardless of repo/host config.
+    let executor: Arc<dyn blumi_core::Executor> = if config.git.author_name.trim().is_empty() {
+        executor
+    } else {
+        Arc::new(blumi_exec::GitIdentityExecutor::new(
+            executor,
+            &config.git.author_name,
+            &config.git.author_email,
+        ))
+    };
+
     // Personas: built-ins merged with config; the active one seeds the model and
     // is layered onto the system prompt by the runner.
     let personas = resolve_personas(config);
