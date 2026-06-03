@@ -164,22 +164,46 @@ fn row_base(r: usize, n: usize) -> usize {
     }
 }
 
-/// The block wordmark ([`crate::logo::BLUMI_BLOCK`]) with a vertical rose→cyan
-/// gradient, gently swept by `tick` so the landing shimmers.
-pub fn wordmark(tick: usize) -> Vec<Line<'static>> {
-    let n = crate::logo::BLUMI_BLOCK.len();
-    crate::logo::BLUMI_BLOCK
-        .iter()
-        .enumerate()
-        .map(|(r, row)| {
-            Line::from(Span::styled(
-                (*row).to_string(),
-                Style::default()
-                    .fg(ramp_color(row_base(r, n) + tick / 2))
-                    .add_modifier(Modifier::BOLD),
-            ))
-        })
-        .collect()
+/// Columns the flower wordmark occupies (5 letters × 5 + 4 gaps).
+pub const FLOWER_WORDMARK_WIDTH: u16 = 29;
+
+/// "BLUMI" spelled out of small flower glyphs (✿) — each letter a 5×5 bloom
+/// grid — washed in the rose→cyan gradient and shimmering with `tick`. This is
+/// the brand logo "grown" from little flowers, matching the petal mark.
+pub fn flower_wordmark(tick: usize) -> Vec<Line<'static>> {
+    // 5×5 pixel letters; 'X' becomes a flower, ' ' stays blank.
+    const B: [&str; 5] = ["XXXX ", "X   X", "XXXX ", "X   X", "XXXX "];
+    const L: [&str; 5] = ["X    ", "X    ", "X    ", "X    ", "XXXXX"];
+    const U: [&str; 5] = ["X   X", "X   X", "X   X", "X   X", " XXX "];
+    const M: [&str; 5] = ["X   X", "XX XX", "X X X", "X   X", "X   X"];
+    const I: [&str; 5] = ["XXXXX", "  X  ", "  X  ", "  X  ", "XXXXX"];
+    const LETTERS: [[&str; 5]; 5] = [B, L, U, M, I];
+
+    let mut out = Vec::with_capacity(5);
+    let mut petal = 0usize; // flower index, for a gradient that flows across
+    for row in 0..5 {
+        let mut spans: Vec<Span<'static>> = Vec::new();
+        for (li, letter) in LETTERS.iter().enumerate() {
+            if li > 0 {
+                spans.push(Span::raw(" "));
+            }
+            for ch in letter[row].chars() {
+                if ch == 'X' {
+                    spans.push(Span::styled(
+                        "✿".to_string(),
+                        Style::default()
+                            .fg(ramp_color(tick / 2 + petal))
+                            .add_modifier(Modifier::BOLD),
+                    ));
+                    petal += 1;
+                } else {
+                    spans.push(Span::raw(" "));
+                }
+            }
+        }
+        out.push(Line::from(spans));
+    }
+    out
 }
 
 /// The block wordmark as a truecolor ANSI string (for the CLI banner), with the
@@ -259,20 +283,28 @@ mod tests {
     }
 
     #[test]
-    fn wordmark_renders_all_block_rows() {
-        let lines = wordmark(0);
-        assert_eq!(lines.len(), crate::logo::BLUMI_BLOCK.len());
+    fn wordmark_ansi_renders_all_block_rows() {
         let ansi = wordmark_ansi(0);
         assert_eq!(ansi.matches('\n').count(), crate::logo::BLUMI_BLOCK.len());
-        assert!(ansi.contains("\x1b[1;38;2;"));
+        assert!(ansi.contains("\x1b[1;38;2;")); // truecolor escape
     }
 
     #[test]
-    fn wordmark_gradient_top_differs_from_bottom() {
-        // Top row should be rosier, bottom row cyaner — distinct colors.
-        let lines = wordmark(0);
-        let top = lines.first().unwrap().spans[0].style.fg;
-        let bottom = lines.last().unwrap().spans[0].style.fg;
-        assert_ne!(top, bottom);
+    fn flower_wordmark_is_five_rows_of_blooms() {
+        let lines = flower_wordmark(0);
+        assert_eq!(lines.len(), 5, "5-row flower font");
+        // Every glyph in the wordmark is either a flower or a blank.
+        for line in &lines {
+            for span in &line.spans {
+                assert!(span.content.chars().all(|c| c == '✿' || c == ' '));
+            }
+        }
+        // It actually contains flowers (not all blank).
+        let flowers: usize = lines
+            .iter()
+            .flat_map(|l| l.spans.iter())
+            .filter(|s| s.content == "✿")
+            .count();
+        assert!(flowers > 20, "letters are drawn from flowers: {flowers}");
     }
 }

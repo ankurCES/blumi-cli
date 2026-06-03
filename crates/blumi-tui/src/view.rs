@@ -992,15 +992,16 @@ fn render_landing(model: &Model, f: &mut Frame, area: Rect, theme: &Theme) {
             .map(|l| l.alignment(Alignment::Center)),
     );
     lines.push(Line::raw(""));
-    if area.width >= crate::logo::BLUMI_BLOCK_WIDTH + 4 {
+    // "BLUMI" grown from little flowers — the brand logo made of small blooms.
+    if area.width >= crate::mascot::FLOWER_WORDMARK_WIDTH + 4 {
         lines.extend(
-            crate::mascot::wordmark(model.spinner_frame)
+            crate::mascot::flower_wordmark(model.spinner_frame)
                 .into_iter()
                 .map(|l| l.alignment(Alignment::Center)),
         );
     } else {
         lines.push(
-            Line::from(Span::styled("blumi", theme.bold_primary())).alignment(Alignment::Center),
+            Line::from(Span::styled("✿ blumi", theme.bold_primary())).alignment(Alignment::Center),
         );
     }
     lines.push(Line::raw(""));
