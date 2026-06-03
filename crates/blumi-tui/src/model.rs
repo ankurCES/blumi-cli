@@ -238,6 +238,10 @@ pub struct Model {
     /// recorded at render time for click-to-select / click-to-switch-tab.
     pub sidebar_list_area: Option<(u16, u16, u16, u16)>,
     pub sidebar_tab_area: Option<(u16, u16, u16, u16)>,
+    /// Right dashboard pane geometry + scroll, so the wheel can pan it on its own.
+    pub dash_area: Option<(u16, u16, u16, u16)>,
+    pub dash_scroll: usize,
+    pub dash_lines: usize,
     /// Rendered memory text when the `/memory` overlay is open.
     pub memory_view: Option<String>,
     /// Rendered usage analytics when the `/usage` overlay is open.
@@ -342,6 +346,9 @@ impl Model {
             dialog_list_area: None,
             sidebar_list_area: None,
             sidebar_tab_area: None,
+            dash_area: None,
+            dash_scroll: 0,
+            dash_lines: 0,
             memory_view: None,
             usage_view: None,
             board_view: None,

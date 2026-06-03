@@ -262,23 +262,11 @@ async fn handle_term(model: &mut Model, ev: TermEvent, session: &SessionHandle) 
             use crossterm::event::MouseEventKind;
             match me.kind {
                 MouseEventKind::ScrollUp => {
-                    if let Some(p) = model.plan_review.as_mut() {
-                        p.scroll = p.scroll.saturating_sub(3);
-                    } else if let Some(d) = model.dialog.as_mut() {
-                        d.move_up();
-                    } else {
-                        model.scrollback = model.scrollback.saturating_add(3);
-                    }
+                    scroll_panes(model, me.column, me.row, -1);
                     model.mark_dirty();
                 }
                 MouseEventKind::ScrollDown => {
-                    if let Some(p) = model.plan_review.as_mut() {
-                        p.scroll = p.scroll.saturating_add(3);
-                    } else if let Some(d) = model.dialog.as_mut() {
-                        d.move_down();
-                    } else {
-                        model.scrollback = model.scrollback.saturating_sub(3);
-                    }
+                    scroll_panes(model, me.column, me.row, 1);
                     model.mark_dirty();
                 }
                 // Click a picker row to select + activate it (menu-style).
@@ -658,6 +646,51 @@ fn find_tool<'a>(model: &'a mut Model, id: &blumi_protocol::ToolCallId) -> Optio
         .find(|e| matches!(e, Entry::Tool { id: tid, .. } if tid == id))
 }
 
+/// Route a mouse-wheel tick to whichever pane the cursor is over, so each side
+/// pane scrolls on its own. `dir` is -1 for up, +1 for down. Overlays (plan /
+/// dialog) capture the wheel wherever the cursor is.
+fn scroll_panes(model: &mut Model, col: u16, row: u16, dir: i32) {
+    if let Some(p) = model.plan_review.as_mut() {
+        p.scroll = if dir < 0 {
+            p.scroll.saturating_sub(3)
+        } else {
+            p.scroll.saturating_add(3)
+        };
+        return;
+    }
+    if let Some(d) = model.dialog.as_mut() {
+        if dir < 0 {
+            d.move_up();
+        } else {
+            d.move_down();
+        }
+        return;
+    }
+    let hit = |a: Option<(u16, u16, u16, u16)>| {
+        a.is_some_and(|(x, y, w, h)| col >= x && col < x + w && row >= y && row < y + h)
+    };
+    if hit(model.dash_area) {
+        // Right dashboard pane: pan its content, clamped to its length.
+        let view_h = model.dash_area.map(|(_, _, _, h)| h as usize).unwrap_or(0);
+        let max = model.dash_lines.saturating_sub(view_h);
+        model.dash_scroll = if dir < 0 {
+            model.dash_scroll.saturating_sub(3)
+        } else {
+            (model.dash_scroll + 3).min(max)
+        };
+    } else if hit(model.sidebar_list_area) {
+        // Left explorer pane: scroll the active list via its selection.
+        model.sidebar_move(dir as isize * 3);
+    } else {
+        // Default: the chat transcript.
+        model.scrollback = if dir < 0 {
+            model.scrollback.saturating_add(3)
+        } else {
+            model.scrollback.saturating_sub(3)
+        };
+    }
+}
+
 /// Map a left-click in a sidebar list to a row index (accounting for the same
 /// bottom-anchored scroll window the renderer uses).
 fn list_click_index(
@@ -868,6 +901,21 @@ mod tests {
     }
     fn test_session() -> SessionHandle {
         blumi_core::spawn_session(blumi_protocol::SessionId::new(), "m", Arc::new(NoopRunner))
+    }
+
+    #[test]
+    fn wheel_scrolls_pane_under_cursor() {
+        let mut m = Model::new("m".into(), "/tmp".into());
+        m.dash_area = Some((50, 2, 30, 10));
+        m.dash_lines = 100;
+        // Over the dashboard → pans it (clamped), leaves the chat alone.
+        scroll_panes(&mut m, 60, 5, 1);
+        assert_eq!(m.dash_scroll, 3);
+        assert_eq!(m.scrollback, 0);
+        // Elsewhere (the chat area) → scrolls the transcript, not the dashboard.
+        scroll_panes(&mut m, 10, 5, -1);
+        assert_eq!(m.scrollback, 3);
+        assert_eq!(m.dash_scroll, 3);
     }
 
     #[test]
