@@ -54,6 +54,8 @@ pub fn render(model: &mut Model, f: &mut Frame) {
     }
     if model.dialog.is_some() {
         render_dialog(model, f, area, &theme);
+    } else {
+        model.dialog_list_area = None;
     }
     if model.memory_view.is_some() {
         render_memory(model, f, area, &theme);
@@ -460,21 +462,31 @@ fn render_usage(model: &Model, f: &mut Frame, area: Rect, theme: &Theme) {
     f.render_widget(Paragraph::new(lines), inner);
 }
 
-fn render_dialog(model: &Model, f: &mut Frame, area: Rect, theme: &Theme) {
-    let Some(d) = &model.dialog else { return };
+fn render_dialog(model: &mut Model, f: &mut Frame, area: Rect, theme: &Theme) {
+    if model.dialog.is_none() {
+        return;
+    }
     let popup = centered_rect(60, 50, area);
     f.render_widget(Clear, popup);
 
+    let title = model
+        .dialog
+        .as_ref()
+        .map(|d| d.title.clone())
+        .unwrap_or_default();
     let block = Block::default()
         .borders(Borders::ALL)
         .border_type(BorderType::Rounded)
         .border_style(Style::default().fg(theme.primary))
-        .title(Span::styled(format!(" {} ", d.title), theme.bold_primary()));
+        .title(Span::styled(format!(" {title} "), theme.bold_primary()));
     let inner = block.inner(popup);
     f.render_widget(block, popup);
 
     let [filter_area, list_area] =
         Layout::vertical([Constraint::Length(1), Constraint::Min(1)]).areas(inner);
+    // Record the list rect so mouse clicks can hit-test rows.
+    model.dialog_list_area = Some((list_area.x, list_area.y, list_area.width, list_area.height));
+    let d = model.dialog.as_ref().expect("dialog present");
     let filter_line = Line::from(vec![
         Span::styled("› ", theme.accent()),
         Span::styled(d.filter.clone(), theme.body()),

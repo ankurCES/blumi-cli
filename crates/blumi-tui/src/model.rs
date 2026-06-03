@@ -127,6 +127,9 @@ pub struct Model {
 
     pub pending: Option<PendingApproval>,
     pub dialog: Option<Picker>,
+    /// Screen rect (x, y, w, h) of the open dialog's row list, recorded at
+    /// render time so mouse clicks can be mapped to a row (click-to-select).
+    pub dialog_list_area: Option<(u16, u16, u16, u16)>,
     /// Rendered memory text when the `/memory` overlay is open.
     pub memory_view: Option<String>,
     /// Rendered usage analytics when the `/usage` overlay is open.
@@ -215,6 +218,7 @@ impl Model {
             slash_sel: 0,
             pending: None,
             dialog: None,
+            dialog_list_area: None,
             memory_view: None,
             usage_view: None,
             board_view: None,

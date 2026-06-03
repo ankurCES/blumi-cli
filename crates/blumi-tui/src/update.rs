@@ -204,6 +204,30 @@ async fn handle_term(model: &mut Model, ev: TermEvent, session: &SessionHandle) 
                     }
                     model.mark_dirty();
                 }
+                // Click a picker row to select + activate it (menu-style).
+                MouseEventKind::Down(crossterm::event::MouseButton::Left) => {
+                    let row = model.dialog_list_area.and_then(|(x, y, w, h)| {
+                        let hit = model.dialog.is_some()
+                            && me.column >= x
+                            && me.column < x + w
+                            && me.row >= y
+                            && me.row < y + h;
+                        hit.then(|| (me.row - y) as usize)
+                    });
+                    if let Some(row) = row {
+                        let action = model.dialog.as_mut().and_then(|d| {
+                            (row < d.filtered.len()).then(|| {
+                                d.selected = row;
+                                d.selected_action()
+                            })?
+                        });
+                        if let Some(a) = action {
+                            model.dialog = None;
+                            perform_action(model, a, session).await;
+                        }
+                        model.mark_dirty();
+                    }
+                }
                 _ => {}
             }
         }
@@ -532,6 +556,23 @@ async fn perform_action(model: &mut Model, action: Action, session: &SessionHand
             let _ = session.send(Command::SetModel { model: m.clone() }).await;
             model.entries.push(Entry::Notice(format!("model → {m}")));
         }
+        // Menu hub: open a focused sub-picker (clone first to avoid borrowing
+        // `model` while assigning `model.dialog`).
+        Action::OpenSessions => {
+            let sessions = model.recent_sessions.clone();
+            model.dialog = Some(Picker::session_picker(&sessions));
+        }
+        Action::OpenModels => {
+            let models = model.model_options.models.clone();
+            let current = model.model_options.model.clone();
+            model.dialog = Some(Picker::model_picker(&models, &current));
+        }
+        Action::OpenProviders => {
+            let providers = model.model_options.providers.clone();
+            let current = model.model_options.provider.clone();
+            model.dialog = Some(Picker::provider_picker(&providers, &current));
+        }
+        Action::ToggleYolo => commands::toggle_yolo(model, session).await,
         Action::SetProvider(name) => {
             if name == model.model_options.provider {
                 return; // already active
