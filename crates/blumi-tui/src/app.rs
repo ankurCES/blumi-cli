@@ -545,6 +545,7 @@ async fn advance_loop(model: &mut Model, session: &SessionHandle) {
         model.loop_iter, task.title
     )));
     model.busy = true;
+    model.busy_since = Some(std::time::Instant::now());
     model.scrollback = 0;
     let _ = session
         .send(Command::UserMessage {

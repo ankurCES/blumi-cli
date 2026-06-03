@@ -325,6 +325,7 @@ async fn send_message(model: &mut Model, session: &SessionHandle, text: String) 
     model.draft.clear();
     model.clear_input();
     model.busy = true;
+    model.busy_since = Some(std::time::Instant::now());
     model.scrollback = 0;
     let _ = session
         .send(Command::UserMessage {
@@ -560,6 +561,7 @@ async fn handle_core(model: &mut Model, event: Event, session: &SessionHandle) {
             commit_streaming(model);
             model.thinking = None;
             model.busy = false;
+            model.busy_since = None;
             model.turn_count += 1;
         }
         Event::Notice { message } => {
