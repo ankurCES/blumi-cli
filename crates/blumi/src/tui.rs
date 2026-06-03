@@ -177,6 +177,7 @@ pub async fn run(config: BlumiConfig) -> anyhow::Result<()> {
         export_dir: config.paths.sessions.clone(),
         context_size: config.llm.context_size,
         cron_jobs,
+        tasks_path: crate::task::board_path(&config),
     };
 
     let factory = Arc::new(TuiSessionFactory { config, store });

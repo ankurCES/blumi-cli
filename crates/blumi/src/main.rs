@@ -4,6 +4,7 @@ mod branding;
 mod cron;
 mod engine;
 mod gateway;
+mod loop_run;
 mod onboarding;
 mod playbook;
 mod prompt;
@@ -72,6 +73,8 @@ enum Commands {
         #[command(subcommand)]
         action: SessionCmd,
     },
+    /// Aggregate token usage across stored sessions.
+    Stats,
     /// Schedule prompts to run on a timer (cron automations).
     Cron {
         #[command(subcommand)]
@@ -91,6 +94,24 @@ enum Commands {
     Task {
         #[command(subcommand)]
         action: TaskCmd,
+    },
+    /// Autonomously work the task board: select → run → advance, repeat.
+    Loop {
+        /// Stop after at most N iterations.
+        #[arg(long)]
+        max: Option<u32>,
+        /// Stop once reported cost (USD) reaches this (provider-dependent).
+        #[arg(long)]
+        budget: Option<f64>,
+        /// Auto-approve tool calls (otherwise approval-requiring tools are denied).
+        #[arg(long)]
+        yolo: bool,
+        /// Send finished tasks to "review" instead of "done".
+        #[arg(long)]
+        review: bool,
+        /// Desktop notification when the loop finishes.
+        #[arg(long)]
+        notify: bool,
     },
 }
 
@@ -274,6 +295,7 @@ async fn main() -> anyhow::Result<()> {
             SessionCmd::Search { query } => session::search(config, query.join(" ")).await,
             SessionCmd::Show { id } => session::show(config, id).await,
         },
+        Some(Commands::Stats) => session::stats(config).await,
         Some(Commands::Cron { action }) => match action {
             CronCmd::Add {
                 name,
@@ -313,5 +335,24 @@ async fn main() -> anyhow::Result<()> {
             }
             TaskCmd::Rm { id } => task::remove(config, id),
         },
+        Some(Commands::Loop {
+            max,
+            budget,
+            yolo,
+            review,
+            notify,
+        }) => {
+            loop_run::run(
+                config,
+                loop_run::LoopOptions {
+                    max,
+                    budget,
+                    yolo,
+                    review,
+                    notify,
+                },
+            )
+            .await
+        }
     }
 }
