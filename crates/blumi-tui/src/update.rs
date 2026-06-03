@@ -115,6 +115,12 @@ async fn handle_term(model: &mut Model, ev: TermEvent, session: &SessionHandle) 
                 return;
             }
 
+            // Ctrl+Y toggles yolo (auto-approve / skip permissions), crush-style.
+            if ctrl && matches!(key.code, KeyCode::Char('y')) {
+                commands::toggle_yolo(model, session).await;
+                return;
+            }
+
             // Slash-command popup navigation (while typing a "/..." command).
             if model.slash_active() && handle_slash_key(model, key, session).await {
                 model.mark_dirty();

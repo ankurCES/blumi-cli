@@ -512,6 +512,18 @@ fn render_header(model: &Model, f: &mut Frame, area: Rect, theme: &Theme) {
             theme.accent(),
         ),
     ];
+    // Skipping permissions is dangerous — surface it loudly and always, not just
+    // in the (hideable) dashboard. A black-on-amber badge right in the header.
+    if model.yolo {
+        spans.push(Span::styled("  ", theme.dim()));
+        spans.push(Span::styled(
+            " ⚡ YOLO ",
+            Style::default()
+                .fg(Color::Black)
+                .bg(Color::Indexed(214))
+                .add_modifier(Modifier::BOLD),
+        ));
+    }
     // When more than the local tab is open, the header shows a tab strip
     // (ralph-style) in place of the working-dir crumb.
     if model.tabs.len() > 1 {
@@ -1040,6 +1052,19 @@ mod tests {
         model.loop_active = false;
         let out = render_to_string(&mut model, 80, 24);
         assert!(out.contains("⏸ loop paused"), "paused loop badge");
+    }
+
+    #[test]
+    fn header_shows_yolo_badge_when_on() {
+        let mut model = Model::new("m".into(), "/tmp".into());
+        // Off: no badge.
+        assert!(!render_to_string(&mut model, 90, 24).contains("YOLO"));
+        // On: a persistent header badge (the ⚡ is a wide glyph, so assert the
+        // pieces rather than an exact substring — TestBackend pads wide cells).
+        model.yolo = true;
+        let out = render_to_string(&mut model, 90, 24);
+        assert!(out.contains("YOLO"), "yolo badge label");
+        assert!(out.contains('⚡'), "yolo badge glyph");
     }
 
     #[test]
