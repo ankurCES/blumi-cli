@@ -18,7 +18,7 @@ use crate::tool::{ChangeJournal, SubAgentSpawner, ToolContext};
 use crate::Executor;
 use async_trait::async_trait;
 use blumi_protocol::{
-    DoneReason, Event, Message, MessageId, StreamChunk, ToolCall, ToolCallId, Usage,
+    DoneReason, Event, Message, MessageId, Role, StreamChunk, ToolCall, ToolCallId, Usage,
 };
 use futures::future::join_all;
 use futures::StreamExt;
@@ -168,7 +168,7 @@ impl TurnRunner for AgentTurnRunner {
                 .await;
 
             // Build the context window: system prompt + conversation so far.
-            let (window, current_model) = {
+            let (mut window, current_model) = {
                 let st = state.lock().await;
                 let mut msgs = Vec::with_capacity(st.messages.len() + 1);
                 if !effective_prompt.is_empty() {
@@ -177,6 +177,9 @@ impl TurnRunner for AgentTurnRunner {
                 msgs.extend(st.messages.iter().cloned());
                 (msgs, st.model.clone())
             };
+            // Defensive: never send a tool_result whose tool_use isn't present
+            // earlier in the window — that's a guaranteed 400 on every provider.
+            strip_orphan_tool_results(&mut window);
 
             // Honor mid-session model switches (Command::SetModel) within the
             // active provider/client; the persona may override the temperature.
@@ -520,6 +523,26 @@ fn finalize_tool_calls(accum: BTreeMap<u32, ToolAccum>) -> Vec<ToolCall> {
         .collect()
 }
 
+/// Drop any tool-result message whose `tool_use` isn't present earlier in the
+/// window. A `tool_result` with no matching `tool_use` is a hard 400 on every
+/// provider; aggressive history surgery (compaction, edits) can leave such
+/// orphans, so we scrub them right before sending — a last line of defense.
+fn strip_orphan_tool_results(window: &mut Vec<Message>) {
+    let mut seen: std::collections::HashSet<String> = std::collections::HashSet::new();
+    window.retain(|m| {
+        for tc in &m.tool_calls {
+            seen.insert(tc.id.as_str().to_string());
+        }
+        if m.role == Role::Tool {
+            return m
+                .tool_call_id
+                .as_ref()
+                .is_some_and(|id| seen.contains(id.as_str()));
+        }
+        true
+    });
+}
+
 fn signature_of(calls: &[ToolCall]) -> String {
     let mut parts: Vec<String> = calls
         .iter()
@@ -828,6 +851,30 @@ mod tests {
                 .any(|m| m.text().contains("same tool call")),
             "a redirect nudge should have been injected"
         );
+    }
+
+    #[test]
+    fn strips_orphan_tool_results() {
+        let orphan = Message::tool_result(ToolCallId::from("gone"), "Bash", "x");
+        let asst = Message::assistant_tool_calls(
+            None,
+            vec![ToolCall {
+                id: ToolCallId::from("ok"),
+                name: "Bash".into(),
+                arguments: serde_json::json!({}),
+            }],
+        );
+        let answered = Message::tool_result(ToolCallId::from("ok"), "Bash", "y");
+        let mut w = vec![Message::user("hi"), orphan, asst, answered];
+        strip_orphan_tool_results(&mut w);
+        // The orphan (no matching tool_use) is dropped; the valid pair survives.
+        assert_eq!(w.len(), 3);
+        let tool_ids: Vec<_> = w
+            .iter()
+            .filter(|m| m.role == Role::Tool)
+            .map(|m| m.tool_call_id.as_ref().unwrap().as_str().to_string())
+            .collect();
+        assert_eq!(tool_ids, vec!["ok".to_string()]);
     }
 
     #[test]
