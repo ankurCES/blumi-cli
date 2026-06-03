@@ -505,12 +505,15 @@ async fn handle_core(model: &mut Model, event: Event, session: &SessionHandle) {
             context,
             ..
         } => {
-            model.input_tokens += input;
+            // `context` = the full prompt (uncached input + cache read + write).
+            // Display that as input so the ↑ meter isn't ~0 once prompt caching
+            // kicks in (`input` alone counts only the uncached remainder). Cost
+            // still uses the billed (uncached) `input`.
+            let prompt = if context > 0 { context } else { input };
+            model.input_tokens += prompt;
             model.output_tokens += output;
             model.cost_usd += crate::cost::estimate(&model.model_name, input, output);
-            // `context` is the full prompt size (incl. cached tokens) — the real
-            // context-window usage. Fall back to `input` for old events.
-            model.context_tokens = if context > 0 { context } else { input };
+            model.context_tokens = prompt;
         }
         Event::Compaction {
             messages_compressed,

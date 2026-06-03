@@ -104,13 +104,16 @@ function applyEvent(s: State, name: string, d: any): State {
       return { ...s, clarify: d as Clarify }
     case 'todo_update':
       return { ...s, todos: (d.items ?? []) as Todo[] }
-    case 'usage':
+    case 'usage': {
+      // `context` = full prompt (uncached input + cache read + write) — the real
+      // context usage. `input` alone is ~0 once prompt caching kicks in.
+      const prompt = (d.context ?? d.input) ?? 0
       return {
         ...s,
-        usage: { input: s.usage.input + (d.input ?? 0), output: s.usage.output + (d.output ?? 0) },
-        // The latest request's input ≈ current context usage.
-        contextTokens: d.input ?? s.contextTokens,
+        usage: { input: s.usage.input + prompt, output: s.usage.output + (d.output ?? 0) },
+        contextTokens: prompt || s.contextTokens,
       }
+    }
     case 'compaction':
       return {
         ...s,
