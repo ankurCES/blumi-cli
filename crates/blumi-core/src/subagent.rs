@@ -17,9 +17,9 @@ use crate::session::SessionState;
 use crate::tool::SubAgentSpawner;
 use async_trait::async_trait;
 use blumi_protocol::{Event, Message, Role, SessionId};
-use std::sync::atomic::{AtomicU64, Ordering};
 use std::collections::HashMap;
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 use tokio::sync::Mutex;
 use tokio_util::sync::CancellationToken;
@@ -177,7 +177,10 @@ impl SubAgentSpawner for AgentSpawner {
 
         // Announce the team member to any UI (the "active agents" pane). The
         // child's *internal* events stay swallowed; only this lifecycle surfaces.
-        let agent_id = format!("a{}", self.next_agent_id.fetch_add(1, Ordering::Relaxed) + 1);
+        let agent_id = format!(
+            "a{}",
+            self.next_agent_id.fetch_add(1, Ordering::Relaxed) + 1
+        );
         events.emit(Event::AgentStart {
             id: agent_id.clone(),
             agent_type: agent_type.to_string(),
@@ -242,7 +245,11 @@ impl SubAgentSpawner for AgentSpawner {
 
 /// First non-empty line of `s`, trimmed to a sensible label length.
 fn summarize_task(s: &str) -> String {
-    let line = s.lines().map(str::trim).find(|l| !l.is_empty()).unwrap_or("");
+    let line = s
+        .lines()
+        .map(str::trim)
+        .find(|l| !l.is_empty())
+        .unwrap_or("");
     let line = line.trim_start_matches(['#', '-', '*', ' ']);
     if line.chars().count() > 80 {
         let cut: String = line.chars().take(79).collect();

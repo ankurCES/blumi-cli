@@ -14,6 +14,35 @@ const PLACEHOLDER: &str = "Ask blumi to build, fix, or explain… (/ for command
 pub enum Focus {
     Editor,
     Chat,
+    /// The left sidebar's workspace list (top).
+    Workspaces,
+    /// The left sidebar's session list (bottom).
+    Sessions,
+}
+
+/// A selectable project workspace shown in the left sidebar.
+#[derive(Debug, Clone)]
+pub struct Workspace {
+    pub name: String,
+    pub path: String,
+    pub pinned: bool,
+}
+
+/// Lifecycle status of a delegated team member.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AgentStatus {
+    Working,
+    Done,
+    Failed,
+}
+
+/// One delegated sub-agent shown in the right "active agents" pane.
+#[derive(Debug, Clone)]
+pub struct AgentCard {
+    pub id: String,
+    pub role: String,
+    pub task: String,
+    pub status: AgentStatus,
 }
 
 /// One rendered transcript item.
@@ -70,6 +99,8 @@ pub enum SessionRequest {
     Resume(String),
     /// Switch to (or open) a remote-instance tab by name.
     Remote(String),
+    /// Open a project workspace (by path) as a new tab.
+    OpenWorkspace(String),
     /// Switch to an already-open tab by index (0 = local).
     SwitchTab(usize),
 }
@@ -84,6 +115,14 @@ pub struct Model {
     pub skills: Vec<(String, String)>,
     /// Recent sessions (id, title) from history — dashboard + `/sessions`.
     pub recent_sessions: Vec<(String, String)>,
+    /// Project workspaces for the left sidebar (recent + pinned + scanned).
+    pub workspaces: Vec<Workspace>,
+    /// Delegated team members for the right "active agents" pane.
+    pub agents: Vec<AgentCard>,
+    /// Selection index in the workspaces list.
+    pub ws_sel: usize,
+    /// Selection index in the sessions list.
+    pub sess_sel: usize,
     /// Available personas (name, description) for `/persona`.
     pub personas: Vec<(String, String)>,
     /// The active persona name.
@@ -148,6 +187,10 @@ pub struct Model {
     /// Screen rect (x, y, w, h) of the open dialog's row list, recorded at
     /// render time so mouse clicks can be mapped to a row (click-to-select).
     pub dialog_list_area: Option<(u16, u16, u16, u16)>,
+    /// Screen rect (x, y, w, h) of the sidebar workspace/session lists, for
+    /// click-to-select. Recorded at render time; `None` when the sidebar is hidden.
+    pub ws_list_area: Option<(u16, u16, u16, u16)>,
+    pub sess_list_area: Option<(u16, u16, u16, u16)>,
     /// Rendered memory text when the `/memory` overlay is open.
     pub memory_view: Option<String>,
     /// Rendered usage analytics when the `/usage` overlay is open.
@@ -206,6 +249,10 @@ impl Model {
             user_md: PathBuf::new(),
             skills: Vec::new(),
             recent_sessions: Vec::new(),
+            workspaces: Vec::new(),
+            agents: Vec::new(),
+            ws_sel: 0,
+            sess_sel: 0,
             personas: Vec::new(),
             persona: "default".into(),
             export_dir: PathBuf::new(),
@@ -240,6 +287,8 @@ impl Model {
             auto_continue: 12,
             dialog: None,
             dialog_list_area: None,
+            ws_list_area: None,
+            sess_list_area: None,
             memory_view: None,
             usage_view: None,
             board_view: None,
@@ -349,6 +398,62 @@ impl Model {
         self.session_request = Some(SessionRequest::Remote(name.into()));
     }
 
+    /// A team member started — add it to the active-agents pane (capped).
+    pub fn agent_started(&mut self, id: String, role: String, task: String) {
+        self.agents.push(AgentCard {
+            id,
+            role,
+            task,
+            status: AgentStatus::Working,
+        });
+        if self.agents.len() > 12 {
+            let drop = self.agents.len() - 12;
+            self.agents.drain(0..drop);
+        }
+        self.mark_dirty();
+    }
+
+    /// A team member finished — mark it done/failed and update its line.
+    pub fn agent_finished(&mut self, id: &str, ok: bool, summary: String) {
+        if let Some(a) = self.agents.iter_mut().find(|a| a.id == id) {
+            a.status = if ok {
+                AgentStatus::Done
+            } else {
+                AgentStatus::Failed
+            };
+            if !summary.trim().is_empty() {
+                a.task = summary;
+            }
+        }
+        self.mark_dirty();
+    }
+
+    /// Move the workspace-list selection (clamped).
+    pub fn ws_move(&mut self, delta: isize) {
+        self.ws_sel = step_index(self.ws_sel, delta, self.workspaces.len());
+        self.mark_dirty();
+    }
+
+    /// Move the session-list selection (clamped).
+    pub fn sess_move(&mut self, delta: isize) {
+        self.sess_sel = step_index(self.sess_sel, delta, self.recent_sessions.len());
+        self.mark_dirty();
+    }
+
+    /// Open the selected workspace as a new tab.
+    pub fn open_selected_workspace(&mut self) {
+        if let Some(ws) = self.workspaces.get(self.ws_sel) {
+            self.session_request = Some(SessionRequest::OpenWorkspace(ws.path.clone()));
+        }
+    }
+
+    /// Resume the selected session.
+    pub fn resume_selected_session(&mut self) {
+        if let Some((id, _)) = self.recent_sessions.get(self.sess_sel) {
+            self.session_request = Some(SessionRequest::Resume(id.clone()));
+        }
+    }
+
     /// Request switching to an already-open tab by index.
     pub fn request_tab(&mut self, index: usize) {
         self.session_request = Some(SessionRequest::SwitchTab(index));
@@ -417,6 +522,7 @@ impl Model {
         self.memory_view = None;
         self.usage_view = None;
         self.board_view = None;
+        self.agents.clear();
         self.loop_active = false;
         self.loop_current = None;
         self.loop_iter = 0;
@@ -591,6 +697,14 @@ impl Model {
 }
 
 /// Compact human duration: `2d 3h`, `4h 5m`, `6m 7s`, or `8s`.
+/// Step a list index by `delta`, clamped to `[0, len-1]` (0 if empty).
+pub(crate) fn step_index(cur: usize, delta: isize, len: usize) -> usize {
+    if len == 0 {
+        return 0;
+    }
+    (cur as isize + delta).clamp(0, len as isize - 1) as usize
+}
+
 pub fn fmt_dur(secs: u64) -> String {
     let (d, h, m, s) = (
         secs / 86_400,

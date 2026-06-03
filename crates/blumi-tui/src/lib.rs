@@ -22,4 +22,5 @@ mod wizard;
 pub use app::{run, ModelOptions, ProviderOpt, SessionFactory, TuiConfig};
 pub use logo::{BLUMI_BLOCK, BLUMI_BLOCK_WIDTH, LOGO, MARK, PETAL, TAGLINE, WORDMARK};
 pub use mascot::{banner_frame, wordmark_ansi, ROSE_ROWS};
+pub use model::Workspace;
 pub use wizard::{run_onboarding, ProviderChoice, WizardOutcome};

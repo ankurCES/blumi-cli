@@ -177,6 +177,15 @@ pub struct RemoteConfig {
     pub instances: Vec<RemoteInstance>,
 }
 
+/// Project-workspace discovery for the TUI's left sidebar.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(default)]
+pub struct WorkspaceConfig {
+    /// Parent directories scanned for git-repo projects. Empty = scan the parent
+    /// of the current project so sibling repos show up automatically.
+    pub roots: Vec<String>,
+}
+
 /// Web UI / server settings.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(default)]
@@ -335,6 +344,9 @@ pub struct BlumiConfig {
     /// Remote blumi instances the TUI can attach to as tabs.
     #[serde(default)]
     pub remote: RemoteConfig,
+    /// Project-workspace discovery for the TUI sidebar.
+    #[serde(default)]
+    pub workspaces: WorkspaceConfig,
     /// Resolved at load time; never serialized to/from files.
     #[serde(skip)]
     pub paths: Paths,
@@ -358,6 +370,7 @@ impl Default for BlumiConfig {
             voice: VoiceSettings::default(),
             brain: BrainConfig::default(),
             remote: RemoteConfig::default(),
+            workspaces: WorkspaceConfig::default(),
             paths: Paths::default(),
         }
     }
