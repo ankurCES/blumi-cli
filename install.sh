@@ -76,6 +76,41 @@ fi
 say ""
 say "${cyan}✓${off} installed ${BIN} (${how}) → ${BIN_DIR}/${BIN}"
 
+# ── Runtimes for the default MCP servers (uv for python, node for npx) ──────
+# Auto-installed so the bundled MCP servers work on a fresh machine. Best-effort
+# and idempotent; never fails the install. Set BLUMI_SKIP_RUNTIMES=1 to skip.
+if [ -z "${BLUMI_SKIP_RUNTIMES:-}" ]; then
+  run_sh() { if have curl; then curl -fsSL "$1" | "$2"; else wget -qO- "$1" | "$2"; fi; }
+
+  if ! have uvx && ! have uv; then
+    say "${dim}installing uv (python runner for MCP)…${off}"
+    run_sh "https://astral.sh/uv/install.sh" sh >/dev/null 2>&1 \
+      || say "${dim}  uv: skipped — install manually for python MCP servers${off}"
+    case ":$PATH:" in *":$HOME/.local/bin:"*) ;; *) PATH="$HOME/.local/bin:$PATH" ;; esac
+  fi
+
+  if ! have npx; then
+    if have bash; then
+      say "${dim}installing node via fnm (npx runner for MCP)…${off}"
+      run_sh "https://fnm.vercel.app/install" bash >/dev/null 2>&1 || true
+      for d in "$HOME/.local/share/fnm" "$HOME/.fnm"; do [ -d "$d" ] && PATH="$d:$PATH"; done
+      if have fnm; then
+        fnm install --lts >/dev/null 2>&1 || true
+        eval "$(fnm env 2>/dev/null)" 2>/dev/null || true
+      fi
+    fi
+    have npx || say "${dim}  node: install Node 18+ for the npx-based MCP servers${off}"
+  fi
+fi
+
+# ── Pre-populate ~/.blumi: bundled skills + default MCP servers ─────────────
+if "$BIN_DIR/$BIN" skills sync >/dev/null 2>&1; then
+  say "${cyan}✓${off} bundled skills ready"
+fi
+if "$BIN_DIR/$BIN" mcp defaults >/dev/null 2>&1; then
+  say "${cyan}✓${off} default MCP servers configured"
+fi
+
 # ── PATH hint ──────────────────────────────────────────────────────────────
 case ":$PATH:" in
   *":$BIN_DIR:"*) ;;
