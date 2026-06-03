@@ -7,6 +7,7 @@
 
 mod actor;
 mod agent;
+mod brain;
 mod context;
 mod emit;
 mod error;
@@ -24,6 +25,7 @@ mod tool;
 
 pub use actor::{spawn_session, spawn_session_seeded, SessionClosed, SessionHandle};
 pub use agent::AgentTurnRunner;
+pub use brain::{Brain, BrainDecision, BrainMode, BrainVerdict, LocalBrain};
 pub use context::ContextManager;
 pub use emit::{EventEmitter, InteractionKind, InteractionReply, InteractionRequest, Interactor};
 pub use error::{ExecError, LlmError, ToolError};

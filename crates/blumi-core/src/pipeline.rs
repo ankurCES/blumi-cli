@@ -39,6 +39,7 @@ pub async fn execute_tool_call(
             tool.is_read_only(),
             &call.arguments,
             &ctx.interactor,
+            &ctx.events,
         )
         .await
     {

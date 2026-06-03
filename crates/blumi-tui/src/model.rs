@@ -41,6 +41,8 @@ pub struct PendingApproval {
     pub summary: String,
     pub dangerous: bool,
     pub diff: Option<String>,
+    /// Optional brain recommendation (advisory mode / auto-mode escalation).
+    pub advice: Option<String>,
 }
 
 /// Messages that drive `update`.
@@ -87,6 +89,8 @@ pub struct Model {
     pub turn_count: u32,
     /// Auto-approve everything (yolo). Toggled by `/yolo`; shown in the dashboard.
     pub yolo: bool,
+    /// Brain approval mode label ("off"/"advisory"/"auto"). Set by `/brain`.
+    pub brain_mode: String,
     /// When the session started (for uptime).
     pub started: Instant,
     /// Milliseconds spent actively working with the bot (busy time).
@@ -180,6 +184,7 @@ impl Model {
             spinner_frame: 0,
             turn_count: 0,
             yolo: false,
+            brain_mode: "off".into(),
             started: Instant::now(),
             active_ms: 0,
             context_tokens: 0,

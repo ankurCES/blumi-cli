@@ -87,6 +87,8 @@ pub struct TuiConfig {
     pub cron_jobs: Vec<(String, String)>,
     /// Path to the persistent task board (for the `/board` overlay).
     pub tasks_path: PathBuf,
+    /// Initial brain approval mode label ("off"/"advisory"/"auto").
+    pub brain_mode: String,
 }
 
 /// Run the interactive TUI, sourcing sessions from `factory`. Restores the
@@ -139,6 +141,7 @@ async fn run_loop(
     model.context_size = cfg.context_size;
     model.cron_jobs = cfg.cron_jobs;
     model.tasks_path = cfg.tasks_path;
+    model.brain_mode = cfg.brain_mode;
 
     let mut session = factory.create().await?;
     let mut events = session.subscribe();

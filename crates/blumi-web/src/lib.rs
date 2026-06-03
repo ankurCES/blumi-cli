@@ -116,6 +116,18 @@ pub struct ModelOptions {
 pub struct SettingsView {
     pub voice: VoiceView,
     pub gateway: GatewayView,
+    pub brain: BrainView,
+}
+
+/// Local-LLM "brain" approval settings (claudectl-style).
+#[derive(Clone, Default, serde::Serialize)]
+pub struct BrainView {
+    /// "off" | "advisory" | "auto".
+    pub mode: String,
+    /// Provider name the brain judges with (empty = reuse main client).
+    pub provider: String,
+    /// Model id the brain judges with (empty = reuse main model).
+    pub model: String,
 }
 
 #[derive(Clone, Default, serde::Serialize)]
@@ -164,6 +176,9 @@ pub struct SettingsPatch {
     pub whatsapp_token: Option<String>,
     pub whatsapp_phone_number_id: Option<String>,
     pub whatsapp_verify_token: Option<String>,
+    pub brain_mode: Option<String>,
+    pub brain_provider: Option<String>,
+    pub brain_model: Option<String>,
 }
 
 /// Control-center data + actions (cron, skills, memory, usage, settings) — the

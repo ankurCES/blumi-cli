@@ -233,6 +233,7 @@ function SettingsTab() {
     tts_voice: '',
   })
   const [gw, setGw] = useState({ yolo: false, whatsapp_phone_number_id: '', whatsapp_verify_token: '' })
+  const [brain, setBrain] = useState({ mode: 'off', provider: '', model: '' })
   const blankSecrets = {
     voice_api_key: '',
     tts_api_key: '',
@@ -260,6 +261,7 @@ function SettingsTab() {
       whatsapp_phone_number_id: d.gateway.whatsapp_phone_number_id,
       whatsapp_verify_token: d.gateway.whatsapp_verify_token,
     })
+    setBrain({ mode: d.brain.mode || 'off', provider: d.brain.provider, model: d.brain.model })
   }
   useEffect(() => {
     api.settingsGet().then(load).catch(() => {})
@@ -278,6 +280,9 @@ function SettingsTab() {
       gateway_yolo: gw.yolo,
       whatsapp_phone_number_id: gw.whatsapp_phone_number_id,
       whatsapp_verify_token: gw.whatsapp_verify_token,
+      brain_mode: brain.mode,
+      brain_provider: brain.provider,
+      brain_model: brain.model,
     }
     for (const [k, val] of Object.entries(secrets)) if (val) patch[k] = val
     await api.settingsSet(patch)
@@ -292,6 +297,27 @@ function SettingsTab() {
 
   return (
     <div className="cc-pane">
+      <div className="cc-section">Brain (auto-approvals)</div>
+      <label className="cc-field">
+        <span>mode</span>
+        <select value={brain.mode} onChange={(e) => setBrain({ ...brain, mode: e.target.value })}>
+          <option value="off">off — ask me for every tool</option>
+          <option value="advisory">advisory — recommend, I confirm</option>
+          <option value="auto">auto — decide for me (dangerous still asks)</option>
+        </select>
+      </label>
+      <Field
+        label="brain provider (blank = main)"
+        value={brain.provider}
+        onChange={(x) => setBrain({ ...brain, provider: x })}
+      />
+      <Field
+        label="brain model (blank = main)"
+        value={brain.model}
+        onChange={(x) => setBrain({ ...brain, model: x })}
+      />
+      <div className="cc-hint">A local LLM reviews each tool call. Reload the agent to apply changes.</div>
+
       <div className="cc-section">Voice</div>
       <label className="cc-check">
         <input

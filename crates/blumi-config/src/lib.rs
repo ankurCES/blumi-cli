@@ -121,6 +121,32 @@ impl Default for ExecutorConfig {
     }
 }
 
+/// Local-LLM "brain" that reviews tool approvals (claudectl-style). When `mode`
+/// is `advisory` it annotates approval prompts with a recommendation; when
+/// `auto` it resolves them directly (escalating only on uncertainty or danger).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct BrainConfig {
+    /// `"off"` | `"advisory"` | `"auto"`.
+    pub mode: String,
+    /// Provider name (from [`BlumiConfig::providers`]) the brain judges with.
+    /// Empty = reuse the main agent's provider/client. Use a cheap local model
+    /// (e.g. `ollama`) here to keep judging fast and free.
+    pub provider: String,
+    /// Model id the brain judges with. Empty = reuse the main agent's model.
+    pub model: String,
+}
+
+impl Default for BrainConfig {
+    fn default() -> Self {
+        BrainConfig {
+            mode: "off".into(),
+            provider: String::new(),
+            model: String::new(),
+        }
+    }
+}
+
 /// Web UI / server settings.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(default)]
@@ -273,6 +299,9 @@ pub struct BlumiConfig {
     /// Voice (speech-to-text + text-to-speech).
     #[serde(default)]
     pub voice: VoiceSettings,
+    /// Local-LLM "brain" that reviews tool approvals.
+    #[serde(default)]
+    pub brain: BrainConfig,
     /// Resolved at load time; never serialized to/from files.
     #[serde(skip)]
     pub paths: Paths,
@@ -294,6 +323,7 @@ impl Default for BlumiConfig {
             gateway: GatewayConfig::default(),
             web: WebSettings::default(),
             voice: VoiceSettings::default(),
+            brain: BrainConfig::default(),
             paths: Paths::default(),
         }
     }

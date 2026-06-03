@@ -178,6 +178,10 @@ pub async fn run(config: BlumiConfig) -> anyhow::Result<()> {
         context_size: config.llm.context_size,
         cron_jobs,
         tasks_path: crate::task::board_path(&config),
+        brain_mode: blumi_core::BrainMode::parse(&config.brain.mode)
+            .unwrap_or_default()
+            .label()
+            .to_string(),
     };
 
     let factory = Arc::new(TuiSessionFactory { config, store });

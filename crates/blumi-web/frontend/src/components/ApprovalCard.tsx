@@ -15,6 +15,7 @@ export function ApprovalCard({ approval, onRespond }: Props) {
         <span className="approval-tool">{approval.tool}</span>
       </div>
       <div className="approval-summary">{approval.summary}</div>
+      {approval.advice && <div className="approval-advice">{approval.advice}</div>}
       {approval.diff && <pre className="diff small">{approval.diff}</pre>}
       <div className="approval-actions">
         <button className="btn allow" onClick={() => onRespond('allow', 'once')}>
