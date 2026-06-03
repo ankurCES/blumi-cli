@@ -325,6 +325,155 @@ pub struct McpServerConfig {
     pub enabled: bool,
 }
 
+impl McpServerConfig {
+    fn npx(pkg: &str, extra: &[&str], enabled: bool) -> Self {
+        let mut args = vec!["-y".to_string(), pkg.to_string()];
+        args.extend(extra.iter().map(|s| s.to_string()));
+        McpServerConfig {
+            command: "npx".into(),
+            args,
+            env: BTreeMap::new(),
+            enabled,
+        }
+    }
+    fn uvx(pkg: &str, extra: &[&str], enabled: bool) -> Self {
+        let mut args = vec![pkg.to_string()];
+        args.extend(extra.iter().map(|s| s.to_string()));
+        McpServerConfig {
+            command: "uvx".into(),
+            args,
+            env: BTreeMap::new(),
+            enabled,
+        }
+    }
+    fn with_env(mut self, kvs: &[(&str, &str)]) -> Self {
+        for (k, v) in kvs {
+            self.env.insert((*k).to_string(), (*v).to_string());
+        }
+        self
+    }
+}
+
+/// The default no-config MCP servers, seeded into `settings.json` on first run.
+/// `{workspace}` in args is replaced with the session's working directory at
+/// connect time (see the engine). These need Node (`npx`) and/or `uv` (`uvx`)
+/// at runtime; a missing runtime just makes the server skip with a log line.
+pub fn default_mcp_servers() -> BTreeMap<String, McpServerConfig> {
+    use McpServerConfig as M;
+    BTreeMap::from([
+        (
+            "filesystem".into(),
+            M::npx(
+                "@modelcontextprotocol/server-filesystem",
+                &["{workspace}"],
+                true,
+            ),
+        ),
+        (
+            "memory".into(),
+            M::npx("@modelcontextprotocol/server-memory", &[], true),
+        ),
+        ("fetch".into(), M::uvx("mcp-server-fetch", &[], true)),
+        (
+            "git".into(),
+            M::uvx("mcp-server-git", &["--repository", "{workspace}"], true),
+        ),
+        (
+            "sequentialthinking".into(),
+            M::npx(
+                "@modelcontextprotocol/server-sequentialthinking",
+                &[],
+                false,
+            ),
+        ),
+        ("time".into(), M::uvx("mcp-server-time", &[], false)),
+    ])
+}
+
+/// One configurable (keyed) server the user can add with `blumi mcp add`.
+#[derive(Debug, Clone)]
+pub struct McpCatalogEntry {
+    pub name: String,
+    pub description: String,
+    /// Env vars the user must fill (keys present, values blank placeholders).
+    pub required_env: Vec<String>,
+    pub server: McpServerConfig,
+}
+
+/// A curated catalog of popular MCP servers that need configuration (API keys),
+/// for `blumi mcp catalog` / `blumi mcp add` (sourced from awesome-mcp-servers).
+/// Added disabled with blank env placeholders the user fills in.
+pub fn default_mcp_catalog() -> Vec<McpCatalogEntry> {
+    use McpServerConfig as M;
+    fn e(name: &str, description: &str, env: &[&str], server: McpServerConfig) -> McpCatalogEntry {
+        McpCatalogEntry {
+            name: name.into(),
+            description: description.into(),
+            required_env: env.iter().map(|s| s.to_string()).collect(),
+            server,
+        }
+    }
+    vec![
+        e(
+            "github",
+            "GitHub repos, issues, and PRs",
+            &["GITHUB_PERSONAL_ACCESS_TOKEN"],
+            M::npx("@modelcontextprotocol/server-github", &[], false)
+                .with_env(&[("GITHUB_PERSONAL_ACCESS_TOKEN", "")]),
+        ),
+        e(
+            "brave-search",
+            "Web search via the Brave Search API",
+            &["BRAVE_API_KEY"],
+            M::npx("@modelcontextprotocol/server-brave-search", &[], false)
+                .with_env(&[("BRAVE_API_KEY", "")]),
+        ),
+        e(
+            "slack",
+            "Read/post Slack messages",
+            &["SLACK_BOT_TOKEN", "SLACK_TEAM_ID"],
+            M::npx("@modelcontextprotocol/server-slack", &[], false)
+                .with_env(&[("SLACK_BOT_TOKEN", ""), ("SLACK_TEAM_ID", "")]),
+        ),
+        e(
+            "gitlab",
+            "GitLab projects, issues, and MRs",
+            &["GITLAB_PERSONAL_ACCESS_TOKEN"],
+            M::npx("@modelcontextprotocol/server-gitlab", &[], false)
+                .with_env(&[("GITLAB_PERSONAL_ACCESS_TOKEN", "")]),
+        ),
+        e(
+            "postgres",
+            "Read-only Postgres queries (set the connection URL in args)",
+            &[],
+            M::npx(
+                "@modelcontextprotocol/server-postgres",
+                &["postgresql://localhost/mydb"],
+                false,
+            ),
+        ),
+        e(
+            "gdrive",
+            "Search + read Google Drive files (OAuth setup required)",
+            &["GDRIVE_CREDENTIALS_PATH"],
+            M::npx("@modelcontextprotocol/server-gdrive", &[], false)
+                .with_env(&[("GDRIVE_CREDENTIALS_PATH", "")]),
+        ),
+        e(
+            "sentry",
+            "Retrieve and analyze Sentry issues",
+            &["SENTRY_AUTH_TOKEN"],
+            M::uvx("mcp-server-sentry", &[], false).with_env(&[("SENTRY_AUTH_TOKEN", "")]),
+        ),
+        e(
+            "puppeteer",
+            "Headless browser automation + screenshots",
+            &[],
+            M::npx("@modelcontextprotocol/server-puppeteer", &[], false),
+        ),
+    ]
+}
+
 /// The full blumi configuration.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(default)]

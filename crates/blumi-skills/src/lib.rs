@@ -1,6 +1,7 @@
 //! Dual memory (MEMORY/USER), SKILL.md skills, and self-evolution tools
 //! (author skills, edit config, reload in place).
 
+mod bundled;
 mod catalog;
 mod memory;
 mod memory_tool;
@@ -12,6 +13,7 @@ mod skill_tool;
 #[cfg(test)]
 mod run_tests;
 
+pub use bundled::{bundled_count, sync_bundled_skills};
 pub use catalog::{Skill, SkillCatalog, SkillMeta};
 pub use memory::MemorySnapshot;
 pub use memory_tool::MemoryTool;

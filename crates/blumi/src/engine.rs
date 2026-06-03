@@ -216,17 +216,26 @@ pub async fn build_session(
     };
 
     // MCP: connect each enabled server and register its tools (mcp__server__tool).
-    // A failed connection is logged and skipped — it never blocks startup.
-    for (srv_name, srv) in &config.mcp_servers {
+    // A failed connection is logged and skipped — it never blocks startup. If the
+    // user hasn't configured any, fall back to the default no-config set so a
+    // fresh install has filesystem/fetch/git/etc out of the box.
+    let mcp_servers = if config.mcp_servers.is_empty() {
+        blumi_config::default_mcp_servers()
+    } else {
+        config.mcp_servers.clone()
+    };
+    // `{workspace}` / `{cwd}` in args/env resolve to the session's working dir
+    // (settings.json is static; the path is per-session).
+    let ws = work_dir.display().to_string();
+    let subst = |s: &str| s.replace("{workspace}", &ws).replace("{cwd}", &ws);
+    for (srv_name, srv) in &mcp_servers {
         if !srv.enabled {
             continue;
         }
-        let env: Vec<(String, String)> = srv
-            .env
-            .iter()
-            .map(|(k, v)| (k.clone(), v.clone()))
-            .collect();
-        match blumi_mcp::connect_server(srv_name, &srv.command, &srv.args, &env).await {
+        let args: Vec<String> = srv.args.iter().map(|a| subst(a)).collect();
+        let env: Vec<(String, String)> =
+            srv.env.iter().map(|(k, v)| (k.clone(), subst(v))).collect();
+        match blumi_mcp::connect_server(srv_name, &srv.command, &args, &env).await {
             Ok(tools) => {
                 for tool in tools {
                     registry.register(tool);

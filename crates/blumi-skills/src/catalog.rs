@@ -88,41 +88,50 @@ impl SkillCatalog {
     }
 }
 
-/// Parse a SKILL.md: optional `---` frontmatter with `name:`/`description:`,
-/// then the markdown body. Falls back to the directory name + first body line.
+/// The two frontmatter keys blumi reads. Everything else (license, version,
+/// `allowed-tools`, nested maps, …) is accepted and ignored — serde_yaml does
+/// not deny unknown fields — so real-world SKILL.md files parse cleanly.
+#[derive(serde::Deserialize, Default)]
+struct Frontmatter {
+    #[serde(default)]
+    name: Option<String>,
+    #[serde(default)]
+    description: Option<String>,
+}
+
+/// Parse a SKILL.md: optional `---` YAML frontmatter, then the markdown body.
+/// Uses a real YAML parser so multi-line/quoted descriptions, colons in values,
+/// and extra keys all work; on any YAML error we degrade to the directory name
+/// + first body line rather than dropping the skill.
 fn parse_skill(text: &str, fallback_name: &str) -> Skill {
-    let mut name: Option<String> = None;
-    let mut description: Option<String> = None;
+    let mut front = "";
     let mut body = text;
 
     if let Some(rest) = text.strip_prefix("---") {
-        // find the closing fence
         if let Some(end) = rest.find("\n---") {
-            let front = &rest[..end];
+            front = &rest[..end];
             body = rest[end + 4..].trim_start_matches('\n');
-            for line in front.lines() {
-                if let Some((k, v)) = line.split_once(':') {
-                    let v = v.trim().trim_matches('"').trim_matches('\'').to_string();
-                    match k.trim() {
-                        "name" => name = Some(v),
-                        "description" => description = Some(v),
-                        _ => {}
-                    }
-                }
-            }
         }
     }
 
-    let name = name
+    let fm: Frontmatter = serde_yaml::from_str(front).unwrap_or_default();
+
+    let name = fm
+        .name
+        .map(|n| n.trim().to_string())
         .filter(|n| !n.is_empty())
         .unwrap_or_else(|| fallback_name.to_string());
-    let description = description.filter(|d| !d.is_empty()).unwrap_or_else(|| {
-        body.lines()
-            .map(str::trim)
-            .find(|l| !l.is_empty() && !l.starts_with('#'))
-            .unwrap_or("")
-            .to_string()
-    });
+    let description = fm
+        .description
+        .map(|d| d.trim().to_string())
+        .filter(|d| !d.is_empty())
+        .unwrap_or_else(|| {
+            body.lines()
+                .map(str::trim)
+                .find(|l| !l.is_empty() && !l.starts_with('#'))
+                .unwrap_or("")
+                .to_string()
+        });
 
     Skill {
         name,
@@ -149,6 +158,36 @@ mod tests {
         assert_eq!(s.description, "Work with PDFs");
         assert!(s.body.contains("Do the thing."));
         assert!(!s.body.contains("name:"));
+    }
+
+    #[test]
+    fn tolerates_real_world_frontmatter() {
+        // Extra keys, a quoted multi-line description with colons, a nested map —
+        // none of which the old line-parser could handle.
+        let text = "---\n\
+            name: db-expert\n\
+            description: \"Use when: migrations, indexes; covers Postgres & MySQL\"\n\
+            license: MIT\n\
+            allowed-tools: [Bash, FileEdit]\n\
+            metadata:\n  author: someone\n  version: 2\n\
+            ---\n\n# DB\n\nBody here.";
+        let s = parse_skill(text, "dir");
+        assert_eq!(s.name, "db-expert");
+        assert_eq!(
+            s.description,
+            "Use when: migrations, indexes; covers Postgres & MySQL"
+        );
+        assert!(s.body.contains("Body here."));
+        assert!(!s.body.contains("license"));
+    }
+
+    #[test]
+    fn malformed_frontmatter_degrades_gracefully() {
+        // Not valid YAML after the fence → fall back, don't drop the skill.
+        let text = "---\nname: : : oops\n\tbad: indent\n---\n\nReal first line.";
+        let s = parse_skill(text, "fallback-name");
+        assert_eq!(s.name, "fallback-name");
+        assert_eq!(s.description, "Real first line.");
     }
 
     #[test]
