@@ -149,6 +149,15 @@ fn render_dashboard(model: &Model, f: &mut Frame, area: Rect, theme: &Theme) {
     if model.plan_mode {
         lines.push(kv("mode", "plan (read-only)", theme));
     }
+    lines.push(kv(
+        "autocont",
+        &if model.auto_continue == 0 {
+            "off".to_string()
+        } else {
+            format!("≤{}", model.auto_continue)
+        },
+        theme,
+    ));
 
     // ── Context usage ─────────────────────────────────────────
     lines.push(Line::raw(""));

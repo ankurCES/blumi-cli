@@ -141,6 +141,9 @@ pub struct Model {
     /// Whether planning mode is on (mutating tools blocked). Mirrors the core
     /// flag for the header/dashboard indicator.
     pub plan_mode: bool,
+    /// Auto-continue step budget (self-wake on the per-turn cap). Mirrors the
+    /// core value for the dashboard; retuned live by `/autocontinue`.
+    pub auto_continue: u32,
     pub dialog: Option<Picker>,
     /// Screen rect (x, y, w, h) of the open dialog's row list, recorded at
     /// render time so mouse clicks can be mapped to a row (click-to-select).
@@ -234,6 +237,7 @@ impl Model {
             pending: None,
             plan_review: None,
             plan_mode: false,
+            auto_continue: 12,
             dialog: None,
             dialog_list_area: None,
             memory_view: None,

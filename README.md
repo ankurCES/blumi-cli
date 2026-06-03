@@ -95,5 +95,8 @@ or `--yolo` for headless `blumi run` / `blumi loop`. The header shows a glaring 
 
 When a turn stops only because it hit the per-turn tool cap, the runtime **auto-continues** in the
 same session (no work or context lost, the conversation is preserved) and narrates each step — so
-long tasks finish without you nudging between turns. It's bounded by `llm.max_auto_continue`
-(default 12; set 0 to disable) and any real user message resets the budget.
+long tasks finish without you nudging between turns. It's **token-effective**: per-iteration
+compaction + prompt caching keep each continuation cheap, and the self-wake is bounded two ways —
+a step budget (`llm.max_auto_continue`, default 12) **and** a token ceiling
+(`llm.max_auto_continue_tokens`, default 400k), whichever is hit first. Tune the steps live with
+`/autocontinue <n>` (0 disables); any real user message resets the budget.

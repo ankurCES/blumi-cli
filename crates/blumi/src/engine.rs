@@ -294,7 +294,8 @@ pub async fn build_session(
         )
         .with_spawner(spawner)
         .with_personas(personas, &active)
-        .with_auto_continue(config.llm.max_auto_continue),
+        .with_auto_continue(config.llm.max_auto_continue)
+        .with_auto_continue_tokens(config.llm.max_auto_continue_tokens),
     );
 
     let state =

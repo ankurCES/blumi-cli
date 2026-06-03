@@ -100,6 +100,8 @@ pub struct TuiConfig {
     pub tasks_path: PathBuf,
     /// Initial brain approval mode label ("off"/"advisory"/"auto").
     pub brain_mode: String,
+    /// Auto-continue step budget (dashboard display + `/autocontinue` default).
+    pub auto_continue: u32,
 }
 
 /// Run the interactive TUI, sourcing sessions from `factory`. Restores the
@@ -153,6 +155,7 @@ async fn run_loop(
     model.cron_jobs = cfg.cron_jobs;
     model.tasks_path = cfg.tasks_path;
     model.brain_mode = cfg.brain_mode;
+    model.auto_continue = cfg.auto_continue;
 
     let mut session = factory.create().await?;
     let mut events = session.subscribe();

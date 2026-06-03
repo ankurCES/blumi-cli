@@ -205,6 +205,7 @@ pub async fn run(config: BlumiConfig) -> anyhow::Result<()> {
             .unwrap_or_default()
             .label()
             .to_string(),
+        auto_continue: config.llm.max_auto_continue,
     };
 
     let factory = Arc::new(TuiSessionFactory { config, store });

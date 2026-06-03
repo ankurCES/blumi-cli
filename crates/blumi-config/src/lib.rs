@@ -44,6 +44,10 @@ pub struct LlmConfig {
     /// because it hit `max_iterations` (it self-wakes in the same session, so
     /// no work/context is lost). 0 disables auto-continue. Bounds runaway work.
     pub max_auto_continue: u32,
+    /// Token ceiling (billed input+output) for one self-woken sequence. Whichever
+    /// of this or `max_auto_continue` is hit first stops the auto-continue — so
+    /// runaway *spend* is bounded, not just the step count. 0 = no token cap.
+    pub max_auto_continue_tokens: u32,
 }
 
 impl Default for LlmConfig {
@@ -58,6 +62,7 @@ impl Default for LlmConfig {
             top_k: 20,
             max_iterations: 25,
             max_auto_continue: 12,
+            max_auto_continue_tokens: 400_000,
         }
     }
 }

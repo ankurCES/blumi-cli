@@ -120,6 +120,7 @@ pub fn spawn_session_seeded(seed: SessionState, runner: Arc<dyn TurnRunner>) -> 
         turn_token: None,
         queued: VecDeque::new(),
         auto_continues: 0,
+        turn_tokens: 0,
     };
 
     tokio::spawn(actor.run());
@@ -151,6 +152,9 @@ struct SessionActor {
     /// Consecutive auto-continuations since the last user message / completion
     /// (bounded by the runner's `auto_continue_budget`).
     auto_continues: u32,
+    /// Billed tokens (input+output) accumulated across the current self-woken
+    /// sequence, for the token ceiling. Reset when a turn truly ends.
+    turn_tokens: u32,
 }
 
 impl SessionActor {
@@ -166,6 +170,9 @@ impl SessionActor {
                     None => break, // all handles dropped
                 },
                 Some(event) = self.event_rx.recv() => {
+                    if let Event::Usage { total, .. } = &event {
+                        self.turn_tokens = self.turn_tokens.saturating_add(*total);
+                    }
                     self.publish(event);
                 }
                 Some(ir) = self.interaction_rx.recv() => {
@@ -232,6 +239,9 @@ impl SessionActor {
             }
             Command::SetPlanMode { on } => {
                 self.runner.set_plan_mode(on);
+            }
+            Command::SetAutoContinue { n } => {
+                self.runner.set_auto_continue(n);
             }
             Command::Compact => {
                 if self.turn_token.is_some() {
@@ -336,8 +346,11 @@ impl SessionActor {
     async fn finish_turn(&mut self, reason: blumi_protocol::DoneReason) {
         use blumi_protocol::DoneReason;
         // Drain any events the turn emitted before deciding what's next, so
-        // ordering is preserved.
+        // ordering is preserved (and keep the token tally accurate).
         while let Ok(event) = self.event_rx.try_recv() {
+            if let Event::Usage { total, .. } = &event {
+                self.turn_tokens = self.turn_tokens.saturating_add(*total);
+            }
             self.publish(event);
         }
         self.turn_token = None;
@@ -348,19 +361,26 @@ impl SessionActor {
         // is lost, and the user needn't nudge it between turns. We do NOT emit
         // TurnDone for the spent segment (nor TurnStarted for the next), so the
         // whole self-woken sequence reads as one seamless turn: `busy` stays on
-        // and consumers that wait for TurnDone see only the real end. Bounded by
-        // the runner's budget so it can't run away.
+        // and consumers that wait for TurnDone see only the real end.
+        //
+        // Bounded two ways so it stays token-effective: a step budget AND a
+        // token ceiling — whichever is hit first stops the self-wake.
         let budget = self.runner.auto_continue_budget();
+        let token_budget = self.runner.auto_continue_token_budget();
+        let token_exhausted = token_budget > 0 && self.turn_tokens >= token_budget;
         let auto = reason == DoneReason::MaxIterations
             && budget > 0
             && self.queued.is_empty()
-            && self.auto_continues < budget;
+            && self.auto_continues < budget
+            && !token_exhausted;
         if auto {
             self.auto_continues += 1;
             self.publish(Event::Notice {
                 message: format!(
-                    "↻ continuing automatically ({}/{}) — picking up where it left off",
-                    self.auto_continues, budget
+                    "↻ continuing automatically ({}/{}, ~{}k tok) — picking up where it left off",
+                    self.auto_continues,
+                    budget,
+                    self.turn_tokens / 1000
                 ),
             });
             self.start_turn_inner(AUTO_CONTINUE_PROMPT.to_string(), None, false)
@@ -368,19 +388,30 @@ impl SessionActor {
             return;
         }
 
-        // Budget exhausted on a cap-stop: tell the user it paused, then end.
-        if reason == DoneReason::MaxIterations && budget > 0 && self.auto_continues >= budget {
-            self.publish(Event::Notice {
-                message: format!(
-                    "paused after {budget} auto-continuations — send a message to keep going"
-                ),
-            });
+        // Stopped at a cap with auto-continue on: say why it paused, then end.
+        if reason == DoneReason::MaxIterations && budget > 0 {
+            let why = if token_exhausted {
+                format!(
+                    "paused — auto-continue hit its ~{}k-token budget",
+                    token_budget / 1000
+                )
+            } else if self.auto_continues >= budget {
+                format!("paused after {budget} auto-continuations")
+            } else {
+                String::new()
+            };
+            if !why.is_empty() {
+                self.publish(Event::Notice {
+                    message: format!("{why} — send a message to keep going"),
+                });
+            }
         }
 
         // End the (possibly multi-segment) turn.
         self.publish(Event::TurnDone { reason });
         self.state.lock().await.turn_count += 1;
         self.auto_continues = 0;
+        self.turn_tokens = 0;
 
         // A queued user message runs next (the user is steering).
         if let Some((text, stream_id)) = self.queued.pop_front() {
@@ -462,6 +493,8 @@ mod tests {
     /// budget — to exercise the actor's self-wake.
     struct CapRunner {
         budget: u32,
+        token_budget: u32,
+        per_call_tokens: u32,
         calls: std::sync::atomic::AtomicU32,
     }
 
@@ -474,13 +507,22 @@ mod tests {
             _ct: CancellationToken,
         ) -> DoneReason {
             self.calls.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-            ctx.events.emit(Event::Token {
-                text: "work".into(),
-            });
+            if self.per_call_tokens > 0 {
+                ctx.events.emit(Event::Usage {
+                    input: self.per_call_tokens,
+                    output: 0,
+                    total: self.per_call_tokens,
+                    context: self.per_call_tokens,
+                    cost_usd: None,
+                });
+            }
             DoneReason::MaxIterations
         }
         fn auto_continue_budget(&self) -> u32 {
             self.budget
+        }
+        fn auto_continue_token_budget(&self) -> u32 {
+            self.token_budget
         }
     }
 
@@ -551,6 +593,8 @@ mod tests {
     async fn auto_continues_then_pauses_when_budget_spent() {
         let runner = Arc::new(CapRunner {
             budget: 2,
+            token_budget: 0,
+            per_call_tokens: 0,
             calls: std::sync::atomic::AtomicU32::new(0),
         });
         let h = spawn_session(SessionId::from("ac"), "m", runner.clone());
@@ -587,6 +631,36 @@ mod tests {
             .filter(|e| matches!(e, Event::Notice { .. }))
             .count();
         assert!(notices >= 3, "continuation + pause notices, got {notices}");
+    }
+
+    #[tokio::test]
+    async fn auto_continue_stops_on_token_budget() {
+        // High step budget, low token ceiling: ~100 tok/segment, cap 250 → it
+        // should stop on tokens (after 3 segments), not on the step count.
+        let runner = Arc::new(CapRunner {
+            budget: 100,
+            token_budget: 250,
+            per_call_tokens: 100,
+            calls: std::sync::atomic::AtomicU32::new(0),
+        });
+        let h = spawn_session(SessionId::from("tok"), "m", runner.clone());
+        let mut rx = h.subscribe();
+        h.send(Command::UserMessage {
+            text: "big task".into(),
+            attachments: vec![],
+            stream_id: None,
+        })
+        .await
+        .unwrap();
+
+        let events = collect_until_done(&mut rx).await;
+
+        // 100 + 100 (continue) then 300 ≥ 250 stops → 3 calls, well under 100.
+        assert_eq!(runner.calls.load(std::sync::atomic::Ordering::SeqCst), 3);
+        // It paused specifically for the token budget.
+        assert!(events
+            .iter()
+            .any(|e| matches!(e, Event::Notice { message } if message.contains("token"))));
     }
 
     #[tokio::test]
