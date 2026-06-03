@@ -5,7 +5,7 @@ import type { CronJob, SettingsView, SkillFull, Usage } from '../types'
 type Tab = 'cron' | 'skills' | 'memory' | 'usage' | 'settings'
 const TABS: Tab[] = ['cron', 'skills', 'memory', 'usage', 'settings']
 
-export function ControlCenter({ onClose }: { onClose: () => void }) {
+export function ControlCenter({ onClose, onReload }: { onClose: () => void; onReload: () => void }) {
   const [tab, setTab] = useState<Tab>('cron')
   return (
     <div className="cc-overlay" onClick={onClose}>
@@ -29,8 +29,8 @@ export function ControlCenter({ onClose }: { onClose: () => void }) {
         </div>
         <div className="cc-body">
           {tab === 'cron' && <CronTab />}
-          {tab === 'skills' && <SkillsTab />}
-          {tab === 'memory' && <MemoryTab />}
+          {tab === 'skills' && <SkillsTab onReload={onReload} />}
+          {tab === 'memory' && <MemoryTab onReload={onReload} />}
           {tab === 'usage' && <UsageTab />}
           {tab === 'settings' && <SettingsTab />}
         </div>
@@ -98,14 +98,28 @@ function CronTab() {
   )
 }
 
-function SkillsTab() {
+function SkillsTab({ onReload }: { onReload: () => void }) {
   const [skills, setSkills] = useState<SkillFull[]>([])
   const [open, setOpen] = useState<string | null>(null)
+  const refresh = () => api.skillsList().then(setSkills).catch(() => {})
   useEffect(() => {
-    api.skillsList().then(setSkills).catch(() => {})
+    refresh()
   }, [])
   return (
     <div className="cc-pane">
+      <div className="cc-row" style={{ alignItems: 'center' }}>
+        <span className="cc-dim cc-row-main">Skills the agent can load. Reload to pick up new ones.</span>
+        <button
+          className="cc-del"
+          style={{ color: 'inherit' }}
+          onClick={() => {
+            onReload()
+            refresh()
+          }}
+        >
+          ↻ reload agent
+        </button>
+      </div>
       {skills.length === 0 && <div className="cc-empty">no skills yet</div>}
       {skills.map((s) => (
         <div className="cc-row cc-col" key={s.name}>
@@ -120,7 +134,7 @@ function SkillsTab() {
   )
 }
 
-function MemoryTab() {
+function MemoryTab({ onReload }: { onReload: () => void }) {
   const [memory, setMemory] = useState('')
   const [user, setUser] = useState('')
   const [saved, setSaved] = useState('')
@@ -146,6 +160,12 @@ function MemoryTab() {
       <textarea className="cc-area" value={user} onChange={(e) => setUser(e.target.value)} />
       <button className="cc-save" onClick={() => save('user')}>
         {saved === 'user' ? 'saved ✓' : 'save'}
+      </button>
+      <div className="cc-dim" style={{ marginTop: 10 }}>
+        Memory is loaded at session start. Reload the agent to apply edits to the current chat.
+      </div>
+      <button className="cc-save" onClick={onReload}>
+        ↻ reload agent
       </button>
     </div>
   )

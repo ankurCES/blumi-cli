@@ -38,7 +38,27 @@ pub async fn config(State(state): State<AppState>) -> Json<Value> {
 }
 
 pub async fn models(State(state): State<AppState>) -> Json<Value> {
-    Json(json!({ "model": state.config.model, "models": state.config.models }))
+    Json(json!({ "options": state.mgmt().model_options() }))
+}
+
+#[derive(Deserialize)]
+pub struct ProviderBody {
+    pub provider: String,
+}
+
+/// Switch the active provider: persist it (+ a default model), then rebuild the
+/// session so the new provider's client is used. The conversation is preserved.
+pub async fn provider_set(
+    State(state): State<AppState>,
+    Json(body): Json<ProviderBody>,
+) -> Json<Value> {
+    if let Err(e) = state.mgmt().set_provider(&body.provider) {
+        return Json(json!({ "ok": false, "error": e.to_string() }));
+    }
+    match state.reload_current().await {
+        Ok(()) => Json(json!({ "ok": true })),
+        Err(e) => Json(json!({ "ok": false, "error": e.to_string() })),
+    }
 }
 
 pub async fn personas(State(state): State<AppState>) -> Json<Value> {
