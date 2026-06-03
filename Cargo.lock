@@ -299,6 +299,7 @@ dependencies = [
  "blumi-playbook",
  "blumi-protocol",
  "blumi-skills",
+ "blumi-task",
  "blumi-tools",
  "blumi-tui",
  "blumi-voice",
@@ -492,6 +493,16 @@ dependencies = [
  "tokio",
  "tokio-util",
  "tracing",
+]
+
+[[package]]
+name = "blumi-task"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "serde_json",
+ "tempfile",
+ "time",
 ]
 
 [[package]]
