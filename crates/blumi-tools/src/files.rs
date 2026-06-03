@@ -29,7 +29,9 @@ async fn journal_before(ctx: &ToolContext, path: &Path, op: &str) {
 
 #[derive(Deserialize, JsonSchema)]
 pub struct FileReadInput {
-    /// Path to the file (absolute, or relative to the working directory).
+    /// Absolute path to the file (a relative path is resolved against the
+    /// working directory). Accepts `path` or `file_path`.
+    #[serde(alias = "file_path", alias = "filepath", alias = "file")]
     pub path: String,
     /// 1-based line to start at (default 1).
     #[serde(default)]
@@ -103,9 +105,12 @@ impl TypedTool for FileRead {
 
 #[derive(Deserialize, JsonSchema)]
 pub struct FileWriteInput {
-    /// Path to write (created or overwritten).
+    /// Absolute path to write, created or overwritten (a relative path is
+    /// resolved against the working directory). Accepts `path` or `file_path`.
+    #[serde(alias = "file_path", alias = "filepath", alias = "file")]
     pub path: String,
     /// Full file contents.
+    #[serde(alias = "contents", alias = "text")]
     pub content: String,
 }
 
@@ -150,6 +155,9 @@ impl TypedTool for FileWrite {
 
 #[derive(Deserialize, JsonSchema)]
 pub struct FileEditInput {
+    /// Absolute path to the file to edit (a relative path is resolved against
+    /// the working directory). Accepts `path` or `file_path`.
+    #[serde(alias = "file_path", alias = "filepath", alias = "file")]
     pub path: String,
     /// Exact text to replace.
     pub old_string: String,
@@ -248,6 +256,25 @@ mod tests {
     use super::*;
     use crate::testutil::ctx;
     use serde_json::json;
+
+    #[test]
+    fn file_tools_accept_file_path_alias() {
+        // Anthropic models emit `file_path` (their Write/Edit convention) — it
+        // must parse as `path` instead of erroring "missing field `path`".
+        let w: FileWriteInput =
+            serde_json::from_value(json!({ "file_path": "/abs/x.rs", "content": "hi" })).unwrap();
+        assert_eq!(w.path, "/abs/x.rs");
+        let w2: FileWriteInput =
+            serde_json::from_value(json!({ "path": "/abs/y.rs", "contents": "hi" })).unwrap();
+        assert_eq!(w2.content, "hi");
+        let e: FileEditInput = serde_json::from_value(
+            json!({ "file_path": "/abs/z.rs", "old_string": "a", "new_string": "b" }),
+        )
+        .unwrap();
+        assert_eq!(e.path, "/abs/z.rs");
+        let r: FileReadInput = serde_json::from_value(json!({ "file_path": "/abs/r.rs" })).unwrap();
+        assert_eq!(r.path, "/abs/r.rs");
+    }
 
     #[tokio::test]
     async fn write_then_read_roundtrip() {
