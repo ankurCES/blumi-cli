@@ -51,27 +51,41 @@ pub fn ramp_color(tick: usize) -> Color {
     Color::Rgb(r, g, b)
 }
 
-/// A compact one-line animated wordmark ("✿ blumi") for the sidebar/header: the
-/// rose→cyan gradient flows across the glyphs and shifts each `tick`, so it
-/// shimmers when redrawn. Bold for presence in a narrow pane.
-pub fn wordmark_line(tick: usize) -> Line<'static> {
-    let spans = "✿ blumi"
+/// A compact 3-row brand logo for a side pane: a small animated flower bloom
+/// (slightly taller than the text, with a cyan ◉ nucleus) beside the small
+/// multicolor "blumi" wordmark on the middle row. Shimmers as `tick` advances.
+pub fn brand_logo(tick: usize) -> Vec<Line<'static>> {
+    let petal = |t: usize| {
+        Style::default()
+            .fg(ramp_color(t))
+            .add_modifier(Modifier::BOLD)
+    };
+    let nucleus = Style::default()
+        .fg(Color::Rgb(0x68, 0xFF, 0xD6))
+        .add_modifier(Modifier::BOLD);
+    let word: Vec<Span<'static>> = "blumi"
         .chars()
         .enumerate()
         .map(|(i, ch)| {
-            if ch == ' ' {
-                Span::raw(" ")
-            } else {
-                Span::styled(
-                    ch.to_string(),
-                    Style::default()
-                        .fg(ramp_color(tick + i * 2))
-                        .add_modifier(Modifier::BOLD),
-                )
-            }
+            Span::styled(
+                ch.to_string(),
+                Style::default()
+                    .fg(ramp_color(tick + 6 + i * 2))
+                    .add_modifier(Modifier::BOLD),
+            )
         })
-        .collect::<Vec<_>>();
-    Line::from(spans)
+        .collect();
+
+    let top = Line::from(Span::styled(" ✿ ".to_string(), petal(tick)));
+    let mut mid = vec![
+        Span::styled("✿".to_string(), petal(tick + 2)),
+        Span::styled("◉".to_string(), nucleus),
+        Span::styled("✿".to_string(), petal(tick + 4)),
+        Span::raw("  "),
+    ];
+    mid.extend(word);
+    let bottom = Line::from(Span::styled(" ✿ ".to_string(), petal(tick + 8)));
+    vec![top, Line::from(mid), bottom]
 }
 
 /// A braille spinner frame for in-flight work (terminal-friendly).
@@ -225,6 +239,15 @@ mod tests {
         assert_eq!(lines.len(), ROSE_ROWS);
         let mid: String = lines[2].spans.iter().map(|s| s.content.as_ref()).collect();
         assert!(mid.contains('◉'));
+    }
+
+    #[test]
+    fn brand_logo_has_flower_and_wordmark() {
+        let lines = brand_logo(0);
+        assert_eq!(lines.len(), 3, "3-row logo");
+        let mid: String = lines[1].spans.iter().map(|s| s.content.as_ref()).collect();
+        assert!(mid.contains('◉'), "nucleus on middle row");
+        assert!(mid.contains("blumi"), "wordmark beside the flower");
     }
 
     #[test]

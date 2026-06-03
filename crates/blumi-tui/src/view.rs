@@ -57,8 +57,8 @@ pub fn render(model: &mut Model, f: &mut Frame) {
         render_sidebar(model, f, cols[ci], &theme);
         ci += 1;
     } else {
-        model.ws_list_area = None;
-        model.sess_list_area = None;
+        model.sidebar_list_area = None;
+        model.sidebar_tab_area = None;
     }
     let chat = cols[ci];
     ci += 1;
@@ -158,63 +158,86 @@ fn render_list<T>(
     f.render_widget(Paragraph::new(lines), inner);
 }
 
-/// The left sidebar: project workspaces (top) + sessions (bottom).
+/// The left explorer: one window with a tab bar (Workspaces / Sessions) and the
+/// active tab's list below it — like a proper tabbed panel.
 fn render_sidebar(model: &mut Model, f: &mut Frame, area: Rect, theme: &Theme) {
-    let [top, bottom] =
-        Layout::vertical([Constraint::Percentage(50), Constraint::Percentage(50)]).areas(area);
+    use crate::model::SidebarTab;
+    let focused = model.focus == Focus::Sidebar;
+    let block = pane_block("explorer", focused, theme);
+    let inner = block.inner(area);
+    f.render_widget(block, area);
 
-    // ── Workspaces ───────────────────────────────────────────
-    let ws_focused = model.focus == Focus::Workspaces;
-    let block = pane_block("workspaces", ws_focused, theme);
-    let inner = block.inner(top);
-    f.render_widget(block, top);
-    model.ws_list_area = Some((inner.x, inner.y, inner.width, inner.height));
-    let name_w = inner.width.saturating_sub(3) as usize;
+    // Tab bar (row 0) + active list (the rest).
+    let [tabs_row, list_area] =
+        Layout::vertical([Constraint::Length(1), Constraint::Min(0)]).areas(inner);
+    model.sidebar_tab_area = Some((tabs_row.x, tabs_row.y, tabs_row.width, tabs_row.height));
+    model.sidebar_list_area = Some((list_area.x, list_area.y, list_area.width, list_area.height));
+
+    let tab = model.sidebar_tab;
+    let chip = |label: &str, active: bool| {
+        if active {
+            Span::styled(
+                format!(" {label} "),
+                theme.bold_primary().add_modifier(Modifier::REVERSED),
+            )
+        } else {
+            Span::styled(format!(" {label} "), theme.subtle())
+        }
+    };
+    f.render_widget(
+        Paragraph::new(Line::from(vec![
+            chip("Workspaces", tab == SidebarTab::Workspaces),
+            Span::raw(" "),
+            chip("Sessions", tab == SidebarTab::Sessions),
+        ])),
+        tabs_row,
+    );
+
     let sel_style = theme.bold_primary();
     let body = theme.body();
-    render_list(
-        f,
-        inner,
-        &model.workspaces,
-        model.ws_sel,
-        ws_focused,
-        theme,
-        "(no projects)",
-        |ws, i| {
-            let star = if ws.pinned { "★" } else { " " };
-            let style = if i == model.ws_sel { sel_style } else { body };
-            vec![
-                Span::styled(format!("{star} "), theme.accent()),
-                Span::styled(truncate(&ws.name, name_w), style),
-            ]
-        },
-    );
-
-    // ── Sessions ─────────────────────────────────────────────
-    let se_focused = model.focus == Focus::Sessions;
-    let block = pane_block("sessions", se_focused, theme);
-    let inner = block.inner(bottom);
-    f.render_widget(block, bottom);
-    model.sess_list_area = Some((inner.x, inner.y, inner.width, inner.height));
-    let title_w = inner.width.saturating_sub(2) as usize;
-    render_list(
-        f,
-        inner,
-        &model.recent_sessions,
-        model.sess_sel,
-        se_focused,
-        theme,
-        "(no sessions)",
-        |(_, title), i| {
-            let style = if i == model.sess_sel { sel_style } else { body };
-            let t = if title.trim().is_empty() {
-                "(untitled)"
-            } else {
-                title
-            };
-            vec![Span::styled(format!(" {}", truncate(t, title_w)), style)]
-        },
-    );
+    match tab {
+        SidebarTab::Workspaces => {
+            let name_w = list_area.width.saturating_sub(3) as usize;
+            render_list(
+                f,
+                list_area,
+                &model.workspaces,
+                model.ws_sel,
+                focused,
+                theme,
+                "(no projects)",
+                |ws, i| {
+                    let star = if ws.pinned { "★" } else { " " };
+                    let style = if i == model.ws_sel { sel_style } else { body };
+                    vec![
+                        Span::styled(format!("{star} "), theme.accent()),
+                        Span::styled(truncate(&ws.name, name_w), style),
+                    ]
+                },
+            );
+        }
+        SidebarTab::Sessions => {
+            let title_w = list_area.width.saturating_sub(2) as usize;
+            render_list(
+                f,
+                list_area,
+                &model.recent_sessions,
+                model.sess_sel,
+                focused,
+                theme,
+                "(no sessions)",
+                |(_, title), i| {
+                    let style = if i == model.sess_sel { sel_style } else { body };
+                    let t = if title.trim().is_empty() {
+                        "(untitled)"
+                    } else {
+                        title
+                    };
+                    vec![Span::styled(format!(" {}", truncate(t, title_w)), style)]
+                },
+            );
+        }
+    }
 }
 
 /// The agent dashboard: live session state, context usage, tasks, recent tool
@@ -247,9 +270,44 @@ fn render_dashboard(model: &Model, f: &mut Frame, area: Rect, theme: &Theme) {
         &model.model_name
     };
 
-    // ── Animated brand wordmark crowning the pane ──────────────
-    lines.push(crate::mascot::wordmark_line(model.spinner_frame));
+    // ── Brand logo crowning the pane: small flower + multicolor wordmark ──
+    for line in crate::mascot::brand_logo(model.spinner_frame) {
+        lines.push(line);
+    }
     lines.push(Line::raw(""));
+
+    // ── Active agents (the team) — directly under the logo ─────
+    if !model.agents.is_empty() {
+        let working = model
+            .agents
+            .iter()
+            .filter(|a| a.status == crate::model::AgentStatus::Working)
+            .count();
+        lines.push(section(&format!("Active agents  {working}▸"), theme));
+        for a in &model.agents {
+            let (glyph, gstyle) = match a.status {
+                crate::model::AgentStatus::Working => (
+                    crate::mascot::spinner(model.spinner_frame).to_string(),
+                    theme.accent(),
+                ),
+                crate::model::AgentStatus::Done => {
+                    (icon::OK.to_string(), Style::default().fg(theme.success))
+                }
+                crate::model::AgentStatus::Failed => {
+                    ("✗".to_string(), Style::default().fg(theme.error))
+                }
+            };
+            lines.push(Line::from(vec![
+                Span::styled(format!("{glyph} "), gstyle),
+                Span::styled(truncate(&a.role, w.saturating_sub(2)), theme.bold_primary()),
+            ]));
+            lines.push(Line::from(Span::styled(
+                format!("   {}", truncate(&a.task, w.saturating_sub(3))),
+                theme.subtle(),
+            )));
+        }
+        lines.push(Line::raw(""));
+    }
 
     // ── Session ───────────────────────────────────────────────
     lines.push(section("Session", theme));
@@ -300,39 +358,6 @@ fn render_dashboard(model: &Model, f: &mut Frame, area: Rect, theme: &Theme) {
         },
         theme,
     ));
-
-    // ── Active agents (delegated team members) ────────────────
-    if !model.agents.is_empty() {
-        let working = model
-            .agents
-            .iter()
-            .filter(|a| a.status == crate::model::AgentStatus::Working)
-            .count();
-        lines.push(Line::raw(""));
-        lines.push(section(&format!("Active agents  {working}▸"), theme));
-        for a in &model.agents {
-            let (glyph, gstyle) = match a.status {
-                crate::model::AgentStatus::Working => (
-                    crate::mascot::spinner(model.spinner_frame).to_string(),
-                    theme.accent(),
-                ),
-                crate::model::AgentStatus::Done => {
-                    (icon::OK.to_string(), Style::default().fg(theme.success))
-                }
-                crate::model::AgentStatus::Failed => {
-                    ("✗".to_string(), Style::default().fg(theme.error))
-                }
-            };
-            lines.push(Line::from(vec![
-                Span::styled(format!("{glyph} "), gstyle),
-                Span::styled(truncate(&a.role, w.saturating_sub(2)), theme.bold_primary()),
-            ]));
-            lines.push(Line::from(Span::styled(
-                format!("   {}", truncate(&a.task, w.saturating_sub(3))),
-                theme.subtle(),
-            )));
-        }
-    }
 
     // ── Context usage ─────────────────────────────────────────
     lines.push(Line::raw(""));
@@ -406,6 +431,13 @@ fn render_dashboard(model: &Model, f: &mut Frame, area: Rect, theme: &Theme) {
             bar(done as f64 / total as f64, w),
             Style::default().fg(theme.success),
         )));
+        // Which team members are working right now (shown against the active task).
+        let working_roles: Vec<&str> = model
+            .agents
+            .iter()
+            .filter(|a| a.status == crate::model::AgentStatus::Working)
+            .map(|a| a.role.as_str())
+            .collect();
         for todo in &model.todos {
             let (mark, style) = match todo.status {
                 TodoStatus::Completed => (icon::OK.to_string(), Style::default().fg(theme.success)),
@@ -416,10 +448,21 @@ fn render_dashboard(model: &Model, f: &mut Frame, area: Rect, theme: &Theme) {
                 ),
                 TodoStatus::Pending => ("•".to_string(), theme.subtle()),
             };
-            lines.push(Line::from(vec![
+            // Tag the active task with the agent(s) working it (team mode).
+            let agent_tag = if todo.status == TodoStatus::InProgress && !working_roles.is_empty() {
+                format!(" ◐ {}", working_roles.join(", "))
+            } else {
+                String::new()
+            };
+            let body_w = w.saturating_sub(2 + agent_tag.chars().count());
+            let mut spans = vec![
                 Span::styled(format!("{mark} "), style),
-                Span::styled(truncate(&todo.content, w.saturating_sub(2)), theme.body()),
-            ]));
+                Span::styled(truncate(&todo.content, body_w), theme.body()),
+            ];
+            if !agent_tag.is_empty() {
+                spans.push(Span::styled(agent_tag, theme.accent()));
+            }
+            lines.push(Line::from(spans));
         }
     }
 
@@ -1329,14 +1372,19 @@ mod tests {
                 status: AgentStatus::Done,
             },
         ];
-        // Wide enough for both side panes.
+        // Wide enough for both side panes. Default tab = Workspaces.
         let out = render_to_string(&mut model, 130, 30);
-        assert!(out.contains("workspaces"), "workspaces pane title");
-        assert!(out.contains("blumi-cli"), "workspace entry");
-        assert!(out.contains("sessions"), "sessions pane title");
-        assert!(out.contains("fix parser"), "session entry");
+        assert!(out.contains("explorer"), "explorer pane");
+        assert!(out.contains("Workspaces"), "workspaces tab");
+        assert!(out.contains("Sessions"), "sessions tab");
+        assert!(out.contains("blumi-cli"), "workspace entry (active tab)");
         assert!(out.contains("Active agents"), "active-agents section");
         assert!(out.contains("Coder"), "agent role");
+
+        // Switch to the Sessions tab → the session list shows.
+        model.sidebar_tab = crate::model::SidebarTab::Sessions;
+        let out = render_to_string(&mut model, 130, 30);
+        assert!(out.contains("fix parser"), "session entry (sessions tab)");
     }
 
     #[test]
