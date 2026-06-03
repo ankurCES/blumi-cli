@@ -38,7 +38,11 @@ pub const COMMANDS: &[CommandDef] = &[
     },
     CommandDef {
         name: "/tasks",
-        desc: "toggle the run dashboard",
+        desc: "toggle the right dashboard sidebar",
+    },
+    CommandDef {
+        name: "/dashboard",
+        desc: "open the full dashboard as a popup (all metrics)",
     },
     CommandDef {
         name: "/dashboard",
@@ -233,7 +237,8 @@ pub async fn run(model: &mut Model, session: &SessionHandle, line: &str) {
                 model.entries.push(Entry::Notice("nothing to retry".into()));
             }
         }
-        "/tasks" | "/dashboard" => model.show_dashboard = !model.show_dashboard,
+        "/tasks" => model.show_dashboard = !model.show_dashboard,
+        "/dashboard" => model.toggle_dash_modal(),
         "/usage" => model.open_usage(),
         "/board" => model.open_board(),
         "/loop" => {

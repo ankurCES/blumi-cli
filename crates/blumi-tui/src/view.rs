@@ -68,7 +68,8 @@ pub fn render(model: &mut Model, f: &mut Frame) {
     if show_right {
         render_dashboard(model, f, cols[ci], &theme);
     } else {
-        model.dash_area = None;
+        model.agents_pane.area = None;
+        model.tasks_pane.area = None;
     }
 
     if model.is_empty() {
@@ -99,6 +100,9 @@ pub fn render(model: &mut Model, f: &mut Frame) {
     }
     if model.board_view.is_some() {
         render_board(model, f, area, &theme);
+    }
+    if model.dash_modal {
+        render_dashboard_modal(model, f, area, &theme);
     }
     // Slash-command popup floats just above the editor.
     if model.slash_active() {
@@ -246,15 +250,11 @@ fn render_sidebar(model: &mut Model, f: &mut Frame, area: Rect, theme: &Theme) {
     }
 }
 
-/// The agent dashboard: live session state, context usage, tasks, recent tool
-/// activity, and recent sessions — the run turned into a terminal cockpit.
+/// The agent dashboard (right pane): a fixed metrics header on top, then two
+/// independently-scrollable sub-panels — active agents and tasks. The full set
+/// (incl. activity + recent sessions) lives in the `/dashboard` modal.
 fn render_dashboard(model: &mut Model, f: &mut Frame, area: Rect, theme: &Theme) {
-    // A pulsing "live agent" dot: amber while working, green when ready.
-    let dot_color = if model.busy {
-        crate::mascot::pulse_color(0xFF, 0xC0, 0x4F, model.spinner_frame)
-    } else {
-        crate::mascot::pulse_color(0x4F, 0xE0, 0xA0, model.spinner_frame)
-    };
+    let dot_color = dash_dot(model);
     let focused = model.focus == Focus::Dashboard;
     let block = Block::default()
         .borders(Borders::LEFT)
@@ -269,63 +269,126 @@ fn render_dashboard(model: &mut Model, f: &mut Frame, area: Rect, theme: &Theme)
                 Style::default().fg(dot_color).add_modifier(Modifier::BOLD),
             ),
             Span::styled("agent ", theme.bold_primary()),
-            if focused {
-                Span::styled("▾ scroll ", theme.subtle())
-            } else {
-                Span::raw("")
-            },
         ]));
     let inner = block.inner(area);
     f.render_widget(block, area);
     let w = inner.width.saturating_sub(1) as usize;
 
+    let metrics = metrics_lines(model, theme, w, dot_color);
+    let agents = agent_lines(model, theme, w);
+    let tasks = task_lines(model, theme, w);
+
+    // Fixed metrics header; clips on a very short pane (the /dashboard modal
+    // shows everything in full). The rest splits into two scroll panels.
+    let metrics_h = (metrics.len() as u16).min(inner.height.saturating_sub(6).max(1));
+    let [m_area, rest] =
+        Layout::vertical([Constraint::Length(metrics_h), Constraint::Min(0)]).areas(inner);
+    f.render_widget(Paragraph::new(metrics), m_area);
+
+    let [a_area, t_area] =
+        Layout::vertical([Constraint::Percentage(50), Constraint::Percentage(50)]).areas(rest);
+    let agents_sel = focused && model.dash_panel == crate::model::DashPanel::Agents;
+    let tasks_sel = focused && model.dash_panel == crate::model::DashPanel::Tasks;
+    let a_title = format!("active agents{}", agents_badge(model));
+    let t_title = format!("tasks{}", tasks_badge(model));
+    render_sub_panel(
+        f,
+        a_area,
+        theme,
+        &a_title,
+        agents,
+        agents_sel,
+        &mut model.agents_pane,
+    );
+    render_sub_panel(
+        f,
+        t_area,
+        theme,
+        &t_title,
+        tasks,
+        tasks_sel,
+        &mut model.tasks_pane,
+    );
+}
+
+/// A pulsing "live agent" dot: amber while working, green when ready.
+fn dash_dot(model: &Model) -> Color {
+    if model.busy {
+        crate::mascot::pulse_color(0xFF, 0xC0, 0x4F, model.spinner_frame)
+    } else {
+        crate::mascot::pulse_color(0x4F, 0xE0, 0xA0, model.spinner_frame)
+    }
+}
+
+fn agents_badge(model: &Model) -> String {
+    if model.agents.is_empty() {
+        return String::new();
+    }
+    let working = model
+        .agents
+        .iter()
+        .filter(|a| a.status == crate::model::AgentStatus::Working)
+        .count();
+    format!("  {working}▸/{}", model.agents.len())
+}
+
+fn tasks_badge(model: &Model) -> String {
+    let total = model.todos.len();
+    if total == 0 {
+        return String::new();
+    }
+    let done = model
+        .todos
+        .iter()
+        .filter(|t| t.status == TodoStatus::Completed)
+        .count();
+    format!("  {done}/{total}")
+}
+
+/// A titled, top-bordered, scrollable dashboard sub-panel.
+fn render_sub_panel(
+    f: &mut Frame,
+    area: Rect,
+    theme: &Theme,
+    title: &str,
+    lines: Vec<Line<'static>>,
+    selected: bool,
+    pane: &mut crate::model::ScrollPane,
+) {
+    let style = if selected {
+        theme.bold_primary()
+    } else {
+        theme.dim()
+    };
+    let block = Block::default()
+        .borders(Borders::TOP)
+        .border_style(style)
+        .title(Span::styled(
+            format!(" {title} "),
+            if selected {
+                theme.bold_primary()
+            } else {
+                theme.subtle()
+            },
+        ));
+    let inner = block.inner(area);
+    f.render_widget(block, area);
+    pane.record(inner.x, inner.y, inner.width, inner.height, lines.len());
+    f.render_widget(Paragraph::new(lines).scroll((pane.scroll as u16, 0)), inner);
+}
+
+/// Metrics header: logo + session + context + usage + goal.
+fn metrics_lines(model: &Model, theme: &Theme, w: usize, dot_color: Color) -> Vec<Line<'static>> {
     let mut lines: Vec<Line> = Vec::new();
     let model_name = if model.model_name.is_empty() {
         "default"
     } else {
         &model.model_name
     };
-
-    // ── Brand logo crowning the pane: small flower + multicolor wordmark ──
     for line in crate::mascot::brand_logo(model.spinner_frame) {
         lines.push(line);
     }
     lines.push(Line::raw(""));
-
-    // ── Active agents (the team) — directly under the logo ─────
-    if !model.agents.is_empty() {
-        let working = model
-            .agents
-            .iter()
-            .filter(|a| a.status == crate::model::AgentStatus::Working)
-            .count();
-        lines.push(section(&format!("Active agents  {working}▸"), theme));
-        for a in &model.agents {
-            let (glyph, gstyle) = match a.status {
-                crate::model::AgentStatus::Working => (
-                    crate::mascot::spinner(model.spinner_frame).to_string(),
-                    theme.accent(),
-                ),
-                crate::model::AgentStatus::Done => {
-                    (icon::OK.to_string(), Style::default().fg(theme.success))
-                }
-                crate::model::AgentStatus::Failed => {
-                    ("✗".to_string(), Style::default().fg(theme.error))
-                }
-            };
-            lines.push(Line::from(vec![
-                Span::styled(format!("{glyph} "), gstyle),
-                Span::styled(truncate(&a.role, w.saturating_sub(2)), theme.bold_primary()),
-            ]));
-            lines.push(Line::from(Span::styled(
-                format!("   {}", truncate(&a.task, w.saturating_sub(3))),
-                theme.subtle(),
-            )));
-        }
-        lines.push(Line::raw(""));
-    }
-
-    // ── Session ───────────────────────────────────────────────
     lines.push(section("Session", theme));
     lines.push(Line::from(vec![
         Span::styled(format!("{:>7} ", "status"), theme.dim()),
@@ -374,15 +437,13 @@ fn render_dashboard(model: &mut Model, f: &mut Frame, area: Rect, theme: &Theme)
         },
         theme,
     ));
-
-    // ── Context usage ─────────────────────────────────────────
     lines.push(Line::raw(""));
     lines.push(section("Context", theme));
     let frac = model.context_frac();
     let bar_color = if frac > 0.85 {
         theme.error
     } else if frac > 0.6 {
-        Color::Indexed(214) // amber
+        Color::Indexed(214)
     } else {
         theme.success
     };
@@ -399,8 +460,6 @@ fn render_dashboard(model: &mut Model, f: &mut Frame, area: Rect, theme: &Theme)
         ),
         theme.subtle(),
     )));
-
-    // ── Usage ─────────────────────────────────────────────────
     lines.push(Line::raw(""));
     lines.push(section("Usage", theme));
     lines.push(kv(
@@ -414,15 +473,12 @@ fn render_dashboard(model: &mut Model, f: &mut Frame, area: Rect, theme: &Theme)
     ));
     lines.push(kv("turns", &model.turn_count.to_string(), theme));
     lines.push(kv("tools", &model.tools_run().to_string(), theme));
-    // Estimated spend (list price × billed tokens); "n/a" for unpriced models.
     let cost = if crate::cost::is_priced(&model.model_name) {
         format!("~${:.4}", model.cost_usd)
     } else {
         "n/a".to_string()
     };
     lines.push(kv("cost", &cost, theme));
-
-    // ── Goal (if set) ─────────────────────────────────────────
     if !model.goal.is_empty() {
         lines.push(Line::raw(""));
         lines.push(section("Goal", theme));
@@ -430,59 +486,96 @@ fn render_dashboard(model: &mut Model, f: &mut Frame, area: Rect, theme: &Theme)
             lines.push(l);
         }
     }
+    lines
+}
 
-    // ── Tasks ─────────────────────────────────────────────────
+/// Active-agents rows (agents sub-panel + modal).
+fn agent_lines(model: &Model, theme: &Theme, w: usize) -> Vec<Line<'static>> {
+    let mut lines: Vec<Line> = Vec::new();
+    if model.agents.is_empty() {
+        lines.push(Line::from(Span::styled(
+            "  (no active agents)",
+            theme.dim(),
+        )));
+        return lines;
+    }
+    for a in &model.agents {
+        let (glyph, gstyle) = match a.status {
+            crate::model::AgentStatus::Working => (
+                crate::mascot::spinner(model.spinner_frame).to_string(),
+                theme.accent(),
+            ),
+            crate::model::AgentStatus::Done => {
+                (icon::OK.to_string(), Style::default().fg(theme.success))
+            }
+            crate::model::AgentStatus::Failed => {
+                ("✗".to_string(), Style::default().fg(theme.error))
+            }
+        };
+        lines.push(Line::from(vec![
+            Span::styled(format!("{glyph} "), gstyle),
+            Span::styled(truncate(&a.role, w.saturating_sub(2)), theme.bold_primary()),
+        ]));
+        lines.push(Line::from(Span::styled(
+            format!("   {}", truncate(&a.task, w.saturating_sub(3))),
+            theme.subtle(),
+        )));
+    }
+    lines
+}
+
+/// Task rows (tasks sub-panel + modal).
+fn task_lines(model: &Model, theme: &Theme, w: usize) -> Vec<Line<'static>> {
+    let mut lines: Vec<Line> = Vec::new();
     let total = model.todos.len();
+    if total == 0 {
+        lines.push(Line::from(Span::styled("  (none yet)", theme.dim())));
+        return lines;
+    }
     let done = model
         .todos
         .iter()
         .filter(|t| t.status == TodoStatus::Completed)
         .count();
-    lines.push(Line::raw(""));
-    lines.push(section(&format!("Tasks  {done}/{total}"), theme));
-    if total == 0 {
-        lines.push(Line::from(Span::styled("  (none yet)", theme.dim())));
-    } else {
-        lines.push(Line::from(Span::styled(
-            bar(done as f64 / total as f64, w),
-            Style::default().fg(theme.success),
-        )));
-        // Which team members are working right now (shown against the active task).
-        let working_roles: Vec<&str> = model
-            .agents
-            .iter()
-            .filter(|a| a.status == crate::model::AgentStatus::Working)
-            .map(|a| a.role.as_str())
-            .collect();
-        for todo in &model.todos {
-            let (mark, style) = match todo.status {
-                TodoStatus::Completed => (icon::OK.to_string(), Style::default().fg(theme.success)),
-                // In-flight tasks get an animated spinner.
-                TodoStatus::InProgress => (
-                    crate::mascot::spinner(model.spinner_frame).to_string(),
-                    theme.accent(),
-                ),
-                TodoStatus::Pending => ("•".to_string(), theme.subtle()),
-            };
-            // Tag the active task with the agent(s) working it (team mode).
-            let agent_tag = if todo.status == TodoStatus::InProgress && !working_roles.is_empty() {
-                format!(" ◐ {}", working_roles.join(", "))
-            } else {
-                String::new()
-            };
-            let body_w = w.saturating_sub(2 + agent_tag.chars().count());
-            let mut spans = vec![
-                Span::styled(format!("{mark} "), style),
-                Span::styled(truncate(&todo.content, body_w), theme.body()),
-            ];
-            if !agent_tag.is_empty() {
-                spans.push(Span::styled(agent_tag, theme.accent()));
-            }
-            lines.push(Line::from(spans));
+    lines.push(Line::from(Span::styled(
+        bar(done as f64 / total as f64, w),
+        Style::default().fg(theme.success),
+    )));
+    let working_roles: Vec<&str> = model
+        .agents
+        .iter()
+        .filter(|a| a.status == crate::model::AgentStatus::Working)
+        .map(|a| a.role.as_str())
+        .collect();
+    for todo in &model.todos {
+        let (mark, style) = match todo.status {
+            TodoStatus::Completed => (icon::OK.to_string(), Style::default().fg(theme.success)),
+            TodoStatus::InProgress => (
+                crate::mascot::spinner(model.spinner_frame).to_string(),
+                theme.accent(),
+            ),
+            TodoStatus::Pending => ("•".to_string(), theme.subtle()),
+        };
+        let agent_tag = if todo.status == TodoStatus::InProgress && !working_roles.is_empty() {
+            format!(" ◐ {}", working_roles.join(", "))
+        } else {
+            String::new()
+        };
+        let body_w = w.saturating_sub(2 + agent_tag.chars().count());
+        let mut spans = vec![
+            Span::styled(format!("{mark} "), style),
+            Span::styled(truncate(&todo.content, body_w), theme.body()),
+        ];
+        if !agent_tag.is_empty() {
+            spans.push(Span::styled(agent_tag, theme.accent()));
         }
+        lines.push(Line::from(spans));
     }
+    lines
+}
 
-    // ── Activity (recent tool calls; running ones spin) ───────
+/// Recent tool-call activity rows (modal only).
+fn activity_lines(model: &Model, theme: &Theme, w: usize) -> Vec<Line<'static>> {
     let mut tools: Vec<(&str, Option<bool>)> = model
         .entries
         .iter()
@@ -491,33 +584,49 @@ fn render_dashboard(model: &mut Model, f: &mut Frame, area: Rect, theme: &Theme)
             Entry::Tool { name, ok, .. } => Some((name.as_str(), *ok)),
             _ => None,
         })
-        .take(5)
+        .take(8)
         .collect();
     tools.reverse();
-    if !tools.is_empty() {
+    let mut lines: Vec<Line> = Vec::new();
+    for (name, ok) in tools {
+        let (mark, style) = match ok {
+            Some(true) => (icon::OK.to_string(), Style::default().fg(theme.success)),
+            Some(false) => (icon::ERR.to_string(), Style::default().fg(theme.error)),
+            None => (
+                crate::mascot::spinner(model.spinner_frame).to_string(),
+                theme.accent(),
+            ),
+        };
+        lines.push(Line::from(vec![
+            Span::styled(format!("{mark} "), style),
+            Span::styled(truncate(name, w.saturating_sub(2)), theme.subtle()),
+        ]));
+    }
+    lines
+}
+
+/// Everything, with section headers, for the `/dashboard` modal.
+fn all_dash_lines(model: &Model, theme: &Theme, w: usize) -> Vec<Line<'static>> {
+    let mut lines = metrics_lines(model, theme, w, dash_dot(model));
+    lines.push(Line::raw(""));
+    lines.push(section(
+        &format!("Active agents{}", agents_badge(model)),
+        theme,
+    ));
+    lines.extend(agent_lines(model, theme, w));
+    lines.push(Line::raw(""));
+    lines.push(section(&format!("Tasks{}", tasks_badge(model)), theme));
+    lines.extend(task_lines(model, theme, w));
+    let act = activity_lines(model, theme, w);
+    if !act.is_empty() {
         lines.push(Line::raw(""));
         lines.push(section("Activity", theme));
-        for (name, ok) in tools {
-            let (mark, style) = match ok {
-                Some(true) => (icon::OK.to_string(), Style::default().fg(theme.success)),
-                Some(false) => (icon::ERR.to_string(), Style::default().fg(theme.error)),
-                None => (
-                    crate::mascot::spinner(model.spinner_frame).to_string(),
-                    theme.accent(),
-                ),
-            };
-            lines.push(Line::from(vec![
-                Span::styled(format!("{mark} "), style),
-                Span::styled(truncate(name, w.saturating_sub(2)), theme.subtle()),
-            ]));
-        }
+        lines.extend(act);
     }
-
-    // ── Sessions (recent history) ─────────────────────────────
     if !model.recent_sessions.is_empty() {
         lines.push(Line::raw(""));
         lines.push(section("Sessions", theme));
-        for (_, title) in model.recent_sessions.iter().take(3) {
+        for (_, title) in model.recent_sessions.iter().take(8) {
             let title = if title.is_empty() {
                 "(untitled)"
             } else {
@@ -529,16 +638,33 @@ fn render_dashboard(model: &mut Model, f: &mut Frame, area: Rect, theme: &Theme)
             ]));
         }
     }
+    lines
+}
 
-    // Record geometry + clamp the scroll so the wheel can pan this pane on its
-    // own (it often overflows: logo + agents + session + context + usage + tasks).
-    let total = lines.len();
-    let max_scroll = total.saturating_sub(inner.height as usize);
-    let scroll = model.dash_scroll.min(max_scroll);
-    f.render_widget(Paragraph::new(lines).scroll((scroll as u16, 0)), inner);
-    model.dash_lines = total;
-    model.dash_area = Some((inner.x, inner.y, inner.width, inner.height));
-    model.dash_scroll = scroll;
+/// The `/dashboard` full-screen modal: a centered, scrollable overlay showing
+/// every metric in full.
+fn render_dashboard_modal(model: &mut Model, f: &mut Frame, area: Rect, theme: &Theme) {
+    let popup = centered_rect(72, 84, area);
+    f.render_widget(Clear, popup);
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .border_type(BorderType::Rounded)
+        .border_style(theme.bold_primary())
+        .title(Span::styled(
+            " dashboard — esc close · ↑/↓ pgup/pgdn scroll ",
+            theme.bold_primary(),
+        ));
+    let inner = block.inner(popup);
+    f.render_widget(block, popup);
+    let w = inner.width.saturating_sub(1) as usize;
+    let lines = all_dash_lines(model, theme, w);
+    model
+        .modal_pane
+        .record(inner.x, inner.y, inner.width, inner.height, lines.len());
+    f.render_widget(
+        Paragraph::new(lines).scroll((model.modal_pane.scroll as u16, 0)),
+        inner,
+    );
 }
 
 /// Format a token count compactly: `1.2k`, `131k`, `42`.
@@ -1511,13 +1637,34 @@ mod tests {
         assert!(out.contains("Workspaces"), "workspaces tab");
         assert!(out.contains("Sessions"), "sessions tab");
         assert!(out.contains("blumi-cli"), "workspace entry (active tab)");
-        assert!(out.contains("Active agents"), "active-agents section");
+        assert!(
+            out.to_lowercase().contains("active agents"),
+            "active-agents sub-panel"
+        );
         assert!(out.contains("Coder"), "agent role");
 
         // Switch to the Sessions tab → the session list shows.
         model.sidebar_tab = crate::model::SidebarTab::Sessions;
         let out = render_to_string(&mut model, 130, 30);
         assert!(out.contains("fix parser"), "session entry (sessions tab)");
+    }
+
+    #[test]
+    fn dashboard_modal_shows_all_sections() {
+        let mut model = Model::new("claude".into(), "/tmp".into());
+        model.entries.push(Entry::User("hi".into()));
+        model.todos.push(blumi_protocol::Todo {
+            id: "1".into(),
+            content: "ship the parser".into(),
+            status: TodoStatus::InProgress,
+        });
+        model.dash_modal = true;
+        // Tall enough that all sections fit above the fold (no scroll needed).
+        let out = render_to_string(&mut model, 120, 50);
+        assert!(out.contains("dashboard"), "modal title");
+        assert!(out.contains("Context"), "metrics section");
+        assert!(out.contains("Tasks"), "tasks section");
+        assert!(out.contains("ship the parser"), "task content");
     }
 
     #[test]
@@ -1753,6 +1900,6 @@ mod tests {
         assert!(out.contains('╭'), "card top border");
         assert!(out.contains("agent"), "dashboard agent panel");
         assert!(out.contains("Context"), "context section");
-        assert!(out.contains("Tasks"), "tasks section");
+        assert!(out.contains("tasks"), "tasks sub-panel");
     }
 }

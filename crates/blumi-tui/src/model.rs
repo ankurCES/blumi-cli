@@ -126,6 +126,55 @@ pub struct ToolRun {
     pub charms: u8,
 }
 
+/// An independently-scrollable panel: tracks its own scroll offset, on-screen
+/// rect, and content length so the wheel/keys can pan it in isolation.
+#[derive(Default)]
+pub struct ScrollPane {
+    pub scroll: usize,
+    pub lines: usize,
+    pub area: Option<(u16, u16, u16, u16)>,
+}
+
+impl ScrollPane {
+    fn view_h(&self) -> usize {
+        self.area.map_or(0, |(_, _, _, h)| h as usize)
+    }
+
+    /// Largest valid scroll offset (so the last line sits at the bottom).
+    pub fn max_scroll(&self) -> usize {
+        self.lines.saturating_sub(self.view_h())
+    }
+
+    /// Scroll by `delta` lines, clamped. `isize::MIN`/`MAX` jump to top/bottom.
+    pub fn scroll_by(&mut self, delta: isize) {
+        let max = self.max_scroll() as isize;
+        self.scroll = (self.scroll as isize).saturating_add(delta).clamp(0, max) as usize;
+    }
+
+    /// Record geometry + content length at render time, re-clamping the offset.
+    pub fn record(&mut self, x: u16, y: u16, w: u16, h: u16, lines: usize) {
+        self.area = Some((x, y, w, h));
+        self.lines = lines;
+        let max = self.max_scroll();
+        if self.scroll > max {
+            self.scroll = max;
+        }
+    }
+
+    /// Whether (col,row) falls inside this panel's recorded rect.
+    pub fn hit(&self, col: u16, row: u16) -> bool {
+        self.area
+            .is_some_and(|(x, y, w, h)| col >= x && col < x + w && row >= y && row < y + h)
+    }
+}
+
+/// Which dashboard sub-panel the keyboard scrolls.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DashPanel {
+    Agents,
+    Tasks,
+}
+
 /// A request to switch the active session, handled by the app loop.
 #[derive(Debug, Clone)]
 pub enum SessionRequest {
@@ -240,10 +289,14 @@ pub struct Model {
     /// recorded at render time for click-to-select / click-to-switch-tab.
     pub sidebar_list_area: Option<(u16, u16, u16, u16)>,
     pub sidebar_tab_area: Option<(u16, u16, u16, u16)>,
-    /// Right dashboard pane geometry + scroll, so the wheel can pan it on its own.
-    pub dash_area: Option<(u16, u16, u16, u16)>,
-    pub dash_scroll: usize,
-    pub dash_lines: usize,
+    /// Independently-scrollable dashboard sub-panels (active agents, tasks).
+    pub agents_pane: ScrollPane,
+    pub tasks_pane: ScrollPane,
+    /// Which sub-panel the keyboard scrolls (when the dashboard is focused).
+    pub dash_panel: DashPanel,
+    /// The `/dashboard` full-screen modal: open flag + its own scroll pane.
+    pub dash_modal: bool,
+    pub modal_pane: ScrollPane,
     /// Rendered memory text when the `/memory` overlay is open.
     pub memory_view: Option<String>,
     /// Rendered usage analytics when the `/usage` overlay is open.
@@ -348,9 +401,11 @@ impl Model {
             dialog_list_area: None,
             sidebar_list_area: None,
             sidebar_tab_area: None,
-            dash_area: None,
-            dash_scroll: 0,
-            dash_lines: 0,
+            agents_pane: ScrollPane::default(),
+            tasks_pane: ScrollPane::default(),
+            dash_panel: DashPanel::Agents,
+            dash_modal: false,
+            modal_pane: ScrollPane::default(),
             memory_view: None,
             usage_view: None,
             board_view: None,
@@ -662,13 +717,28 @@ impl Model {
 
     /// Scroll the right dashboard pane by `delta` lines (clamped to its content).
     /// `isize::MIN`/`MAX` jump to top/bottom.
+    /// Scroll the keyboard-selected dashboard sub-panel by `delta` lines.
     pub fn scroll_dashboard(&mut self, delta: isize) {
-        let view_h = self.dash_area.map(|(_, _, _, h)| h as usize).unwrap_or(0);
-        let max = self.dash_lines.saturating_sub(view_h) as isize;
-        let next = (self.dash_scroll as isize)
-            .saturating_add(delta)
-            .clamp(0, max);
-        self.dash_scroll = next as usize;
+        match self.dash_panel {
+            DashPanel::Agents => self.agents_pane.scroll_by(delta),
+            DashPanel::Tasks => self.tasks_pane.scroll_by(delta),
+        }
+    }
+
+    /// Switch which dashboard sub-panel the keyboard scrolls.
+    pub fn cycle_dash_panel(&mut self) {
+        self.dash_panel = match self.dash_panel {
+            DashPanel::Agents => DashPanel::Tasks,
+            DashPanel::Tasks => DashPanel::Agents,
+        };
+    }
+
+    /// Open/close the `/dashboard` full-screen modal.
+    pub fn toggle_dash_modal(&mut self) {
+        self.dash_modal = !self.dash_modal;
+        if self.dash_modal {
+            self.modal_pane.scroll = 0;
+        }
     }
 
     /// Number of tool calls in the transcript.
