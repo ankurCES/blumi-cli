@@ -12,6 +12,11 @@ pub struct Theme {
     pub fg_dim: Color,
     pub success: Color,
     pub error: Color,
+    /// A slightly-raised panel/chip fill (focused panels, footer chips). We never
+    /// paint a global background; only panels/chips opt into this.
+    pub surface: Color,
+    /// Idle panel border (quieter than `fg_dim`).
+    pub border: Color,
 }
 
 impl Default for Theme {
@@ -54,6 +59,8 @@ impl Theme {
             fg_dim: rgb(0x8C6571),
             success: rgb(0x4FE0A0), // Julep
             error: rgb(0xFF5470),   // Sriracha
+            surface: rgb(0x2A1722), // raised rose panel
+            border: rgb(0x5A3A47),
         }
     }
 
@@ -69,6 +76,8 @@ impl Theme {
             fg_dim: rgb(0x605F6B),
             success: rgb(0x00FFB2), // Julep
             error: rgb(0xEB4268),   // Sriracha
+            surface: rgb(0x1B1630),
+            border: rgb(0x39354F),
         }
     }
 
@@ -83,6 +92,8 @@ impl Theme {
             fg_dim: rgb(0x6E6488),
             success: rgb(0x00FFB2),
             error: rgb(0xEB4268),
+            surface: rgb(0x201A38),
+            border: rgb(0x3E3560),
         }
     }
 
@@ -97,6 +108,8 @@ impl Theme {
             fg_dim: Color::Indexed(240),
             success: Color::Indexed(114),
             error: Color::Indexed(203),
+            surface: Color::Indexed(235),
+            border: Color::Indexed(239),
         }
     }
 
@@ -111,6 +124,8 @@ impl Theme {
             fg_dim: Color::Indexed(239),
             success: Color::Indexed(114),
             error: Color::Indexed(203),
+            surface: Color::Indexed(235),
+            border: Color::Indexed(238),
         }
     }
 
@@ -125,6 +140,8 @@ impl Theme {
             fg_dim: Color::Indexed(239),
             success: Color::Indexed(246),
             error: Color::Indexed(210),
+            surface: Color::Indexed(236),
+            border: Color::Indexed(240),
         }
     }
 
@@ -148,6 +165,46 @@ impl Theme {
         Style::default()
             .fg(self.primary)
             .add_modifier(Modifier::BOLD)
+    }
+
+    /// A raised panel/chip fill. Honors the `FILL_PANELS` kill switch so
+    /// transparency-loving terminals can opt out (env `BLUMI_NO_FILL`).
+    pub fn surface(&self) -> Style {
+        if FILL_PANELS.load(std::sync::atomic::Ordering::Relaxed) {
+            Style::default().bg(self.surface)
+        } else {
+            Style::default()
+        }
+    }
+    /// Style for an idle (unfocused) panel border + its title.
+    pub fn border(&self) -> Style {
+        Style::default().fg(self.border)
+    }
+    /// Style for a focused panel border + its title accent.
+    pub fn panel_focus(&self) -> Style {
+        Style::default()
+            .fg(self.primary)
+            .add_modifier(Modifier::BOLD)
+    }
+    /// A footer key-chip: the keycap half (bright accent on surface).
+    pub fn chip_key(&self) -> Style {
+        self.surface().fg(self.accent).add_modifier(Modifier::BOLD)
+    }
+    /// A footer key-chip: the label half (subtle on surface).
+    pub fn chip_label(&self) -> Style {
+        self.surface().fg(self.fg_subtle)
+    }
+}
+
+/// Global kill-switch for panel/chip background fills. Defaults on; set the env
+/// var `BLUMI_NO_FILL` (any value) to render borderless/transparent instead —
+/// helps terminals that ignore or mangle background colors.
+pub static FILL_PANELS: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(true);
+
+/// Initialize [`FILL_PANELS`] from the environment. Call once at startup.
+pub fn init_fill_from_env() {
+    if std::env::var_os("BLUMI_NO_FILL").is_some() {
+        FILL_PANELS.store(false, std::sync::atomic::Ordering::Relaxed);
     }
 }
 

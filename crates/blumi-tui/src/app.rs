@@ -141,6 +141,7 @@ pub struct TuiConfig {
 /// Run the interactive TUI, sourcing sessions from `factory`. Restores the
 /// terminal on exit (including on error).
 pub async fn run(factory: Arc<dyn SessionFactory>, cfg: TuiConfig) -> anyhow::Result<()> {
+    crate::theme::init_fill_from_env();
     let mut terminal = setup_terminal()?;
     let result = run_loop(&mut terminal, factory, cfg).await;
     let _ = teardown_terminal(&mut terminal);
