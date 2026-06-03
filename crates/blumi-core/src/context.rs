@@ -6,7 +6,7 @@
 use crate::emit::EventEmitter;
 use crate::llm::{LlmClient, LlmOptions};
 use crate::session::SessionState;
-use blumi_protocol::{Event, Message, StreamChunk};
+use blumi_protocol::{Event, Message, Role, StreamChunk};
 use futures::StreamExt;
 use std::sync::Arc;
 use tokio::sync::Mutex;
@@ -106,16 +106,22 @@ impl ContextManager {
             st.messages.clone()
         };
 
-        let cutoff = messages.len() - self.keep_messages;
+        let cutoff = safe_cutoff(&messages, self.keep_messages);
+        if cutoff == 0 {
+            return false;
+        }
         let Some(summary) = self.summarize(llm, &messages[..cutoff], options, ct).await else {
             return false;
         };
 
         let (compressed, tokens_after) = {
             let mut st = state.lock().await;
-            // Re-check the cutoff against current length (the turn may have
-            // appended since we cloned); clamp to be safe.
-            let cutoff = cutoff.min(st.messages.len().saturating_sub(self.keep_messages));
+            // Re-derive the cutoff against current length (the turn may have
+            // appended since we cloned). `safe_cutoff` also never starts the kept
+            // tail on a tool_result — otherwise its matching tool_use would be in
+            // the summarized (dropped) portion, leaving an orphan that the
+            // provider rejects with a 400 on the next request.
+            let cutoff = safe_cutoff(&st.messages, self.keep_messages);
             if cutoff == 0 {
                 return false;
             }
@@ -179,6 +185,22 @@ impl ContextManager {
     }
 }
 
+/// Where to split history for compaction: keep the last `keep` messages, but
+/// never let the kept tail *begin* with a tool result — its matching `tool_use`
+/// would be in the summarized (dropped) part, leaving an orphan `tool_result`
+/// that every provider rejects with a 400. Advance the boundary forward past any
+/// leading tool results so the kept tail always starts on a clean message.
+fn safe_cutoff(messages: &[Message], keep: usize) -> usize {
+    if messages.len() <= keep {
+        return 0;
+    }
+    let mut cutoff = messages.len() - keep;
+    while cutoff < messages.len() && messages[cutoff].role == Role::Tool {
+        cutoff += 1;
+    }
+    cutoff
+}
+
 fn render_transcript(messages: &[Message]) -> String {
     let mut out = String::new();
     for m in messages {
@@ -229,6 +251,34 @@ mod tests {
         let small = [Message::user("hi")];
         let big = [Message::user("x".repeat(4000))];
         assert!(ContextManager::estimate_tokens(&big) > ContextManager::estimate_tokens(&small));
+    }
+
+    #[test]
+    fn safe_cutoff_never_starts_tail_on_a_tool_result() {
+        use blumi_protocol::{Role, ToolCall, ToolCallId};
+        let asst = |id: &str| {
+            Message::assistant_tool_calls(
+                None,
+                vec![ToolCall {
+                    id: ToolCallId::from(id),
+                    name: "Bash".into(),
+                    arguments: serde_json::json!({}),
+                }],
+            )
+        };
+        let tool = |id: &str| Message::tool_result(ToolCallId::from(id), "Bash", "out");
+        // u, a(t1), tool(t1), a(t2), tool(t2)
+        let msgs = vec![
+            Message::user("hi"),
+            asst("t1"),
+            tool("t1"),
+            asst("t2"),
+            tool("t2"),
+        ];
+        // keep=3 → naive cutoff=2 lands on tool(t1) (its tool_use would be dropped).
+        let c = safe_cutoff(&msgs, 3);
+        assert_eq!(c, 3, "advanced past the orphan tool result");
+        assert_ne!(msgs[c].role, Role::Tool);
     }
 
     #[test]
