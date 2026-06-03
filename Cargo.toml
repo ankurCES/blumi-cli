@@ -25,6 +25,7 @@ blumi-cron = { path = "crates/blumi-cron" }
 blumi-playbook = { path = "crates/blumi-playbook" }
 blumi-gateway = { path = "crates/blumi-gateway" }
 blumi-voice = { path = "crates/blumi-voice" }
+blumi-task = { path = "crates/blumi-task" }
 blumi-config = { path = "crates/blumi-config" }
 blumi-tui = { path = "crates/blumi-tui" }
 blumi-web = { path = "crates/blumi-web" }

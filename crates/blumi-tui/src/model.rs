@@ -123,6 +123,10 @@ pub struct Model {
     pub memory_view: Option<String>,
     /// Rendered usage analytics when the `/usage` overlay is open.
     pub usage_view: Option<String>,
+    /// Rendered task board when the `/board` overlay is open.
+    pub board_view: Option<String>,
+    /// Path to the persistent task board (`<project>/.blumi/tasks.json`).
+    pub tasks_path: PathBuf,
     /// A pending session switch for the app loop to perform.
     pub session_request: Option<SessionRequest>,
     /// Set when the agent asked to reload itself (self-evolution). The app loop
@@ -188,6 +192,8 @@ impl Model {
             dialog: None,
             memory_view: None,
             usage_view: None,
+            board_view: None,
+            tasks_path: PathBuf::new(),
             session_request: None,
             reload_pending: None,
             model_options: crate::app::ModelOptions::default(),
@@ -331,6 +337,7 @@ impl Model {
         self.dialog = None;
         self.memory_view = None;
         self.usage_view = None;
+        self.board_view = None;
         self.clear_input();
     }
 
@@ -391,6 +398,30 @@ impl Model {
         } else {
             (self.context_tokens as f64 / self.context_size as f64).clamp(0.0, 1.0)
         }
+    }
+
+    /// Build the `/board` overlay from the persistent task board (read fresh).
+    pub fn open_board(&mut self) {
+        let board = blumi_task::TaskBoard::load(&self.tasks_path);
+        let c = board.counts();
+        let mut s = format!(
+            "running {} · queued {} · review {} · done {}",
+            c.doing, c.todo, c.review, c.done
+        );
+        if board.is_empty() {
+            s.push_str("\n\nno tasks yet — add with `blumi task add`, then `blumi loop`");
+        } else {
+            for (i, t) in board.tasks().iter().enumerate() {
+                s.push_str(&format!(
+                    "\n{:>2}. {} P{}  {}",
+                    i + 1,
+                    t.state.icon(),
+                    t.priority,
+                    t.title
+                ));
+            }
+        }
+        self.board_view = Some(s);
     }
 
     /// Build the `/usage` analytics overlay.

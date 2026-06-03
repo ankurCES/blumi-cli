@@ -299,6 +299,7 @@ dependencies = [
  "blumi-playbook",
  "blumi-protocol",
  "blumi-skills",
+ "blumi-task",
  "blumi-tools",
  "blumi-tui",
  "blumi-voice",
@@ -495,6 +496,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "blumi-task"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "serde_json",
+ "tempfile",
+ "time",
+]
+
+[[package]]
 name = "blumi-tools"
 version = "0.1.0"
 dependencies = [
@@ -525,6 +536,7 @@ dependencies = [
  "blumi-config",
  "blumi-core",
  "blumi-protocol",
+ "blumi-task",
  "crossterm",
  "futures",
  "nucleo-matcher",

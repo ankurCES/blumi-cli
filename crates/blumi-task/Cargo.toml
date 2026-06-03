@@ -1,0 +1,15 @@
+[package]
+name = "blumi-task"
+description = "A persistent task board (todo→doing→review→done) for the autonomous loop."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]
+serde.workspace = true
+serde_json.workspace = true
+time.workspace = true
+
+[dev-dependencies]
+tempfile = "3"

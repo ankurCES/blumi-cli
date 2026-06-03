@@ -45,6 +45,10 @@ pub const COMMANDS: &[CommandDef] = &[
         desc: "show token usage",
     },
     CommandDef {
+        name: "/board",
+        desc: "show the task board (blumi loop work queue)",
+    },
+    CommandDef {
         name: "/memory",
         desc: "view saved memory",
     },
@@ -182,6 +186,7 @@ pub async fn run(model: &mut Model, session: &SessionHandle, line: &str) {
         }
         "/tasks" | "/dashboard" => model.show_dashboard = !model.show_dashboard,
         "/usage" => model.open_usage(),
+        "/board" => model.open_board(),
         "/memory" => model.open_memory(),
         "/skills" => {
             if model.skills.is_empty() {

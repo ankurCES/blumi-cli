@@ -61,6 +61,9 @@ pub fn render(model: &mut Model, f: &mut Frame) {
     if model.usage_view.is_some() {
         render_usage(model, f, area, &theme);
     }
+    if model.board_view.is_some() {
+        render_board(model, f, area, &theme);
+    }
     // Slash-command popup floats just above the editor.
     if model.slash_active() {
         render_slash_popup(model, f, editor, &theme);
@@ -337,6 +340,37 @@ fn render_slash_popup(model: &Model, f: &mut Frame, editor: Rect, theme: &Theme)
         })
         .collect();
     f.render_widget(Paragraph::new(rows), inner);
+}
+
+/// The `/board` overlay: the persistent task board (status + counts).
+fn render_board(model: &Model, f: &mut Frame, area: Rect, theme: &Theme) {
+    let Some(text) = &model.board_view else {
+        return;
+    };
+    let popup = centered_rect(64, 60, area);
+    f.render_widget(Clear, popup);
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .border_type(BorderType::Rounded)
+        .border_style(Style::default().fg(theme.primary))
+        .title(Span::styled(
+            " task board — any key to close ",
+            theme.bold_primary(),
+        ));
+    let inner = block.inner(popup);
+    f.render_widget(block, popup);
+
+    let width = inner.width.saturating_sub(1) as usize;
+    let mut lines: Vec<Line> = Vec::new();
+    for (i, raw) in text.lines().enumerate() {
+        let style = if i == 0 {
+            theme.bold_primary() // the running/queued/done summary line
+        } else {
+            theme.body()
+        };
+        lines.push(Line::from(Span::styled(truncate(raw, width), style)));
+    }
+    f.render_widget(Paragraph::new(lines), inner);
 }
 
 /// The `/memory` overlay: shows MEMORY.md + USER.md.

@@ -83,6 +83,8 @@ pub struct TuiConfig {
     pub context_size: u32,
     /// Scheduled cron jobs (name, schedule) for `/cron`.
     pub cron_jobs: Vec<(String, String)>,
+    /// Path to the persistent task board (for the `/board` overlay).
+    pub tasks_path: PathBuf,
 }
 
 /// Run the interactive TUI, sourcing sessions from `factory`. Restores the
@@ -134,6 +136,7 @@ async fn run_loop(
     model.export_dir = cfg.export_dir;
     model.context_size = cfg.context_size;
     model.cron_jobs = cfg.cron_jobs;
+    model.tasks_path = cfg.tasks_path;
 
     let mut session = factory.create().await?;
     let mut events = session.subscribe();

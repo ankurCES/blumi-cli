@@ -4,12 +4,14 @@ mod branding;
 mod cron;
 mod engine;
 mod gateway;
+mod loop_run;
 mod onboarding;
 mod playbook;
 mod prompt;
 mod providers;
 mod run;
 mod session;
+mod task;
 mod tui;
 mod web;
 
@@ -71,6 +73,8 @@ enum Commands {
         #[command(subcommand)]
         action: SessionCmd,
     },
+    /// Aggregate token usage across stored sessions.
+    Stats,
     /// Schedule prompts to run on a timer (cron automations).
     Cron {
         #[command(subcommand)]
@@ -86,6 +90,56 @@ enum Commands {
         #[command(subcommand)]
         action: GatewayCmd,
     },
+    /// Manage the task board (the work queue for `blumi loop`).
+    Task {
+        #[command(subcommand)]
+        action: TaskCmd,
+    },
+    /// Autonomously work the task board: select → run → advance, repeat.
+    Loop {
+        /// Stop after at most N iterations.
+        #[arg(long)]
+        max: Option<u32>,
+        /// Stop once reported cost (USD) reaches this (provider-dependent).
+        #[arg(long)]
+        budget: Option<f64>,
+        /// Auto-approve tool calls (otherwise approval-requiring tools are denied).
+        #[arg(long)]
+        yolo: bool,
+        /// Send finished tasks to "review" instead of "done".
+        #[arg(long)]
+        review: bool,
+        /// Desktop notification when the loop finishes.
+        #[arg(long)]
+        notify: bool,
+    },
+}
+
+#[derive(Subcommand)]
+enum TaskCmd {
+    /// Add a task to the board.
+    Add {
+        /// The task title.
+        title: Vec<String>,
+        /// Priority 1 (highest) .. 4 (lowest).
+        #[arg(long, short, default_value_t = 3)]
+        priority: u8,
+        /// Optional longer detail for the agent.
+        #[arg(long)]
+        detail: Option<String>,
+    },
+    /// List the board with status + counts.
+    List,
+    /// Mark a task in-progress (todo → doing).
+    Start { id: String },
+    /// Mark a task for review (doing → review).
+    Review { id: String },
+    /// Mark a task done.
+    Done { id: String },
+    /// Cancel a task.
+    Cancel { id: String },
+    /// Remove a task from the board.
+    Rm { id: String },
 }
 
 #[derive(Subcommand)]
@@ -241,6 +295,7 @@ async fn main() -> anyhow::Result<()> {
             SessionCmd::Search { query } => session::search(config, query.join(" ")).await,
             SessionCmd::Show { id } => session::show(config, id).await,
         },
+        Some(Commands::Stats) => session::stats(config).await,
         Some(Commands::Cron { action }) => match action {
             CronCmd::Add {
                 name,
@@ -265,5 +320,39 @@ async fn main() -> anyhow::Result<()> {
             } => gateway::run_slack(config, bot_token, app_token).await,
             GatewayCmd::Whatsapp { port } => gateway::run_whatsapp(config, port).await,
         },
+        Some(Commands::Task { action }) => match action {
+            TaskCmd::Add {
+                title,
+                priority,
+                detail,
+            } => task::add(config, title.join(" "), priority, detail),
+            TaskCmd::List => task::list(config),
+            TaskCmd::Start { id } => task::transition(config, id, blumi_task::TaskState::Doing),
+            TaskCmd::Review { id } => task::transition(config, id, blumi_task::TaskState::Review),
+            TaskCmd::Done { id } => task::transition(config, id, blumi_task::TaskState::Done),
+            TaskCmd::Cancel { id } => {
+                task::transition(config, id, blumi_task::TaskState::Cancelled)
+            }
+            TaskCmd::Rm { id } => task::remove(config, id),
+        },
+        Some(Commands::Loop {
+            max,
+            budget,
+            yolo,
+            review,
+            notify,
+        }) => {
+            loop_run::run(
+                config,
+                loop_run::LoopOptions {
+                    max,
+                    budget,
+                    yolo,
+                    review,
+                    notify,
+                },
+            )
+            .await
+        }
     }
 }

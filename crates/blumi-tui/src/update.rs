@@ -57,6 +57,11 @@ async fn handle_term(model: &mut Model, ev: TermEvent, session: &SessionHandle) 
                 model.mark_dirty();
                 return;
             }
+            if model.board_view.is_some() {
+                model.board_view = None;
+                model.mark_dirty();
+                return;
+            }
 
             // A dialog (command palette) captures all keys.
             if model.dialog.is_some() {
