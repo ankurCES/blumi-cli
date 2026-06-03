@@ -17,6 +17,8 @@ pub enum Focus {
     Chat,
     /// The left explorer sidebar (tabbed: workspaces / sessions).
     Sidebar,
+    /// The right agent dashboard pane (scrollable).
+    Dashboard,
 }
 
 /// Which tab the left explorer sidebar is showing.
@@ -656,6 +658,17 @@ impl Model {
     /// Take a pending `/bg` prompt for the app loop to spawn as a background job.
     pub fn take_bg_request(&mut self) -> Option<String> {
         self.bg_request.take()
+    }
+
+    /// Scroll the right dashboard pane by `delta` lines (clamped to its content).
+    /// `isize::MIN`/`MAX` jump to top/bottom.
+    pub fn scroll_dashboard(&mut self, delta: isize) {
+        let view_h = self.dash_area.map(|(_, _, _, h)| h as usize).unwrap_or(0);
+        let max = self.dash_lines.saturating_sub(view_h) as isize;
+        let next = (self.dash_scroll as isize)
+            .saturating_add(delta)
+            .clamp(0, max);
+        self.dash_scroll = next as usize;
     }
 
     /// Number of tool calls in the transcript.
