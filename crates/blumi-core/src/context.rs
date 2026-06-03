@@ -154,35 +154,44 @@ impl ContextManager {
         options: &LlmOptions,
         ct: &CancellationToken,
     ) -> Option<String> {
-        let transcript = render_transcript(messages);
-        let prompt = vec![
-            Message::system(
-                "You compress conversations. Summarize the following so the assistant can \
-                 continue seamlessly: preserve decisions made, files touched, important facts, \
-                 and any unfinished work. Be concise but complete.",
-            ),
-            Message::user(transcript),
-        ];
-
-        let mut stream = match llm
-            .stream_chat(&prompt, &[], options, ct.child_token())
-            .await
-        {
-            Ok(s) => s,
-            Err(_) => return None,
-        };
-
-        let mut summary = String::new();
-        while let Some(chunk) = stream.next().await {
-            match chunk {
-                Ok(StreamChunk::Text { text }) => summary.push_str(&text),
-                Ok(StreamChunk::Done { .. }) => {}
-                Err(_) => return None,
-                _ => {}
-            }
-        }
-        (!summary.trim().is_empty()).then_some(summary)
+        summarize_history(llm, messages, options, &ct.child_token()).await
     }
+}
+
+/// Summarize a conversation into a concise handoff so a fresh context (an
+/// in-place compaction or a rolled-over session) can continue seamlessly.
+/// Returns `None` if the provider errors or yields nothing usable.
+pub async fn summarize_history(
+    llm: &Arc<dyn LlmClient>,
+    messages: &[Message],
+    options: &LlmOptions,
+    ct: &CancellationToken,
+) -> Option<String> {
+    let transcript = render_transcript(messages);
+    let prompt = vec![
+        Message::system(
+            "You compress conversations. Summarize the following so the assistant can \
+             continue seamlessly: preserve decisions made, files touched, important facts, \
+             and any unfinished work. Be concise but complete.",
+        ),
+        Message::user(transcript),
+    ];
+
+    let mut stream = match llm.stream_chat(&prompt, &[], options, ct.clone()).await {
+        Ok(s) => s,
+        Err(_) => return None,
+    };
+
+    let mut summary = String::new();
+    while let Some(chunk) = stream.next().await {
+        match chunk {
+            Ok(StreamChunk::Text { text }) => summary.push_str(&text),
+            Ok(StreamChunk::Done { .. }) => {}
+            Err(_) => return None,
+            _ => {}
+        }
+    }
+    (!summary.trim().is_empty()).then_some(summary)
 }
 
 /// Where to split history for compaction: keep the last `keep` messages, but
