@@ -11,6 +11,7 @@ pub async fn update(model: &mut Model, msg: Msg, session: &SessionHandle) {
     match msg {
         Msg::Tick => {
             model.spinner_frame = model.spinner_frame.wrapping_add(1);
+            tick_tool_charms(model);
             if model.busy {
                 // Accumulate active-with-bot time (tick is ~50ms).
                 model.active_ms += 50;
@@ -27,6 +28,55 @@ pub async fn update(model: &mut Model, msg: Msg, session: &SessionHandle) {
             handle_core(model, env.event, session).await;
             model.mark_dirty();
         }
+        Msg::Bg(u) => {
+            model.bg_count = model.bg_count.saturating_sub(1);
+            let head = if u.ok { "done" } else { "failed" };
+            let body = u.text.trim();
+            let body = if body.is_empty() {
+                "(no output)".to_string()
+            } else if body.chars().count() > 1500 {
+                format!("{}…", body.chars().take(1500).collect::<String>())
+            } else {
+                body.to_string()
+            };
+            model
+                .entries
+                .push(Entry::Notice(format!("⬢ [{}] {head}\n{body}", u.id)));
+            model.mark_dirty();
+        }
+    }
+}
+
+/// A rotating long-run charm (hermes-style), changing every ~10s.
+fn charm_text(secs: u64) -> &'static str {
+    const CHARMS: [&str; 4] = [
+        "🍵 still cooking…",
+        "✨ polishing edges…",
+        "🔮 asking the void nicely…",
+        "⏳ almost there…",
+    ];
+    CHARMS[((secs / 10) as usize) % CHARMS.len()]
+}
+
+/// Per-tool long-run reassurance: for any tool running ≥8s, post a charm every
+/// 10s, capped at 2 per tool (hermes `useLongRunToolCharms`).
+fn tick_tool_charms(model: &mut Model) {
+    let mut fire: Vec<(String, String, u64)> = Vec::new();
+    for (id, run) in model.running_tools.iter() {
+        let secs = run.started.elapsed().as_secs();
+        if run.charms < 2 && secs >= 8 + run.charms as u64 * 10 {
+            fire.push((id.clone(), run.name.clone(), secs));
+        }
+    }
+    for (id, name, secs) in fire {
+        if let Some(run) = model.running_tools.get_mut(&id) {
+            run.charms += 1;
+        }
+        model.entries.push(Entry::Notice(format!(
+            "{} ({name} · {secs}s)",
+            charm_text(secs)
+        )));
+        model.mark_dirty();
     }
 }
 
@@ -443,6 +493,15 @@ async fn handle_core(model: &mut Model, event: Event, session: &SessionHandle) {
         Event::ToolStart {
             id, name, summary, ..
         } => {
+            // Track the running tool so long ones get "still working" charms.
+            model.running_tools.insert(
+                id.as_str().to_string(),
+                crate::model::ToolRun {
+                    started: std::time::Instant::now(),
+                    name: name.clone(),
+                    charms: 0,
+                },
+            );
             model.entries.push(Entry::Tool {
                 id,
                 name,
@@ -456,6 +515,7 @@ async fn handle_core(model: &mut Model, event: Event, session: &SessionHandle) {
         Event::ToolResult {
             id, ok, preview, ..
         } => {
+            model.running_tools.remove(id.as_str());
             if let Some(Entry::Tool {
                 ok: o, preview: p, ..
             }) = find_tool(model, &id)
@@ -562,6 +622,7 @@ async fn handle_core(model: &mut Model, event: Event, session: &SessionHandle) {
             model.thinking = None;
             model.busy = false;
             model.busy_since = None;
+            model.running_tools.clear();
             model.turn_count += 1;
         }
         Event::Notice { message } => {
@@ -807,6 +868,29 @@ mod tests {
     }
     fn test_session() -> SessionHandle {
         blumi_core::spawn_session(blumi_protocol::SessionId::new(), "m", Arc::new(NoopRunner))
+    }
+
+    #[test]
+    fn long_running_tool_posts_a_charm() {
+        let mut m = Model::new("m".into(), "/tmp".into());
+        m.running_tools.insert(
+            "c1".into(),
+            crate::model::ToolRun {
+                started: std::time::Instant::now() - std::time::Duration::from_secs(9),
+                name: "Bash".into(),
+                charms: 0,
+            },
+        );
+        tick_tool_charms(&mut m);
+        // First charm posted at ≥8s; the per-tool counter advances (so it won't spam).
+        assert_eq!(m.running_tools["c1"].charms, 1);
+        assert!(m
+            .entries
+            .iter()
+            .any(|e| matches!(e, Entry::Notice(n) if n.contains("Bash") && n.contains("9s"))));
+        // A second immediate tick must NOT post again (next charm is ~10s later).
+        tick_tool_charms(&mut m);
+        assert_eq!(m.running_tools["c1"].charms, 1);
     }
 
     #[tokio::test]

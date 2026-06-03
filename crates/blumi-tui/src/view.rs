@@ -1221,6 +1221,13 @@ fn render_inforule(model: &Model, f: &mut Frame, area: Rect, theme: &Theme) {
             theme.dim(),
         ));
     }
+    // Background-job count (hermes-style "N bg").
+    if model.bg_count > 0 {
+        spans.push(Span::styled(
+            format!(" │ ⬢ {} bg", model.bg_count),
+            theme.accent(),
+        ));
+    }
 
     // A single-row Paragraph clips to the area width.
     f.render_widget(Paragraph::new(Line::from(spans)), area);
@@ -1509,6 +1516,11 @@ mod tests {
         model.busy_since = Some(std::time::Instant::now());
         let out = render_to_string(&mut model, 100, 24);
         assert!(out.contains("working"), "working indicator while busy");
+
+        // Background jobs surface a "N bg" badge.
+        model.bg_count = 2;
+        let out = render_to_string(&mut model, 100, 24);
+        assert!(out.contains("2 bg"), "background-job count badge");
     }
 
     #[test]

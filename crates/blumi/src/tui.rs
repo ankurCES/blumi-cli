@@ -22,6 +22,12 @@ impl blumi_tui::SessionFactory for TuiSessionFactory {
         build_session(&self.config, false, None).await
     }
 
+    async fn create_background(&self) -> anyhow::Result<SessionHandle> {
+        // Background jobs run unattended — auto-approve so they never block on a
+        // prompt no one can answer.
+        build_session(&self.config, true, None).await
+    }
+
     async fn resume(&self, id: &str) -> anyhow::Result<SessionHandle> {
         let store = self
             .store

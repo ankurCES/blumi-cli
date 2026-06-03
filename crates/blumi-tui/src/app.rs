@@ -2,10 +2,10 @@
 //! crossterm input, the core's event stream, and an animation tick.
 
 use crate::dialog::Picker;
-use crate::model::{Entry, Model, Msg, SessionRequest};
+use crate::model::{BgUpdate, Entry, Model, Msg, SessionRequest};
 use crate::{update, view};
 use blumi_core::SessionHandle;
-use blumi_protocol::{Command, Envelope};
+use blumi_protocol::{Command, Envelope, Event, Role};
 use blumi_task::{TaskBoard, TaskState};
 use crossterm::event::{
     DisableBracketedPaste, DisableMouseCapture, EnableBracketedPaste, EnableFocusChange,
@@ -55,6 +55,13 @@ pub struct ModelOptions {
 pub trait SessionFactory: Send + Sync {
     /// Spawn a fresh session.
     async fn create(&self) -> anyhow::Result<SessionHandle>;
+
+    /// Spawn a session for an autonomous background job (`/bg`). It runs
+    /// unattended with no UI, so it must auto-approve tools (yolo) rather than
+    /// block on prompts. Default: fall back to a normal session.
+    async fn create_background(&self) -> anyhow::Result<SessionHandle> {
+        self.create().await
+    }
     /// Resume a stored session by id, seeded with its prior messages.
     async fn resume(&self, id: &str) -> anyhow::Result<SessionHandle>;
     /// Rebuild the agent in place (self-evolution): re-read config + re-scan
@@ -207,6 +214,9 @@ async fn run_loop(
     // context rollover exactly once per finished turn.
     let mut was_busy = false;
 
+    // Background jobs (`/bg`) run on detached tasks and report completion here.
+    let (bg_tx, mut bg_rx) = tokio::sync::mpsc::unbounded_channel::<BgUpdate>();
+
     terminal.draw(|f| view::render(&mut model, f))?;
 
     loop {
@@ -224,6 +234,7 @@ async fn run_loop(
                 Ok(env) => Some(Msg::Core(env)),
                 Err(_) => None, // lagged or closed; keep going
             },
+            Some(u) = bg_rx.recv() => Some(Msg::Bg(u)),
             _ = tick.tick() => Some(Msg::Tick),
         };
 
@@ -350,6 +361,65 @@ async fn run_loop(
                 }
             }
             model.mark_dirty();
+        }
+
+        // Background job: spawn a detached, unattended (yolo) session that runs
+        // concurrently; its result is posted back over `bg_tx` and dropped into
+        // the transcript when done. The foreground stays fully usable.
+        if let Some(prompt) = model.take_bg_request() {
+            match factory.create_background().await {
+                Ok(handle) => {
+                    model.bg_seq += 1;
+                    model.bg_count += 1;
+                    let id = format!("bg{}", model.bg_seq);
+                    model.entries.push(Entry::Notice(format!(
+                        "⬢ {id} started in the background: {prompt}"
+                    )));
+                    let tx = bg_tx.clone();
+                    let fac = factory.clone();
+                    tokio::spawn(async move {
+                        let mut rx = handle.subscribe();
+                        let _ = handle
+                            .send(Command::UserMessage {
+                                text: prompt,
+                                attachments: vec![],
+                                stream_id: None,
+                            })
+                            .await;
+                        let mut ok = true;
+                        loop {
+                            match rx.recv().await {
+                                Ok(env) => match env.event {
+                                    Event::TurnDone { .. } => break,
+                                    Event::Error { .. } => {
+                                        ok = false;
+                                        break;
+                                    }
+                                    _ => {}
+                                },
+                                Err(_) => {
+                                    ok = false;
+                                    break;
+                                }
+                            }
+                        }
+                        let snap = handle.snapshot().await;
+                        let text = snap
+                            .messages
+                            .iter()
+                            .rev()
+                            .find(|m| m.role == Role::Assistant && !m.text().trim().is_empty())
+                            .map(|m| m.text())
+                            .unwrap_or_default();
+                        fac.save(&handle).await;
+                        let _ = tx.send(BgUpdate { id, text, ok });
+                    });
+                    model.mark_dirty();
+                }
+                Err(e) => model
+                    .entries
+                    .push(Entry::Notice(format!("background job failed: {e}"))),
+            }
         }
 
         // Self-evolution: the agent asked to reload. We wait until the turn is

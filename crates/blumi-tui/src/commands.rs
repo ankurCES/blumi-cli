@@ -33,6 +33,10 @@ pub const COMMANDS: &[CommandDef] = &[
         desc: "resend the last message",
     },
     CommandDef {
+        name: "/bg",
+        desc: "run a task in the background (/bg <prompt>); result drops in when done",
+    },
+    CommandDef {
         name: "/tasks",
         desc: "toggle the run dashboard",
     },
@@ -196,6 +200,17 @@ pub async fn run(model: &mut Model, session: &SessionHandle, line: &str) {
                 ));
             } else {
                 model.request_resume(arg);
+            }
+        }
+        "/bg" => {
+            if arg.is_empty() {
+                model.entries.push(Entry::Notice(
+                    "usage: /bg <prompt> — run a task in the background while you keep working"
+                        .into(),
+                ));
+            } else {
+                // The app loop owns session creation, so it spawns the job.
+                model.bg_request = Some(arg.clone());
             }
         }
         "/retry" => {
