@@ -163,6 +163,10 @@ pub enum Event {
     Compaction {
         messages_compressed: u32,
         checkpoint: u32,
+        /// Estimated context-window tokens *after* compaction, so the live meter
+        /// can reset immediately instead of waiting for the next request.
+        #[serde(default)]
+        tokens_after: u32,
     },
 
     /// The turn is complete.
