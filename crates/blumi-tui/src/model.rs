@@ -3,6 +3,7 @@
 use crate::dialog::Picker;
 use crate::theme::Theme;
 use blumi_protocol::{Envelope, RequestId, Todo, ToolCallId};
+use std::collections::HashMap;
 use std::path::PathBuf;
 use std::time::Instant;
 use tui_textarea::TextArea;
@@ -102,6 +103,25 @@ pub enum Msg {
     Term(crossterm::event::Event),
     Core(Envelope),
     Tick,
+    /// A background job (`/bg`) finished — its result, posted from a detached task.
+    Bg(BgUpdate),
+}
+
+/// A finished background job, sent from its detached task back to the UI loop.
+#[derive(Debug, Clone)]
+pub struct BgUpdate {
+    pub id: String,
+    pub text: String,
+    pub ok: bool,
+}
+
+/// A tool that's currently executing — tracked so the UI can post "still
+/// working" charms for long-running ones (hermes-style).
+pub struct ToolRun {
+    pub started: Instant,
+    pub name: String,
+    /// How many long-run charms we've already posted for this tool (max 2).
+    pub charms: u8,
 }
 
 /// A request to switch the active session, handled by the app loop.
@@ -156,6 +176,14 @@ pub struct Model {
     /// When the current turn started working (for the live "working · Ns"
     /// indicator + long-running reassurance). `None` when idle.
     pub busy_since: Option<Instant>,
+    /// Currently-executing tools, keyed by tool-call id, for long-run charms.
+    pub running_tools: HashMap<String, ToolRun>,
+    /// Number of background jobs (`/bg`) currently running.
+    pub bg_count: usize,
+    /// Monotonic counter for background-job ids.
+    pub bg_seq: usize,
+    /// A pending `/bg` prompt the app loop should spawn as a background job.
+    pub bg_request: Option<String>,
     pub spinner_frame: usize,
     pub turn_count: u32,
     /// Auto-approve everything (yolo). Toggled by `/yolo`; shown in the dashboard.
@@ -282,6 +310,10 @@ impl Model {
             todos: Vec::new(),
             busy: false,
             busy_since: None,
+            running_tools: HashMap::new(),
+            bg_count: 0,
+            bg_seq: 0,
+            bg_request: None,
             spinner_frame: 0,
             turn_count: 0,
             yolo: false,
@@ -541,6 +573,8 @@ impl Model {
         self.thinking = None;
         self.todos.clear();
         self.busy = false;
+        self.busy_since = None;
+        self.running_tools.clear();
         self.scrollback = 0;
         self.turn_count = 0;
         self.input_tokens = 0;
@@ -610,6 +644,11 @@ impl Model {
     /// Seconds the current turn has been working (0 when idle).
     pub fn busy_secs(&self) -> u64 {
         self.busy_since.map(|t| t.elapsed().as_secs()).unwrap_or(0)
+    }
+
+    /// Take a pending `/bg` prompt for the app loop to spawn as a background job.
+    pub fn take_bg_request(&mut self) -> Option<String> {
+        self.bg_request.take()
     }
 
     /// Number of tool calls in the transcript.
