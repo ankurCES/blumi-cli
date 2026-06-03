@@ -85,6 +85,10 @@ pub const COMMANDS: &[CommandDef] = &[
         desc: "local-LLM approvals: /brain off|advisory|auto",
     },
     CommandDef {
+        name: "/plan",
+        desc: "planning mode: /plan <task> to plan it, or /plan to toggle",
+    },
+    CommandDef {
         name: "/remote",
         desc: "attach to a remote instance: /remote <name> | local | next",
     },
@@ -322,6 +326,45 @@ pub async fn run(model: &mut Model, session: &SessionHandle, line: &str) {
                 model
                     .entries
                     .push(Entry::Notice("usage: /brain off|advisory|auto".into()));
+            }
+        }
+        "/plan" => {
+            if arg.is_empty() {
+                // Toggle planning mode.
+                model.plan_mode = !model.plan_mode;
+                let _ = session
+                    .send(Command::SetPlanMode {
+                        on: model.plan_mode,
+                    })
+                    .await;
+                model.entries.push(Entry::Notice(if model.plan_mode {
+                    "◑ plan mode ON — blumi researches read-only and proposes a plan (ExitPlanMode) to approve".into()
+                } else {
+                    "plan mode off — changes no longer gated".into()
+                }));
+            } else if model.busy {
+                model
+                    .entries
+                    .push(Entry::Notice("busy — press esc to cancel first".into()));
+            } else {
+                // Enter plan mode and kick off planning for the given task.
+                model.plan_mode = true;
+                let _ = session.send(Command::SetPlanMode { on: true }).await;
+                let prompt = format!(
+                    "Enter planning mode. Research the codebase READ-ONLY and do NOT make any \
+                     changes yet. Produce a concise, numbered implementation plan, then call the \
+                     ExitPlanMode tool with the full plan (markdown) for my approval.\n\nTask: {arg}"
+                );
+                model.entries.push(Entry::User(format!("◑ [plan] {arg}")));
+                model.busy = true;
+                model.scrollback = 0;
+                let _ = session
+                    .send(Command::UserMessage {
+                        text: prompt,
+                        attachments: vec![],
+                        stream_id: None,
+                    })
+                    .await;
             }
         }
         "/remote" => {

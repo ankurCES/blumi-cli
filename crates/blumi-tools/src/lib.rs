@@ -8,6 +8,7 @@ mod delegate;
 mod dir;
 mod files;
 mod path;
+mod plan;
 mod search;
 mod session_search;
 mod shell;
@@ -16,6 +17,7 @@ mod todo;
 pub use delegate::Delegate;
 pub use dir::ListDirectory;
 pub use files::{FileEdit, FileRead, FileWrite};
+pub use plan::ExitPlanMode;
 pub use search::{Glob, Grep};
 pub use session_search::SessionSearch;
 pub use shell::Bash;
@@ -35,6 +37,7 @@ pub fn register_builtin_tools(reg: &mut ToolRegistry) {
     reg.register(Arc::new(Typed(Grep)));
     reg.register(Arc::new(Typed(TodoWrite)));
     reg.register(Arc::new(Typed(Delegate)));
+    reg.register(Arc::new(Typed(ExitPlanMode)));
 }
 
 #[cfg(test)]
@@ -70,10 +73,11 @@ mod tests {
     fn registers_all_builtins() {
         let mut reg = ToolRegistry::new();
         register_builtin_tools(&mut reg);
-        assert_eq!(reg.len(), 9);
+        assert_eq!(reg.len(), 10);
         assert!(reg.get("Bash").is_some());
         assert!(reg.get("delegate").is_some());
+        assert!(reg.get("ExitPlanMode").is_some());
         // every non-deferred tool produces a spec
-        assert_eq!(reg.specs().len(), 9);
+        assert_eq!(reg.specs().len(), 10);
     }
 }

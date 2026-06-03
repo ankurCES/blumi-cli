@@ -41,6 +41,9 @@ pub struct PermissionEngine {
     /// How the brain participates (off/advisory/auto); runtime-toggleable via
     /// the `/brain` command. Encoded as [`BrainMode::as_u8`].
     brain_mode: AtomicU8,
+    /// Planning mode: block mutating tools so the agent researches read-only
+    /// and proposes a plan (via `ExitPlanMode`) before changing anything.
+    plan_mode: AtomicBool,
 }
 
 impl PermissionEngine {
@@ -52,6 +55,7 @@ impl PermissionEngine {
             remembered: Mutex::new(HashSet::new()),
             brain: None,
             brain_mode: AtomicU8::new(BrainMode::Off.as_u8()),
+            plan_mode: AtomicBool::new(false),
         }
     }
 
@@ -85,6 +89,16 @@ impl PermissionEngine {
     /// Whether a brain is attached (so a UI can offer the `/brain` toggle).
     pub fn has_brain(&self) -> bool {
         self.brain.is_some()
+    }
+
+    /// Enter/leave planning mode (mutating tools blocked).
+    pub fn set_plan_mode(&self, on: bool) {
+        self.plan_mode.store(on, Ordering::Relaxed);
+    }
+
+    /// Whether planning mode is on.
+    pub fn is_plan_mode(&self) -> bool {
+        self.plan_mode.load(Ordering::Relaxed)
     }
 
     /// Check a tool call, prompting the user if policy is inconclusive. The
@@ -206,6 +220,19 @@ impl PermissionEngine {
     }
 
     fn classify(&self, tool_name: &str, is_read_only: bool, input: &Value) -> Class {
+        // ExitPlanMode runs its own approval (the plan modal); never gate it,
+        // and let it through even in plan mode so the agent can submit a plan.
+        if tool_name == "ExitPlanMode" {
+            return Class::Allow;
+        }
+        // Planning mode: block any mutating tool, even under yolo — the whole
+        // point is to research read-only and propose a plan first.
+        if self.is_plan_mode() && !is_read_only {
+            return Class::Deny(
+                "plan mode is on (read-only): research, then propose changes via ExitPlanMode"
+                    .into(),
+            );
+        }
         if self.is_yolo() {
             return Class::Allow;
         }
@@ -396,6 +423,37 @@ mod tests {
         assert!(matches!(
             e.classify("FileWrite", false, &json!({ "path": "src/x.rs" })),
             Class::Ask { .. }
+        ));
+    }
+
+    #[test]
+    fn plan_mode_blocks_writes_allows_reads_and_exit() {
+        let e = engine();
+        e.set_plan_mode(true);
+        // Mutating tools are denied (even normally-safe bash).
+        assert!(matches!(
+            e.classify("FileWrite", false, &json!({ "path": "a" })),
+            Class::Deny(_)
+        ));
+        assert!(matches!(
+            e.classify("Bash", false, &json!({ "command": "ls" })),
+            Class::Deny(_)
+        ));
+        // Reads still go through.
+        assert!(matches!(
+            e.classify("FileRead", true, &json!({})),
+            Class::Allow
+        ));
+        // ExitPlanMode is always allowed (it runs its own approval).
+        assert!(matches!(
+            e.classify("ExitPlanMode", false, &json!({ "plan": "x" })),
+            Class::Allow
+        ));
+        // Leaving plan mode restores normal gating.
+        e.set_plan_mode(false);
+        assert!(matches!(
+            e.classify("Bash", false, &json!({ "command": "ls" })),
+            Class::Allow
         ));
     }
 

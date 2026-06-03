@@ -35,6 +35,16 @@ effect, keeping the current conversation. Call it after a `manage_skill` or \
 Evolve deliberately: prefer small, well-described skills and minimal config \
 changes, and tell the user what you changed and why.";
 
+const PLANNING: &str = "\
+# Planning mode
+
+When the user enters planning mode (the `/plan` command), all tools that modify \
+files or run mutating commands are blocked — you may only read, search, and \
+inspect. Research what's needed, then call the `ExitPlanMode` tool with a \
+concise, numbered implementation plan (markdown) and wait for the user's \
+approval. Do not attempt edits until the plan is approved; if it's rejected, \
+revise the plan and call `ExitPlanMode` again.";
+
 /// Build the full system prompt for a session. `skills_section` is the
 /// available-skills listing (empty when there are none).
 pub fn build_system_prompt(
@@ -46,6 +56,8 @@ pub fn build_system_prompt(
     s.push_str(BASE);
     s.push_str("\n\n");
     s.push_str(SELF_EVOLUTION);
+    s.push_str("\n\n");
+    s.push_str(PLANNING);
     s.push_str(&format!(
         "\n\nWorking directory: {}\n",
         config.paths.working_dir.display()

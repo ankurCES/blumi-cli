@@ -2,7 +2,7 @@
 
 use crate::commands;
 use crate::dialog::{Action, Picker};
-use crate::model::{Entry, Focus, Model, Msg, PendingApproval};
+use crate::model::{Entry, Focus, Model, Msg, PendingApproval, PlanReview};
 use blumi_core::SessionHandle;
 use blumi_protocol::{ApprovalScope, Command, Decision, Event};
 use crossterm::event::{Event as TermEvent, KeyCode, KeyEventKind, KeyModifiers};
@@ -90,6 +90,13 @@ async fn handle_term(model: &mut Model, ev: TermEvent, session: &SessionHandle) 
                         model.input.input(key);
                     }
                 }
+                model.mark_dirty();
+                return;
+            }
+
+            // A plan-review modal captures all keys (scroll + approve/reject).
+            if model.plan_review.is_some() {
+                handle_plan_key(model, key, session).await;
                 model.mark_dirty();
                 return;
             }
@@ -189,7 +196,9 @@ async fn handle_term(model: &mut Model, ev: TermEvent, session: &SessionHandle) 
             use crossterm::event::MouseEventKind;
             match me.kind {
                 MouseEventKind::ScrollUp => {
-                    if let Some(d) = model.dialog.as_mut() {
+                    if let Some(p) = model.plan_review.as_mut() {
+                        p.scroll = p.scroll.saturating_sub(3);
+                    } else if let Some(d) = model.dialog.as_mut() {
                         d.move_up();
                     } else {
                         model.scrollback = model.scrollback.saturating_add(3);
@@ -197,7 +206,9 @@ async fn handle_term(model: &mut Model, ev: TermEvent, session: &SessionHandle) 
                     model.mark_dirty();
                 }
                 MouseEventKind::ScrollDown => {
-                    if let Some(d) = model.dialog.as_mut() {
+                    if let Some(p) = model.plan_review.as_mut() {
+                        p.scroll = p.scroll.saturating_add(3);
+                    } else if let Some(d) = model.dialog.as_mut() {
                         d.move_down();
                     } else {
                         model.scrollback = model.scrollback.saturating_sub(3);
@@ -327,6 +338,71 @@ async fn handle_approval_key(model: &mut Model, code: KeyCode, session: &Session
     }
 }
 
+/// Keys while the plan-review modal is open: scroll, or approve/reject.
+async fn handle_plan_key(
+    model: &mut Model,
+    key: crossterm::event::KeyEvent,
+    session: &SessionHandle,
+) {
+    match key.code {
+        KeyCode::Char('a') | KeyCode::Enter => resolve_plan(model, session, true).await,
+        KeyCode::Char('d') | KeyCode::Char('r') | KeyCode::Esc => {
+            resolve_plan(model, session, false).await
+        }
+        KeyCode::Up | KeyCode::Char('k') => {
+            if let Some(p) = model.plan_review.as_mut() {
+                p.scroll = p.scroll.saturating_sub(1);
+            }
+        }
+        KeyCode::Down | KeyCode::Char('j') => {
+            if let Some(p) = model.plan_review.as_mut() {
+                p.scroll = p.scroll.saturating_add(1);
+            }
+        }
+        KeyCode::PageUp => {
+            if let Some(p) = model.plan_review.as_mut() {
+                p.scroll = p.scroll.saturating_sub(10);
+            }
+        }
+        KeyCode::PageDown => {
+            if let Some(p) = model.plan_review.as_mut() {
+                p.scroll = p.scroll.saturating_add(10);
+            }
+        }
+        _ => {}
+    }
+}
+
+/// Resolve a plan review: approve (proceed) or reject (revise). On approve the
+/// core also exits plan mode; we mirror the flag locally for the indicator.
+async fn resolve_plan(model: &mut Model, session: &SessionHandle, approve: bool) {
+    let Some(p) = model.plan_review.take() else {
+        return;
+    };
+    let decision = if approve {
+        Decision::Allow
+    } else {
+        Decision::Deny
+    };
+    let _ = session
+        .send(Command::ApproveTool {
+            request_id: p.request_id,
+            decision,
+            scope: ApprovalScope::Once,
+        })
+        .await;
+    if approve {
+        model.plan_mode = false;
+        model
+            .entries
+            .push(Entry::Notice("✓ plan approved — proceeding".into()));
+    } else {
+        model.entries.push(Entry::Notice(
+            "✗ plan rejected — still in plan mode; tell blumi what to change".into(),
+        ));
+    }
+}
+
 async fn handle_core(model: &mut Model, event: Event, session: &SessionHandle) {
     match event {
         Event::AssistantStarted { .. } => model.streaming = Some(String::new()),
@@ -398,6 +474,13 @@ async fn handle_core(model: &mut Model, event: Event, session: &SessionHandle) {
                 dangerous,
                 diff,
                 advice,
+            });
+        }
+        Event::PlanReview { request_id, plan } => {
+            model.plan_review = Some(PlanReview {
+                request_id,
+                plan,
+                scroll: 0,
             });
         }
         Event::ClarifyRequest {

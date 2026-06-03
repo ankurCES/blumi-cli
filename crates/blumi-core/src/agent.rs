@@ -312,6 +312,14 @@ impl TurnRunner for AgentTurnRunner {
         self.perms.brain_mode()
     }
 
+    fn set_plan_mode(&self, on: bool) {
+        self.perms.set_plan_mode(on);
+    }
+
+    fn plan_mode(&self) -> bool {
+        self.perms.is_plan_mode()
+    }
+
     async fn compact(
         &self,
         state: Arc<Mutex<SessionState>>,

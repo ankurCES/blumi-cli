@@ -52,6 +52,9 @@ pub fn render(model: &mut Model, f: &mut Frame) {
     if model.pending.is_some() {
         render_approval(model, f, area, &theme);
     }
+    if model.plan_review.is_some() {
+        render_plan_review(model, f, area, &theme);
+    }
     if model.dialog.is_some() {
         render_dialog(model, f, area, &theme);
     } else {
@@ -142,6 +145,9 @@ fn render_dashboard(model: &Model, f: &mut Frame, area: Rect, theme: &Theme) {
     ));
     if model.brain_mode != "off" {
         lines.push(kv("brain", &model.brain_mode, theme));
+    }
+    if model.plan_mode {
+        lines.push(kv("mode", "plan (read-only)", theme));
     }
 
     // ── Context usage ─────────────────────────────────────────
@@ -547,6 +553,17 @@ fn render_header(model: &Model, f: &mut Frame, area: Rect, theme: &Theme) {
                 .add_modifier(Modifier::BOLD),
         ));
     }
+    // Planning mode: read-only until a plan is approved.
+    if model.plan_mode {
+        spans.push(Span::styled("  ", theme.dim()));
+        spans.push(Span::styled(
+            " ◑ PLAN ",
+            Style::default()
+                .fg(Color::Black)
+                .bg(theme.primary)
+                .add_modifier(Modifier::BOLD),
+        ));
+    }
     // When more than the local tab is open, the header shows a tab strip
     // (ralph-style) in place of the working-dir crumb.
     if model.tabs.len() > 1 {
@@ -920,6 +937,41 @@ fn render_status(model: &Model, f: &mut Frame, area: Rect, theme: &Theme) {
     );
 }
 
+/// The scrollable plan-review modal (the `ExitPlanMode` approval popup).
+fn render_plan_review(model: &Model, f: &mut Frame, area: Rect, theme: &Theme) {
+    let Some(p) = &model.plan_review else { return };
+    let popup = centered_rect(80, 80, area);
+    f.render_widget(Clear, popup);
+
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .border_type(BorderType::Rounded)
+        .border_style(Style::default().fg(theme.primary))
+        .title(Span::styled(" ◑ plan review ", theme.bold_primary()));
+    let inner = block.inner(popup);
+    f.render_widget(block, popup);
+
+    let [body, footer] = Layout::vertical([Constraint::Min(1), Constraint::Length(1)]).areas(inner);
+
+    let width = body.width.saturating_sub(1) as usize;
+    let lines = crate::markdown::render_markdown(&p.plan, width, theme);
+    let max_scroll = (lines.len() as u16).saturating_sub(body.height);
+    let scroll = p.scroll.min(max_scroll);
+    f.render_widget(Paragraph::new(lines).scroll((scroll, 0)), body);
+
+    let hint = Line::from(vec![
+        Span::styled(" [a]", theme.accent()),
+        Span::styled(" approve  ", theme.dim()),
+        Span::styled("[d]", theme.accent()),
+        Span::styled(" reject  ", theme.dim()),
+        Span::styled("↑/↓", theme.accent()),
+        Span::styled(" scroll  ", theme.dim()),
+        Span::styled("esc", theme.accent()),
+        Span::styled(" reject", theme.dim()),
+    ]);
+    f.render_widget(Paragraph::new(hint), footer);
+}
+
 fn render_approval(model: &Model, f: &mut Frame, area: Rect, theme: &Theme) {
     let Some(p) = &model.pending else { return };
     let popup = centered_rect(70, 50, area);
@@ -1017,7 +1069,7 @@ fn truncate(s: &str, max: usize) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::model::{Entry, Model, PendingApproval};
+    use crate::model::{Entry, Model, PendingApproval, PlanReview};
     use blumi_protocol::{RequestId, ToolCallId};
     use ratatui::backend::TestBackend;
     use ratatui::Terminal;
@@ -1088,6 +1140,24 @@ mod tests {
         let out = render_to_string(&mut model, 90, 24);
         assert!(out.contains("YOLO"), "yolo badge label");
         assert!(out.contains('⚡'), "yolo badge glyph");
+    }
+
+    #[test]
+    fn plan_badge_and_scrollable_modal() {
+        let mut model = Model::new("m".into(), "/tmp".into());
+        model.plan_mode = true;
+        let out = render_to_string(&mut model, 90, 24);
+        assert!(out.contains("PLAN"), "plan-mode header badge");
+
+        model.plan_review = Some(PlanReview {
+            request_id: RequestId::new(),
+            plan: "# Plan\n\n1. first step\n2. second step\n".into(),
+            scroll: 0,
+        });
+        let out = render_to_string(&mut model, 90, 30);
+        assert!(out.contains("plan review"), "plan modal title");
+        assert!(out.contains("first step"), "plan body");
+        assert!(out.contains("approve"), "plan modal footer");
     }
 
     #[test]

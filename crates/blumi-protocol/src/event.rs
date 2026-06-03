@@ -118,6 +118,11 @@ pub enum Event {
         question: String,
         choices: Vec<ClarifyChoice>,
     },
+    /// The agent finished planning and is proposing a plan for approval (the
+    /// `ExitPlanMode` tool). The host shows it (a scrollable modal) and replies
+    /// with `Command::ApproveTool` — `Allow` approves (proceed), `Deny` rejects
+    /// (revise). The `plan` is markdown.
+    PlanReview { request_id: RequestId, plan: String },
 
     /// The todo/plan list changed.
     TodoUpdate { items: Vec<Todo> },
@@ -176,6 +181,7 @@ impl Event {
             Event::Diff { .. } => "diff",
             Event::ApprovalRequest { .. } => "approval_request",
             Event::ClarifyRequest { .. } => "clarify_request",
+            Event::PlanReview { .. } => "plan_review",
             Event::TodoUpdate { .. } => "todo_update",
             Event::Usage { .. } => "usage",
             Event::Compaction { .. } => "compaction",

@@ -55,6 +55,14 @@ pub trait TurnRunner: Send + Sync {
         crate::brain::BrainMode::Off
     }
 
+    /// Enter/leave planning mode (mutating tools blocked). Default: no-op.
+    fn set_plan_mode(&self, _on: bool) {}
+
+    /// Whether planning mode is on. Default: `false`.
+    fn plan_mode(&self) -> bool {
+        false
+    }
+
     /// Force a context compaction now (the manual `/compact`). Emits a
     /// `Compaction` event via `events` on success. Default: no-op → `false`.
     async fn compact(

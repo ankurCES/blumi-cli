@@ -56,6 +56,9 @@ pub enum Command {
     /// Set the local-LLM "brain" approval mode at runtime (`off`/`advisory`/
     /// `auto`). Unknown values are ignored by the core.
     SetBrainMode { mode: String },
+    /// Enter/leave planning mode: while on, mutating tools are blocked (the
+    /// agent must research read-only and propose a plan via `ExitPlanMode`).
+    SetPlanMode { on: bool },
     /// Force a context compaction now (manual `/compact`).
     Compact,
     /// Revert the most recent file change (manual `/undo`).

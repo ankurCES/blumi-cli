@@ -12,8 +12,8 @@ use crate::emit::{
 use crate::eventlog::EventLog;
 use crate::runner::{TurnContext, TurnRunner};
 use crate::session::{SessionSnapshot, SessionState};
-use blumi_protocol::{Command, Envelope, Event, Message, RequestId, SessionId, StreamId};
-use std::collections::{HashMap, VecDeque};
+use blumi_protocol::{Command, Decision, Envelope, Event, Message, RequestId, SessionId, StreamId};
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::sync::{Arc, Mutex as StdMutex};
 use tokio::sync::{broadcast, mpsc, Mutex};
 use tokio_util::sync::CancellationToken;
@@ -109,6 +109,7 @@ pub fn spawn_session_seeded(seed: SessionState, runner: Arc<dyn TurnRunner>) -> 
         turn_done_tx,
         turn_done_rx,
         pending: HashMap::new(),
+        plan_pending: HashSet::new(),
         turn_token: None,
         queued: VecDeque::new(),
     };
@@ -133,6 +134,8 @@ struct SessionActor {
 
     /// Interactions awaiting a user reply, keyed by request id.
     pending: HashMap<RequestId, tokio::sync::oneshot::Sender<InteractionReply>>,
+    /// Request ids that are plan reviews (so an `Allow` exits plan mode).
+    plan_pending: HashSet<RequestId>,
     /// Cancellation token for the in-flight turn (None when idle).
     turn_token: Option<CancellationToken>,
     /// User messages received while busy, started FIFO when the turn ends.
@@ -185,8 +188,17 @@ impl SessionActor {
                 decision,
                 scope,
             } => {
+                // Approving a plan review exits plan mode so the agent's next
+                // (mutating) tools are allowed. Done here, in the actor, so it
+                // lands well before the turn streams its next request — no race
+                // with the client having to also toggle the mode.
+                let approved_plan =
+                    self.plan_pending.remove(&request_id) && decision == Decision::Allow;
                 if let Some(resp) = self.pending.remove(&request_id) {
                     let _ = resp.send(InteractionReply::Approval { decision, scope });
+                }
+                if approved_plan {
+                    self.runner.set_plan_mode(false);
                 }
             }
             Command::AnswerClarify { request_id, value } => {
@@ -204,6 +216,9 @@ impl SessionActor {
                 if let Some(m) = crate::brain::BrainMode::parse(&mode) {
                     self.runner.set_brain_mode(m);
                 }
+            }
+            Command::SetPlanMode { on } => {
+                self.runner.set_plan_mode(on);
             }
             Command::Compact => {
                 if self.turn_token.is_some() {
@@ -327,7 +342,14 @@ impl SessionActor {
                 question: question.clone(),
                 choices: choices.clone(),
             },
+            InteractionKind::Plan { plan } => Event::PlanReview {
+                request_id: ir.id.clone(),
+                plan: plan.clone(),
+            },
         };
+        if matches!(ir.kind, InteractionKind::Plan { .. }) {
+            self.plan_pending.insert(ir.id.clone());
+        }
         self.publish(event);
         self.pending.insert(ir.id, ir.respond);
     }
