@@ -18,16 +18,20 @@ const ANCHORS: [(u8, u8, u8); 5] = [
 /// Frames per ramp segment — higher = slower, smoother color sweep.
 const STEPS: usize = 6;
 
+/// The cyan nucleus at the flower's center (matches the logo PNG's center ring).
+const NUCLEUS: Color = Color::Rgb(0x68, 0xFF, 0xD6);
+
 /// Morphing petal glyphs — the flower "blooms"/turns as the tick advances.
 const PETALS: [&str; 8] = ["✿", "❀", "❁", "✾", "❃", "❀", "✿", "❋"];
 
-/// The rose mark: rose/lavender petals around a cyan ◉ nucleus (10-petal motif).
+/// The flower mark, mirroring the logo PNG: eight gradient petals (four cardinal
+/// + four diagonal) radiating from a cyan `◉` nucleus.
 const ROSE_ART: [&str; 5] = [
-    "  ✿ ❀ ✿  ",
-    " ❀ ❁ ❁ ❀ ",
-    "  ❁ ◉ ❁  ",
-    " ❀ ❁ ❁ ❀ ",
-    "  ✿ ❀ ✿  ",
+    "  ✿   ✿  ",
+    "    ✿    ",
+    " ✿  ◉  ✿ ",
+    "    ✿    ",
+    "  ✿   ✿  ",
 ];
 
 /// Number of rows in the rose mark (for the CLI's cursor-rewind animation).
@@ -140,6 +144,12 @@ pub fn rose_logo(tick: usize) -> Vec<Line<'static>> {
         for ch in row.chars() {
             if ch == ' ' {
                 spans.push(Span::raw(" "));
+            } else if ch == '◉' {
+                // The nucleus is always cyan (the PNG's center ring).
+                spans.push(Span::styled(
+                    "◉".to_string(),
+                    Style::default().fg(NUCLEUS).add_modifier(Modifier::BOLD),
+                ));
             } else {
                 let style = Style::default()
                     .fg(ramp_color(idx))
@@ -164,46 +174,22 @@ fn row_base(r: usize, n: usize) -> usize {
     }
 }
 
-/// Columns the flower wordmark occupies (5 letters × 5 + 4 gaps).
-pub const FLOWER_WORDMARK_WIDTH: u16 = 29;
-
-/// "BLUMI" spelled out of small flower glyphs (✿) — each letter a 5×5 bloom
-/// grid — washed in the rose→cyan gradient and shimmering with `tick`. This is
-/// the brand logo "grown" from little flowers, matching the petal mark.
-pub fn flower_wordmark(tick: usize) -> Vec<Line<'static>> {
-    // 5×5 pixel letters; 'X' becomes a flower, ' ' stays blank.
-    const B: [&str; 5] = ["XXXX ", "X   X", "XXXX ", "X   X", "XXXX "];
-    const L: [&str; 5] = ["X    ", "X    ", "X    ", "X    ", "XXXXX"];
-    const U: [&str; 5] = ["X   X", "X   X", "X   X", "X   X", " XXX "];
-    const M: [&str; 5] = ["X   X", "XX XX", "X X X", "X   X", "X   X"];
-    const I: [&str; 5] = ["XXXXX", "  X  ", "  X  ", "  X  ", "XXXXX"];
-    const LETTERS: [[&str; 5]; 5] = [B, L, U, M, I];
-
-    let mut out = Vec::with_capacity(5);
-    let mut petal = 0usize; // flower index, for a gradient that flows across
-    for row in 0..5 {
-        let mut spans: Vec<Span<'static>> = Vec::new();
-        for (li, letter) in LETTERS.iter().enumerate() {
-            if li > 0 {
-                spans.push(Span::raw(" "));
-            }
-            for ch in letter[row].chars() {
-                if ch == 'X' {
-                    spans.push(Span::styled(
-                        "✿".to_string(),
-                        Style::default()
-                            .fg(ramp_color(tick / 2 + petal))
-                            .add_modifier(Modifier::BOLD),
-                    ));
-                    petal += 1;
-                } else {
-                    spans.push(Span::raw(" "));
-                }
-            }
-        }
-        out.push(Line::from(spans));
-    }
-    out
+/// The block wordmark ([`crate::logo::BLUMI_BLOCK`]) with a vertical rose→cyan
+/// gradient, gently swept by `tick` so the landing shimmers.
+pub fn wordmark(tick: usize) -> Vec<Line<'static>> {
+    let n = crate::logo::BLUMI_BLOCK.len();
+    crate::logo::BLUMI_BLOCK
+        .iter()
+        .enumerate()
+        .map(|(r, row)| {
+            Line::from(Span::styled(
+                (*row).to_string(),
+                Style::default()
+                    .fg(ramp_color(row_base(r, n) + tick / 2))
+                    .add_modifier(Modifier::BOLD),
+            ))
+        })
+        .collect()
 }
 
 /// The block wordmark as a truecolor ANSI string (for the CLI banner), with the
@@ -227,6 +213,8 @@ pub fn banner_frame(tick: usize) -> String {
         for ch in row.chars() {
             if ch == ' ' {
                 out.push(' ');
+            } else if ch == '◉' {
+                out.push_str("\x1b[1;38;2;104;255;214m◉"); // cyan nucleus
             } else {
                 let (r, g, b) = ramp_rgb(idx);
                 out.push_str(&format!("\x1b[1;38;2;{r};{g};{b}m{ch}"));
@@ -283,28 +271,23 @@ mod tests {
     }
 
     #[test]
-    fn wordmark_ansi_renders_all_block_rows() {
+    fn wordmark_renders_all_block_rows() {
+        let lines = wordmark(0);
+        assert_eq!(lines.len(), crate::logo::BLUMI_BLOCK.len());
         let ansi = wordmark_ansi(0);
         assert_eq!(ansi.matches('\n').count(), crate::logo::BLUMI_BLOCK.len());
         assert!(ansi.contains("\x1b[1;38;2;")); // truecolor escape
     }
 
     #[test]
-    fn flower_wordmark_is_five_rows_of_blooms() {
-        let lines = flower_wordmark(0);
-        assert_eq!(lines.len(), 5, "5-row flower font");
-        // Every glyph in the wordmark is either a flower or a blank.
-        for line in &lines {
-            for span in &line.spans {
-                assert!(span.content.chars().all(|c| c == '✿' || c == ' '));
-            }
-        }
-        // It actually contains flowers (not all blank).
-        let flowers: usize = lines
+    fn rose_logo_nucleus_is_cyan() {
+        // The center ◉ is rendered in the fixed cyan nucleus color, not swept.
+        let lines = rose_logo(0);
+        let nucleus = lines
             .iter()
             .flat_map(|l| l.spans.iter())
-            .filter(|s| s.content == "✿")
-            .count();
-        assert!(flowers > 20, "letters are drawn from flowers: {flowers}");
+            .find(|s| s.content == "◉")
+            .expect("a nucleus glyph");
+        assert_eq!(nucleus.style.fg, Some(NUCLEUS));
     }
 }
