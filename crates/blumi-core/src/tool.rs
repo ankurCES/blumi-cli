@@ -139,8 +139,19 @@ pub fn schema_for<T: JsonSchema>() -> serde_json::Value {
 }
 
 /// Parse tool arguments into a typed value, mapping failures to `InvalidInput`.
+/// The message is made actionable (the raw serde error like "missing field
+/// `path`" alone tends to make models retry the same mistake).
 pub fn parse_input<T: DeserializeOwned>(input: serde_json::Value) -> Result<T, ToolError> {
-    serde_json::from_value(input).map_err(|e| ToolError::InvalidInput(e.to_string()))
+    serde_json::from_value(input).map_err(|e| {
+        let raw = e.to_string();
+        let hint = if raw.contains("missing field") {
+            " — include every required field in the JSON arguments. For file tools, \
+             pass the file path as `path` (an absolute path is best)."
+        } else {
+            " — send the arguments as a JSON object matching the tool's schema."
+        };
+        ToolError::InvalidInput(format!("invalid tool arguments: {raw}{hint}"))
+    })
 }
 
 /// Ergonomic tool definition: implement this with a typed input and wrap the
