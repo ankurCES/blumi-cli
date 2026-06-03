@@ -135,6 +135,26 @@ impl blumi_tui::SessionFactory for TuiSessionFactory {
         }
         Ok(crate::remote::connect(inst))
     }
+
+    fn workspaces(&self) -> Vec<blumi_tui::Workspace> {
+        crate::workspace::discover(&self.fresh_config())
+    }
+
+    async fn open_workspace(&self, path: &str) -> anyhow::Result<SessionHandle> {
+        let dir = std::path::PathBuf::from(path);
+        if !dir.is_dir() {
+            anyhow::bail!("not a directory: {path}");
+        }
+        // Load that project's layered config (global home + the project's own
+        // .blumi/settings.json), then spawn a session rooted there.
+        let config = BlumiConfig::load(&dir, Some(self.config.paths.home.clone()))?;
+        config.paths.ensure_dirs().ok();
+        crate::workspace::record_recent(
+            &self.config,
+            dir.display().to_string().trim_end_matches('/'),
+        );
+        build_session(&config, false, None).await
+    }
 }
 
 impl TuiSessionFactory {

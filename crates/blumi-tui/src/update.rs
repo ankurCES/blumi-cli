@@ -134,6 +134,27 @@ async fn handle_term(model: &mut Model, ev: TermEvent, session: &SessionHandle) 
                 return;
             }
 
+            // Left sidebar focus: the workspace / session lists capture navigation.
+            if matches!(model.focus, Focus::Workspaces | Focus::Sessions) {
+                match key.code {
+                    KeyCode::Tab => model.focus = next_focus(model.focus),
+                    KeyCode::Esc => model.focus = Focus::Editor,
+                    KeyCode::Up | KeyCode::Char('k') => sidebar_move(model, -1),
+                    KeyCode::Down | KeyCode::Char('j') => sidebar_move(model, 1),
+                    KeyCode::Left | KeyCode::Right => {
+                        model.focus = if model.focus == Focus::Workspaces {
+                            Focus::Sessions
+                        } else {
+                            Focus::Workspaces
+                        };
+                    }
+                    KeyCode::Enter => sidebar_select(model),
+                    _ => {}
+                }
+                model.mark_dirty();
+                return;
+            }
+
             match key.code {
                 KeyCode::Esc => {
                     if model.busy {
@@ -142,12 +163,7 @@ async fn handle_term(model: &mut Model, ev: TermEvent, session: &SessionHandle) 
                         model.clear_input();
                     }
                 }
-                KeyCode::Tab => {
-                    model.focus = match model.focus {
-                        Focus::Editor => Focus::Chat,
-                        Focus::Chat => Focus::Editor,
-                    };
-                }
+                KeyCode::Tab => model.focus = next_focus(model.focus),
                 KeyCode::Char('j') if ctrl => model.input.insert_newline(),
                 KeyCode::Enter
                     if key
@@ -237,6 +253,9 @@ async fn handle_term(model: &mut Model, ev: TermEvent, session: &SessionHandle) 
                             perform_action(model, a, session).await;
                         }
                         model.mark_dirty();
+                    } else if model.dialog.is_none() {
+                        // Click a sidebar row: focus it, select, and activate.
+                        sidebar_click(model, me.column, me.row);
                     }
                 }
                 _ => {}
@@ -498,6 +517,14 @@ async fn handle_core(model: &mut Model, event: Event, session: &SessionHandle) {
                 })
                 .await;
         }
+        Event::AgentStart {
+            id,
+            agent_type,
+            task,
+        } => model.agent_started(id, agent_type, task),
+        Event::AgentDone {
+            id, ok, summary, ..
+        } => model.agent_finished(&id, ok, summary),
         Event::TodoUpdate { items } => model.todos = items,
         Event::Usage {
             input,
@@ -560,6 +587,81 @@ fn find_tool<'a>(model: &'a mut Model, id: &blumi_protocol::ToolCallId) -> Optio
         .iter_mut()
         .rev()
         .find(|e| matches!(e, Entry::Tool { id: tid, .. } if tid == id))
+}
+
+/// Map a left-click in a sidebar list to a row index (accounting for the same
+/// bottom-anchored scroll window the renderer uses).
+fn list_click_index(
+    area: Option<(u16, u16, u16, u16)>,
+    sel: usize,
+    len: usize,
+    col: u16,
+    row: u16,
+) -> Option<usize> {
+    let (x, y, w, h) = area?;
+    if len == 0 || col < x || col >= x + w || row < y || row >= y + h {
+        return None;
+    }
+    let h = h as usize;
+    let sel = sel.min(len - 1);
+    let start = sel.saturating_sub(h.saturating_sub(1));
+    let idx = start + (row - y) as usize;
+    (idx < len).then_some(idx)
+}
+
+/// Handle a left-click somewhere in the left sidebar (workspaces / sessions).
+fn sidebar_click(model: &mut Model, col: u16, row: u16) {
+    if let Some(idx) = list_click_index(
+        model.ws_list_area,
+        model.ws_sel,
+        model.workspaces.len(),
+        col,
+        row,
+    ) {
+        model.focus = Focus::Workspaces;
+        model.ws_sel = idx;
+        model.open_selected_workspace();
+        model.mark_dirty();
+    } else if let Some(idx) = list_click_index(
+        model.sess_list_area,
+        model.sess_sel,
+        model.recent_sessions.len(),
+        col,
+        row,
+    ) {
+        model.focus = Focus::Sessions;
+        model.sess_sel = idx;
+        model.resume_selected_session();
+        model.mark_dirty();
+    }
+}
+
+/// Cycle keyboard focus: editor → chat → workspaces → sessions → editor.
+fn next_focus(f: Focus) -> Focus {
+    match f {
+        Focus::Editor => Focus::Chat,
+        Focus::Chat => Focus::Workspaces,
+        Focus::Workspaces => Focus::Sessions,
+        Focus::Sessions => Focus::Editor,
+    }
+}
+
+/// Move the focused sidebar list's selection.
+fn sidebar_move(model: &mut Model, delta: isize) {
+    if model.focus == Focus::Workspaces {
+        model.ws_move(delta);
+    } else {
+        model.sess_move(delta);
+    }
+}
+
+/// Activate the focused sidebar selection (open workspace / resume session).
+fn sidebar_select(model: &mut Model) {
+    if model.focus == Focus::Workspaces {
+        model.open_selected_workspace();
+    } else {
+        model.resume_selected_session();
+    }
 }
 
 fn history_prev(model: &mut Model) {

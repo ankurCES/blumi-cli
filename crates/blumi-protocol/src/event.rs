@@ -124,6 +124,24 @@ pub enum Event {
     /// (revise). The `plan` is markdown.
     PlanReview { request_id: RequestId, plan: String },
 
+    /// A delegated team member (sub-agent) started working. Drives the TUI's
+    /// "active agents" pane.
+    AgentStart {
+        id: String,
+        /// The agent template/role (e.g. "Coder", "Explore").
+        agent_type: String,
+        /// A short description of the delegated task.
+        task: String,
+    },
+    /// A delegated team member finished.
+    AgentDone {
+        id: String,
+        agent_type: String,
+        ok: bool,
+        /// A short summary of the result.
+        summary: String,
+    },
+
     /// The todo/plan list changed.
     TodoUpdate { items: Vec<Todo> },
     /// Token accounting update (drives the live meter).
@@ -182,6 +200,8 @@ impl Event {
             Event::ApprovalRequest { .. } => "approval_request",
             Event::ClarifyRequest { .. } => "clarify_request",
             Event::PlanReview { .. } => "plan_review",
+            Event::AgentStart { .. } => "agent_start",
+            Event::AgentDone { .. } => "agent_done",
             Event::TodoUpdate { .. } => "todo_update",
             Event::Usage { .. } => "usage",
             Event::Compaction { .. } => "compaction",

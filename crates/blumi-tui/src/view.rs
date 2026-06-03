@@ -12,6 +12,8 @@ use ratatui::Frame;
 /// Min terminal width to show the run dashboard sidebar.
 const DASHBOARD_MIN_WIDTH: u16 = 92;
 const DASHBOARD_WIDTH: u16 = 32;
+/// Left sidebar (workspaces + sessions) width.
+const SIDEBAR_WIDTH: u16 = 26;
 
 const MAX_CONTENT_WIDTH: u16 = 100;
 
@@ -30,16 +32,39 @@ pub fn render(model: &mut Model, f: &mut Frame) {
 
     render_header(model, f, header, &theme);
 
-    // Split the body into chat + run dashboard when there's room and a run.
-    let chat = if model.show_dashboard && chat.width >= DASHBOARD_MIN_WIDTH && !model.is_empty() {
-        let [main, side] =
-            Layout::horizontal([Constraint::Min(0), Constraint::Length(DASHBOARD_WIDTH)])
-                .areas(chat);
-        render_dashboard(model, f, side, &theme);
-        main
+    // Body columns: optional left sidebar (workspaces + sessions) | center chat |
+    // optional right dashboard (logo + cost + active agents). The dashboard keeps
+    // its established threshold; the sidebar only appears when there's room left
+    // over for it (so adding it never displaces the dashboard).
+    let show_right = model.show_dashboard && !model.is_empty() && chat.width >= DASHBOARD_MIN_WIDTH;
+    let show_left = if show_right {
+        chat.width >= DASHBOARD_MIN_WIDTH + SIDEBAR_WIDTH
     } else {
-        chat
+        chat.width >= SIDEBAR_WIDTH + 60
     };
+
+    let mut constraints: Vec<Constraint> = Vec::new();
+    if show_left {
+        constraints.push(Constraint::Length(SIDEBAR_WIDTH));
+    }
+    constraints.push(Constraint::Min(0));
+    if show_right {
+        constraints.push(Constraint::Length(DASHBOARD_WIDTH));
+    }
+    let cols = Layout::horizontal(constraints).split(chat);
+    let mut ci = 0;
+    if show_left {
+        render_sidebar(model, f, cols[ci], &theme);
+        ci += 1;
+    } else {
+        model.ws_list_area = None;
+        model.sess_list_area = None;
+    }
+    let chat = cols[ci];
+    ci += 1;
+    if show_right {
+        render_dashboard(model, f, cols[ci], &theme);
+    }
 
     if model.is_empty() {
         render_landing(model, f, chat, &theme);
@@ -73,6 +98,123 @@ pub fn render(model: &mut Model, f: &mut Frame) {
     if model.slash_active() {
         render_slash_popup(model, f, editor, &theme);
     }
+}
+
+/// A rounded, titled pane block; border + title brighten when focused.
+fn pane_block(title: &str, focused: bool, theme: &Theme) -> Block<'static> {
+    Block::default()
+        .borders(Borders::ALL)
+        .border_type(BorderType::Rounded)
+        .border_style(if focused {
+            theme.bold_primary()
+        } else {
+            theme.dim()
+        })
+        .title(Span::styled(
+            format!(" {title} "),
+            if focused {
+                theme.bold_primary()
+            } else {
+                theme.subtle()
+            },
+        ))
+}
+
+/// Render one selectable list into `inner`, windowed around `sel`. Returns the
+/// inner rect (for click mapping). `row` formats each item into spans.
+#[allow(clippy::too_many_arguments)]
+fn render_list<T>(
+    f: &mut Frame,
+    inner: Rect,
+    items: &[T],
+    sel: usize,
+    focused: bool,
+    theme: &Theme,
+    empty: &str,
+    row: impl Fn(&T, usize) -> Vec<Span<'static>>,
+) {
+    if items.is_empty() {
+        f.render_widget(
+            Paragraph::new(Line::from(Span::styled(format!("  {empty}"), theme.dim()))),
+            inner,
+        );
+        return;
+    }
+    let h = inner.height.max(1) as usize;
+    let sel = sel.min(items.len() - 1);
+    let start = sel.saturating_sub(h.saturating_sub(1));
+    let mut lines: Vec<Line> = Vec::new();
+    for (i, it) in items.iter().enumerate().skip(start).take(h) {
+        let selected = i == sel;
+        let caret = if selected && focused {
+            Span::styled("▸", theme.accent())
+        } else {
+            Span::raw(" ")
+        };
+        let mut spans = vec![caret];
+        spans.extend(row(it, i));
+        lines.push(Line::from(spans));
+    }
+    f.render_widget(Paragraph::new(lines), inner);
+}
+
+/// The left sidebar: project workspaces (top) + sessions (bottom).
+fn render_sidebar(model: &mut Model, f: &mut Frame, area: Rect, theme: &Theme) {
+    let [top, bottom] =
+        Layout::vertical([Constraint::Percentage(50), Constraint::Percentage(50)]).areas(area);
+
+    // ── Workspaces ───────────────────────────────────────────
+    let ws_focused = model.focus == Focus::Workspaces;
+    let block = pane_block("workspaces", ws_focused, theme);
+    let inner = block.inner(top);
+    f.render_widget(block, top);
+    model.ws_list_area = Some((inner.x, inner.y, inner.width, inner.height));
+    let name_w = inner.width.saturating_sub(3) as usize;
+    let sel_style = theme.bold_primary();
+    let body = theme.body();
+    render_list(
+        f,
+        inner,
+        &model.workspaces,
+        model.ws_sel,
+        ws_focused,
+        theme,
+        "(no projects)",
+        |ws, i| {
+            let star = if ws.pinned { "★" } else { " " };
+            let style = if i == model.ws_sel { sel_style } else { body };
+            vec![
+                Span::styled(format!("{star} "), theme.accent()),
+                Span::styled(truncate(&ws.name, name_w), style),
+            ]
+        },
+    );
+
+    // ── Sessions ─────────────────────────────────────────────
+    let se_focused = model.focus == Focus::Sessions;
+    let block = pane_block("sessions", se_focused, theme);
+    let inner = block.inner(bottom);
+    f.render_widget(block, bottom);
+    model.sess_list_area = Some((inner.x, inner.y, inner.width, inner.height));
+    let title_w = inner.width.saturating_sub(2) as usize;
+    render_list(
+        f,
+        inner,
+        &model.recent_sessions,
+        model.sess_sel,
+        se_focused,
+        theme,
+        "(no sessions)",
+        |(_, title), i| {
+            let style = if i == model.sess_sel { sel_style } else { body };
+            let t = if title.trim().is_empty() {
+                "(untitled)"
+            } else {
+                title
+            };
+            vec![Span::styled(format!(" {}", truncate(t, title_w)), style)]
+        },
+    );
 }
 
 /// The agent dashboard: live session state, context usage, tasks, recent tool
@@ -158,6 +300,39 @@ fn render_dashboard(model: &Model, f: &mut Frame, area: Rect, theme: &Theme) {
         },
         theme,
     ));
+
+    // ── Active agents (delegated team members) ────────────────
+    if !model.agents.is_empty() {
+        let working = model
+            .agents
+            .iter()
+            .filter(|a| a.status == crate::model::AgentStatus::Working)
+            .count();
+        lines.push(Line::raw(""));
+        lines.push(section(&format!("Active agents  {working}▸"), theme));
+        for a in &model.agents {
+            let (glyph, gstyle) = match a.status {
+                crate::model::AgentStatus::Working => (
+                    crate::mascot::spinner(model.spinner_frame).to_string(),
+                    theme.accent(),
+                ),
+                crate::model::AgentStatus::Done => {
+                    (icon::OK.to_string(), Style::default().fg(theme.success))
+                }
+                crate::model::AgentStatus::Failed => {
+                    ("✗".to_string(), Style::default().fg(theme.error))
+                }
+            };
+            lines.push(Line::from(vec![
+                Span::styled(format!("{glyph} "), gstyle),
+                Span::styled(truncate(&a.role, w.saturating_sub(2)), theme.bold_primary()),
+            ]));
+            lines.push(Line::from(Span::styled(
+                format!("   {}", truncate(&a.task, w.saturating_sub(3))),
+                theme.subtle(),
+            )));
+        }
+    }
 
     // ── Context usage ─────────────────────────────────────────
     lines.push(Line::raw(""));
@@ -1119,6 +1294,49 @@ mod tests {
         assert!(out.contains("local"), "local tab shown");
         assert!(out.contains("prod-box"), "remote tab shown");
         assert!(out.contains('☁'), "remote glyph shown");
+    }
+
+    #[test]
+    fn sidebar_and_active_agents_render() {
+        use crate::model::{AgentCard, AgentStatus, Workspace};
+        let mut model = Model::new("m".into(), "/tmp/proj".into());
+        model.show_dashboard = true;
+        model.entries.push(Entry::User("hi".into())); // non-empty → dashboard shows
+        model.workspaces = vec![
+            Workspace {
+                name: "blumi-cli".into(),
+                path: "/x/blumi-cli".into(),
+                pinned: true,
+            },
+            Workspace {
+                name: "mono".into(),
+                path: "/x/mono".into(),
+                pinned: false,
+            },
+        ];
+        model.recent_sessions = vec![("s1".into(), "fix parser".into())];
+        model.agents = vec![
+            AgentCard {
+                id: "a1".into(),
+                role: "Coder".into(),
+                task: "edit src/x.rs".into(),
+                status: AgentStatus::Working,
+            },
+            AgentCard {
+                id: "a2".into(),
+                role: "Verify".into(),
+                task: "tests pass".into(),
+                status: AgentStatus::Done,
+            },
+        ];
+        // Wide enough for both side panes.
+        let out = render_to_string(&mut model, 130, 30);
+        assert!(out.contains("workspaces"), "workspaces pane title");
+        assert!(out.contains("blumi-cli"), "workspace entry");
+        assert!(out.contains("sessions"), "sessions pane title");
+        assert!(out.contains("fix parser"), "session entry");
+        assert!(out.contains("Active agents"), "active-agents section");
+        assert!(out.contains("Coder"), "agent role");
     }
 
     #[test]

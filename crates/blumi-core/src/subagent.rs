@@ -16,9 +16,10 @@ use crate::runner::{TurnContext, TurnRunner};
 use crate::session::SessionState;
 use crate::tool::SubAgentSpawner;
 use async_trait::async_trait;
-use blumi_protocol::{Message, Role, SessionId};
+use blumi_protocol::{Event, Message, Role, SessionId};
 use std::collections::HashMap;
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 use tokio::sync::Mutex;
 use tokio_util::sync::CancellationToken;
@@ -120,6 +121,8 @@ pub struct AgentSpawner {
     context_size: u32,
     working_dir: PathBuf,
     agents: HashMap<String, AgentDef>,
+    /// Monotonic id source for the "active agents" UI pane.
+    next_agent_id: AtomicU64,
 }
 
 impl AgentSpawner {
@@ -144,6 +147,7 @@ impl AgentSpawner {
             context_size,
             working_dir,
             agents,
+            next_agent_id: AtomicU64::new(0),
         }
     }
 }
@@ -160,7 +164,7 @@ impl SubAgentSpawner for AgentSpawner {
         &self,
         agent_type: &str,
         prompt: &str,
-        _events: EventEmitter,
+        events: EventEmitter,
         interactor: Interactor,
         ct: CancellationToken,
     ) -> Result<String, ToolError> {
@@ -170,6 +174,18 @@ impl SubAgentSpawner for AgentSpawner {
                 self.agent_types().join(", ")
             ))
         })?;
+
+        // Announce the team member to any UI (the "active agents" pane). The
+        // child's *internal* events stay swallowed; only this lifecycle surfaces.
+        let agent_id = format!(
+            "a{}",
+            self.next_agent_id.fetch_add(1, Ordering::Relaxed) + 1
+        );
+        events.emit(Event::AgentStart {
+            id: agent_id.clone(),
+            agent_type: agent_type.to_string(),
+            task: summarize_task(prompt),
+        });
 
         // Restricted toolset; never include `delegate` (no nested sub-agents).
         let child_registry = Arc::new(self.registry.subset(&def.allowed_tools, &["delegate"]));
@@ -208,15 +224,38 @@ impl SubAgentSpawner for AgentSpawner {
 
         child.run_turn(state.clone(), child_ctx, ct).await;
 
-        let st = state.lock().await;
-        let output = st
-            .messages
-            .iter()
-            .rev()
-            .find(|m| m.role == Role::Assistant && !m.text().trim().is_empty())
-            .map(|m| m.text())
-            .unwrap_or_else(|| "(sub-agent produced no output)".to_string());
+        let output = {
+            let st = state.lock().await;
+            st.messages
+                .iter()
+                .rev()
+                .find(|m| m.role == Role::Assistant && !m.text().trim().is_empty())
+                .map(|m| m.text())
+                .unwrap_or_else(|| "(sub-agent produced no output)".to_string())
+        };
+        events.emit(Event::AgentDone {
+            id: agent_id,
+            agent_type: agent_type.to_string(),
+            ok: true,
+            summary: summarize_task(&output),
+        });
         Ok(output)
+    }
+}
+
+/// First non-empty line of `s`, trimmed to a sensible label length.
+fn summarize_task(s: &str) -> String {
+    let line = s
+        .lines()
+        .map(str::trim)
+        .find(|l| !l.is_empty())
+        .unwrap_or("");
+    let line = line.trim_start_matches(['#', '-', '*', ' ']);
+    if line.chars().count() > 80 {
+        let cut: String = line.chars().take(79).collect();
+        format!("{cut}…")
+    } else {
+        line.to_string()
     }
 }
 

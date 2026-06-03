@@ -74,6 +74,17 @@ pub trait SessionFactory: Send + Sync {
     async fn connect_remote(&self, _name: &str) -> anyhow::Result<SessionHandle> {
         anyhow::bail!("remote instances are not supported by this host")
     }
+
+    /// Open a project workspace rooted at `path` as a fresh session (its own
+    /// working dir + that project's config/skills).
+    async fn open_workspace(&self, _path: &str) -> anyhow::Result<SessionHandle> {
+        anyhow::bail!("workspace switching is not supported by this host")
+    }
+
+    /// Project workspaces for the left sidebar (recent + pinned + scanned).
+    fn workspaces(&self) -> Vec<crate::Workspace> {
+        Vec::new()
+    }
 }
 
 /// Everything the TUI needs besides the session handle.
@@ -161,6 +172,7 @@ async fn run_loop(
     let mut events = session.subscribe();
     model.model_options = factory.model_options();
     model.remotes = factory.remotes();
+    model.workspaces = factory.workspaces();
     // Open tabs: one live handle + the saved transcript per tab, parallel to
     // `model.tabs`. Index 0 is the local session; the active tab's transcript
     // lives in `model.entries`, inactive tabs' in `tab_views`.
@@ -263,6 +275,43 @@ async fn run_loop(
                         }
                     }
                 }
+                // Open a project workspace as a new local tab (or switch if open).
+                SessionRequest::OpenWorkspace(path) => {
+                    let label = workspace_label(&path);
+                    if let Some(i) = model.tabs.iter().position(|(n, _)| n == &label) {
+                        switch_tab(
+                            &mut model,
+                            &mut session,
+                            &mut events,
+                            &handles,
+                            &mut tab_views,
+                            i,
+                        );
+                    } else {
+                        match factory.open_workspace(&path).await {
+                            Ok(handle) => {
+                                tab_views[model.active_tab] = std::mem::take(&mut model.entries);
+                                handles.push(handle.clone());
+                                tab_views.push(Vec::new());
+                                model.tabs.push((label.clone(), false));
+                                model.active_tab = handles.len() - 1;
+                                model.reset_for_session();
+                                model.working_dir = path.clone();
+                                model.busy = false;
+                                model.pending = None;
+                                model.scrollback = 0;
+                                model
+                                    .entries
+                                    .push(Entry::Notice(format!("◳ workspace '{label}' — {path}")));
+                                session = handle;
+                                events = session.subscribe();
+                            }
+                            Err(e) => model
+                                .entries
+                                .push(Entry::Notice(format!("open workspace failed: {e}"))),
+                        }
+                    }
+                }
                 SessionRequest::SwitchTab(i) => {
                     switch_tab(
                         &mut model,
@@ -347,6 +396,15 @@ async fn run_loop(
 
 /// Switch the active tab to `i`, preserving each tab's transcript: the leaving
 /// tab's `entries` are stashed and the entering tab's restored, then the live
+/// A short tab label for a workspace path (its final path component).
+fn workspace_label(path: &str) -> String {
+    path.trim_end_matches('/')
+        .rsplit('/')
+        .find(|s| !s.is_empty())
+        .unwrap_or(path)
+        .to_string()
+}
+
 /// handle + subscription are repointed.
 fn switch_tab(
     model: &mut Model,

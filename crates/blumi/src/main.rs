@@ -15,6 +15,7 @@ mod session;
 mod task;
 mod tui;
 mod web;
+mod workspace;
 
 use clap::{Parser, Subcommand};
 use std::path::PathBuf;
