@@ -4,6 +4,8 @@
 use crate::model::{Entry, Model, Msg, SessionRequest};
 use crate::{update, view};
 use blumi_core::SessionHandle;
+use blumi_protocol::Command;
+use blumi_task::{TaskBoard, TaskState};
 use crossterm::event::{
     DisableBracketedPaste, DisableMouseCapture, EnableBracketedPaste, EnableFocusChange,
     EnableMouseCapture, EventStream,
@@ -249,6 +251,9 @@ async fn run_loop(
             }
         }
 
+        // Autonomous loop: when idle, advance the task board (ralph-style).
+        advance_loop(&mut model, &session).await;
+
         if model.take_dirty() {
             terminal.draw(|f| view::render(&mut model, f))?;
         }
@@ -256,4 +261,67 @@ async fn run_loop(
 
     factory.save(&session).await; // persist on exit
     Ok(())
+}
+
+/// Drive the in-TUI autonomous loop: when a turn finishes, advance the current
+/// task and dispatch the next highest-priority todo as a fresh turn.
+async fn advance_loop(model: &mut Model, session: &SessionHandle) {
+    if !model.loop_active
+        || model.busy
+        || model.pending.is_some()
+        || model.provider_key_prompt.is_some()
+        || model.dialog.is_some()
+    {
+        return;
+    }
+    let mut board = TaskBoard::load(&model.tasks_path);
+
+    // The previous loop task just finished — advance it.
+    if let Some((id, title)) = model.loop_current.take() {
+        let next = if model.loop_review {
+            TaskState::Review
+        } else {
+            TaskState::Done
+        };
+        board.set_state_now(&id, next);
+        board.save().ok();
+        model
+            .entries
+            .push(Entry::Notice(format!("{} {title}", next.icon())));
+    }
+
+    // Pick the next todo, or finish.
+    let Some(task) = board.next_todo().cloned() else {
+        model.loop_active = false;
+        model.entries.push(Entry::Notice(format!(
+            "✿ loop complete — {} iterations",
+            model.loop_iter
+        )));
+        model.mark_dirty();
+        return;
+    };
+    board.set_state_now(&task.id, TaskState::Doing);
+    board.save().ok();
+    model.loop_iter += 1;
+    model.loop_current = Some((task.id.clone(), task.title.clone()));
+
+    let prompt = if task.detail.trim().is_empty() {
+        task.title.clone()
+    } else {
+        format!("{}\n\n{}", task.title, task.detail)
+    };
+    model.entries.push(Entry::User(format!(
+        "▶ [loop {}] {}",
+        model.loop_iter, task.title
+    )));
+    model.busy = true;
+    model.scrollback = 0;
+    let _ = session
+        .send(Command::UserMessage {
+            text: prompt,
+            attachments: vec![],
+            stream_id: None,
+        })
+        .await;
+    model.mark_dirty();
 }

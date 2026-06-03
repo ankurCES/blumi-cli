@@ -161,6 +161,12 @@ impl TaskBoard {
         Some(self.tasks[i].title.clone())
     }
 
+    /// Like [`Self::set_state`] but stamps the current time (convenience for
+    /// callers that don't depend on `time`).
+    pub fn set_state_now(&mut self, id_or_pos: &str, state: TaskState) -> Option<String> {
+        self.set_state(id_or_pos, state, OffsetDateTime::now_utc())
+    }
+
     /// Remove a task; returns whether anything was removed.
     pub fn remove(&mut self, id_or_pos: &str) -> bool {
         match self.index_of(id_or_pos) {
