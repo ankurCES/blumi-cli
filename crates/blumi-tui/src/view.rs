@@ -67,6 +67,8 @@ pub fn render(model: &mut Model, f: &mut Frame) {
     ci += 1;
     if show_right {
         render_dashboard(model, f, cols[ci], &theme);
+    } else {
+        model.dash_area = None;
     }
 
     if model.is_empty() {
@@ -246,7 +248,7 @@ fn render_sidebar(model: &mut Model, f: &mut Frame, area: Rect, theme: &Theme) {
 
 /// The agent dashboard: live session state, context usage, tasks, recent tool
 /// activity, and recent sessions — the run turned into a terminal cockpit.
-fn render_dashboard(model: &Model, f: &mut Frame, area: Rect, theme: &Theme) {
+fn render_dashboard(model: &mut Model, f: &mut Frame, area: Rect, theme: &Theme) {
     // A pulsing "live agent" dot: amber while working, green when ready.
     let dot_color = if model.busy {
         crate::mascot::pulse_color(0xFF, 0xC0, 0x4F, model.spinner_frame)
@@ -518,7 +520,15 @@ fn render_dashboard(model: &Model, f: &mut Frame, area: Rect, theme: &Theme) {
         }
     }
 
-    f.render_widget(Paragraph::new(lines), inner);
+    // Record geometry + clamp the scroll so the wheel can pan this pane on its
+    // own (it often overflows: logo + agents + session + context + usage + tasks).
+    let total = lines.len();
+    let max_scroll = total.saturating_sub(inner.height as usize);
+    let scroll = model.dash_scroll.min(max_scroll);
+    f.render_widget(Paragraph::new(lines).scroll((scroll as u16, 0)), inner);
+    model.dash_lines = total;
+    model.dash_area = Some((inner.x, inner.y, inner.width, inner.height));
+    model.dash_scroll = scroll;
 }
 
 /// Format a token count compactly: `1.2k`, `131k`, `42`.
