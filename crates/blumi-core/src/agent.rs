@@ -28,8 +28,11 @@ use std::sync::Arc;
 use tokio::sync::Mutex;
 use tokio_util::sync::CancellationToken;
 
-/// How many identical consecutive tool-call rounds count as a doom loop.
-const DOOM_REPEATS: usize = 3;
+/// Identical consecutive tool-call rounds before the runtime intervenes to
+/// break the loop (the model re-issued the exact same call with the same args).
+const DOOM_NUDGE_AT: usize = 2;
+/// How many times we try to redirect a repeating agent before giving up.
+const DOOM_MAX_NUDGES: u32 = 2;
 
 /// The production turn runner. Construct one per session.
 pub struct AgentTurnRunner {
@@ -140,6 +143,7 @@ impl TurnRunner for AgentTurnRunner {
         let tool_specs = self.registry.specs();
         let tool_ctx = self.tool_ctx(&ctx);
         let mut recent_signatures: Vec<String> = Vec::new();
+        let mut loop_nudges: u32 = 0;
 
         // Snapshot the active persona for this turn: it layers extra
         // instructions onto the system prompt and may override the temperature.
@@ -270,13 +274,47 @@ impl TurnRunner for AgentTurnRunner {
                 return DoneReason::Completed;
             }
 
-            // Doom-loop guard.
+            // Doom-loop guard. If the model re-issues the SAME tool call(s) with
+            // identical arguments, running them again only reproduces the same
+            // result — so instead of executing (or just aborting), we break the
+            // loop: drop the pointless repeat, keep any reasoning, and inject an
+            // escalating nudge so the agent changes course. Most loops recover
+            // here; we only give up if the nudges don't take.
             let signature = signature_of(&tool_calls);
             recent_signatures.push(signature);
-            if is_doom_loop(&recent_signatures) {
-                emit_error(&ctx, "doom loop: the agent repeated the same tool calls");
-                return DoneReason::DoomLoop;
+            if trailing_repeats(&recent_signatures) >= DOOM_NUDGE_AT {
+                loop_nudges += 1;
+                if !text.is_empty() {
+                    state.lock().await.messages.push(Message::assistant(text));
+                }
+                if loop_nudges > DOOM_MAX_NUDGES {
+                    ctx.events.emit(Event::Notice {
+                        message: "broke a repeating tool loop — the agent kept re-issuing \
+                                  the same call after being redirected; ending this turn"
+                            .into(),
+                    });
+                    return DoneReason::DoomLoop;
+                }
+                let nudge = if loop_nudges == 1 {
+                    "You just requested the exact same tool call(s) with identical arguments \
+                     as the previous step, and that result is already in the conversation \
+                     above. Repeating it will not produce anything new. Use the result you \
+                     already have, or take a DIFFERENT action — different arguments, a \
+                     different tool, or a new approach. Do not repeat the same call."
+                } else {
+                    "You are still repeating the same tool call. Stop calling tools and reply \
+                     now with your best answer using what you already know; if you are \
+                     genuinely blocked, state precisely what is blocking you and why."
+                };
+                state
+                    .lock()
+                    .await
+                    .messages
+                    .push(Message::user(nudge.to_string()));
+                continue;
             }
+            // A productive (non-repeating) step — reset the redirect counter.
+            loop_nudges = 0;
 
             // Record the assistant message (with its tool calls) before results.
             state
@@ -491,16 +529,13 @@ fn signature_of(calls: &[ToolCall]) -> String {
     parts.join("|")
 }
 
-fn is_doom_loop(signatures: &[String]) -> bool {
-    if signatures.len() < DOOM_REPEATS {
-        return false;
+/// How many times the most recent signature repeats consecutively at the tail
+/// (1 = it just appeared; 2 = the model issued the identical call twice in a row).
+fn trailing_repeats(signatures: &[String]) -> usize {
+    match signatures.last() {
+        Some(last) => signatures.iter().rev().take_while(|s| *s == last).count(),
+        None => 0,
     }
-    let last = &signatures[signatures.len() - 1];
-    signatures
-        .iter()
-        .rev()
-        .take(DOOM_REPEATS)
-        .all(|s| s == last)
 }
 
 fn add_usage(total: &mut Usage, u: &Usage) {
@@ -705,12 +740,108 @@ mod tests {
         assert_eq!(snap.messages.last().unwrap().text(), "all done");
     }
 
+    #[tokio::test]
+    async fn doom_loop_is_broken_then_recovers() {
+        let flag = Arc::new(AtomicBool::new(false));
+        let llm = Arc::new(ScriptedLlm {
+            scripts: std::sync::Mutex::new(
+                vec![
+                    // iter 1: call Flag
+                    vec![
+                        tool_call_chunk("c1", "Flag", "{}"),
+                        StreamChunk::Done {
+                            reason: FinishReason::ToolCalls,
+                        },
+                    ],
+                    // iter 2: the SAME call again → runtime should break the loop,
+                    // not execute it again, and inject a redirect nudge.
+                    vec![
+                        tool_call_chunk("c2", "Flag", "{}"),
+                        StreamChunk::Done {
+                            reason: FinishReason::ToolCalls,
+                        },
+                    ],
+                    // iter 3: the model takes the nudge and finishes.
+                    vec![
+                        StreamChunk::Text {
+                            text: "recovered".into(),
+                        },
+                        StreamChunk::Done {
+                            reason: FinishReason::Stop,
+                        },
+                    ],
+                ]
+                .into(),
+            ),
+        });
+
+        let mut reg = ToolRegistry::new();
+        reg.register(Arc::new(FlagTool(flag.clone())));
+        let perms = Arc::new(PermissionEngine::new(PermissionConfig {
+            yolo: true,
+            ..Default::default()
+        }));
+        let runner = Arc::new(AgentTurnRunner::new(
+            llm,
+            Arc::new(reg),
+            perms,
+            Arc::new(NoopExec),
+            LlmOptions::default(),
+            10,
+            131_072,
+            "you are blumi".into(),
+            PathBuf::from("."),
+        ));
+
+        let h = spawn_session(SessionId::from("s"), "m", runner);
+        let mut rx = h.subscribe();
+        h.send(Command::UserMessage {
+            text: "go".into(),
+            attachments: vec![],
+            stream_id: None,
+        })
+        .await
+        .unwrap();
+
+        let events = drain_until_done(&mut rx).await;
+
+        // The loop recovered: it completed instead of aborting with DoomLoop.
+        assert!(matches!(
+            events.last().unwrap(),
+            Event::TurnDone {
+                reason: DoneReason::Completed
+            }
+        ));
+        // The repeated call was NOT executed a second time (Flag ran once).
+        let runs = events
+            .iter()
+            .filter(|e| matches!(e, Event::ToolStart { name, .. } if name == "Flag"))
+            .count();
+        assert_eq!(runs, 1, "the repeat must be dropped, not re-run");
+
+        let snap = h.snapshot().await;
+        assert_eq!(snap.messages.last().unwrap().text(), "recovered");
+        // A redirect nudge was injected to break the loop.
+        assert!(
+            snap.messages
+                .iter()
+                .any(|m| m.text().contains("same tool call")),
+            "a redirect nudge should have been injected"
+        );
+    }
+
     #[test]
-    fn doom_loop_detects_repeats() {
-        let sig = "Flag:{}".to_string();
-        assert!(!is_doom_loop(std::slice::from_ref(&sig)));
-        assert!(!is_doom_loop(&[sig.clone(), sig.clone()]));
-        assert!(is_doom_loop(&[sig.clone(), sig.clone(), sig.clone()]));
+    fn trailing_repeats_counts_consecutive_tail() {
+        let a = "Flag:{}".to_string();
+        let b = "Other:{}".to_string();
+        assert_eq!(trailing_repeats(&[]), 0);
+        assert_eq!(trailing_repeats(std::slice::from_ref(&a)), 1);
+        assert_eq!(trailing_repeats(&[a.clone(), a.clone()]), 2);
+        // A different call in between resets the tail run.
+        assert_eq!(trailing_repeats(&[a.clone(), a.clone(), b.clone()]), 1);
+        assert_eq!(trailing_repeats(&[b.clone(), a.clone(), a.clone()]), 2);
+        // The nudge trigger fires at 2 identical in a row.
+        assert!(trailing_repeats(&[a.clone(), a.clone()]) >= DOOM_NUDGE_AT);
     }
 
     #[test]
