@@ -21,6 +21,13 @@ use tokio_util::sync::CancellationToken;
 /// The command channel buffer (commands are infrequent and small).
 const COMMAND_BUFFER: usize = 64;
 
+/// Injected to resume a turn that stopped at the per-turn tool-iteration cap.
+/// Guides the model to continue from where it left off without redoing work.
+const AUTO_CONTINUE_PROMPT: &str = "Continue. You reached the per-turn tool limit, \
+not the end of the task — resume exactly where you left off, do not repeat steps \
+you have already completed, and keep working until the task is genuinely done \
+(then stop).";
+
 /// Error returned when a command can't reach a shut-down session.
 #[derive(Debug, thiserror::Error)]
 #[error("session is closed")]
@@ -112,6 +119,7 @@ pub fn spawn_session_seeded(seed: SessionState, runner: Arc<dyn TurnRunner>) -> 
         plan_pending: HashSet::new(),
         turn_token: None,
         queued: VecDeque::new(),
+        auto_continues: 0,
     };
 
     tokio::spawn(actor.run());
@@ -140,6 +148,9 @@ struct SessionActor {
     turn_token: Option<CancellationToken>,
     /// User messages received while busy, started FIFO when the turn ends.
     queued: VecDeque<(String, Option<StreamId>)>,
+    /// Consecutive auto-continuations since the last user message / completion
+    /// (bounded by the runner's `auto_continue_budget`).
+    auto_continues: u32,
 }
 
 impl SessionActor {
@@ -175,6 +186,8 @@ impl SessionActor {
                 if self.turn_token.is_some() {
                     self.queued.push_back((text, stream_id));
                 } else {
+                    // A fresh user instruction resets the auto-continue budget.
+                    self.auto_continues = 0;
                     self.start_turn(text, stream_id).await;
                 }
             }
@@ -284,13 +297,27 @@ impl SessionActor {
     }
 
     async fn start_turn(&mut self, text: String, stream_id: Option<StreamId>) {
+        self.start_turn_inner(text, stream_id, true).await;
+    }
+
+    /// Start a turn. `announce` emits `TurnStarted` (true for user-initiated
+    /// turns); auto-continuations pass `false` so the whole self-woken sequence
+    /// reads as one seamless turn (one TurnStarted … one TurnDone).
+    async fn start_turn_inner(
+        &mut self,
+        text: String,
+        stream_id: Option<StreamId>,
+        announce: bool,
+    ) {
         self.state.lock().await.messages.push(Message::user(text));
 
         let token = CancellationToken::new();
         self.turn_token = Some(token.clone());
-        self.publish(Event::TurnStarted {
-            stream_id: stream_id.map(|s| s.0),
-        });
+        if announce {
+            self.publish(Event::TurnStarted {
+                stream_id: stream_id.map(|s| s.0),
+            });
+        }
 
         let ctx = TurnContext {
             session_id: self.id.clone(),
@@ -307,15 +334,55 @@ impl SessionActor {
     }
 
     async fn finish_turn(&mut self, reason: blumi_protocol::DoneReason) {
-        // Drain any events the turn emitted before signalling completion, so
-        // TurnDone is always the last event of the turn.
+        use blumi_protocol::DoneReason;
+        // Drain any events the turn emitted before deciding what's next, so
+        // ordering is preserved.
         while let Ok(event) = self.event_rx.try_recv() {
             self.publish(event);
         }
-        self.publish(Event::TurnDone { reason });
         self.turn_token = None;
-        self.state.lock().await.turn_count += 1;
 
+        // Self-wake: a turn that stopped *only* because it hit the per-turn tool
+        // cap (not finished / errored / looped) and has no pending user message
+        // is continued automatically in the same session — no work or context
+        // is lost, and the user needn't nudge it between turns. We do NOT emit
+        // TurnDone for the spent segment (nor TurnStarted for the next), so the
+        // whole self-woken sequence reads as one seamless turn: `busy` stays on
+        // and consumers that wait for TurnDone see only the real end. Bounded by
+        // the runner's budget so it can't run away.
+        let budget = self.runner.auto_continue_budget();
+        let auto = reason == DoneReason::MaxIterations
+            && budget > 0
+            && self.queued.is_empty()
+            && self.auto_continues < budget;
+        if auto {
+            self.auto_continues += 1;
+            self.publish(Event::Notice {
+                message: format!(
+                    "↻ continuing automatically ({}/{}) — picking up where it left off",
+                    self.auto_continues, budget
+                ),
+            });
+            self.start_turn_inner(AUTO_CONTINUE_PROMPT.to_string(), None, false)
+                .await;
+            return;
+        }
+
+        // Budget exhausted on a cap-stop: tell the user it paused, then end.
+        if reason == DoneReason::MaxIterations && budget > 0 && self.auto_continues >= budget {
+            self.publish(Event::Notice {
+                message: format!(
+                    "paused after {budget} auto-continuations — send a message to keep going"
+                ),
+            });
+        }
+
+        // End the (possibly multi-segment) turn.
+        self.publish(Event::TurnDone { reason });
+        self.state.lock().await.turn_count += 1;
+        self.auto_continues = 0;
+
+        // A queued user message runs next (the user is steering).
         if let Some((text, stream_id)) = self.queued.pop_front() {
             self.start_turn(text, stream_id).await;
         }
@@ -391,6 +458,32 @@ mod tests {
         }
     }
 
+    /// Always stops at the per-turn cap (MaxIterations), with an auto-continue
+    /// budget — to exercise the actor's self-wake.
+    struct CapRunner {
+        budget: u32,
+        calls: std::sync::atomic::AtomicU32,
+    }
+
+    #[async_trait]
+    impl TurnRunner for CapRunner {
+        async fn run_turn(
+            &self,
+            _state: Arc<Mutex<SessionState>>,
+            ctx: TurnContext,
+            _ct: CancellationToken,
+        ) -> DoneReason {
+            self.calls.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            ctx.events.emit(Event::Token {
+                text: "work".into(),
+            });
+            DoneReason::MaxIterations
+        }
+        fn auto_continue_budget(&self) -> u32 {
+            self.budget
+        }
+    }
+
     /// Asks for approval, then echoes the decision into an assistant message.
     struct ApprovalRunner;
 
@@ -452,6 +545,48 @@ mod tests {
         assert_eq!(snap.turn_count, 1);
         // user + assistant
         assert_eq!(snap.messages.len(), 2);
+    }
+
+    #[tokio::test]
+    async fn auto_continues_then_pauses_when_budget_spent() {
+        let runner = Arc::new(CapRunner {
+            budget: 2,
+            calls: std::sync::atomic::AtomicU32::new(0),
+        });
+        let h = spawn_session(SessionId::from("ac"), "m", runner.clone());
+        let mut rx = h.subscribe();
+        h.send(Command::UserMessage {
+            text: "do a big task".into(),
+            attachments: vec![],
+            stream_id: None,
+        })
+        .await
+        .unwrap();
+
+        let events = collect_until_done(&mut rx).await;
+
+        // The self-woken sequence reads as ONE turn: a single TurnStarted and a
+        // single TurnDone bracket all the segments.
+        let started = events
+            .iter()
+            .filter(|e| matches!(e, Event::TurnStarted { .. }))
+            .count();
+        let done = events
+            .iter()
+            .filter(|e| matches!(e, Event::TurnDone { .. }))
+            .count();
+        assert_eq!(started, 1, "one TurnStarted for the whole sequence");
+        assert_eq!(done, 1, "one TurnDone at the real end");
+
+        // Original turn + 2 auto-continuations actually ran.
+        assert_eq!(runner.calls.load(std::sync::atomic::Ordering::SeqCst), 3);
+
+        // It narrated the two continuations and the final pause.
+        let notices = events
+            .iter()
+            .filter(|e| matches!(e, Event::Notice { .. }))
+            .count();
+        assert!(notices >= 3, "continuation + pause notices, got {notices}");
     }
 
     #[tokio::test]

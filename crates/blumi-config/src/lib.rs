@@ -40,6 +40,10 @@ pub struct LlmConfig {
     pub top_k: u32,
     /// Iterations the agent loop may take in a single turn.
     pub max_iterations: u32,
+    /// How many times the runtime may auto-continue a turn that stopped only
+    /// because it hit `max_iterations` (it self-wakes in the same session, so
+    /// no work/context is lost). 0 disables auto-continue. Bounds runaway work.
+    pub max_auto_continue: u32,
 }
 
 impl Default for LlmConfig {
@@ -53,6 +57,7 @@ impl Default for LlmConfig {
             top_p: 0.8,
             top_k: 20,
             max_iterations: 25,
+            max_auto_continue: 12,
         }
     }
 }

@@ -293,7 +293,8 @@ pub async fn build_session(
             work_dir.clone(),
         )
         .with_spawner(spawner)
-        .with_personas(personas, &active),
+        .with_personas(personas, &active)
+        .with_auto_continue(config.llm.max_auto_continue),
     );
 
     let state =
