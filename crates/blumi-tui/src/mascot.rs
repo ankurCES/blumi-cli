@@ -230,6 +230,40 @@ pub fn flower_raster(rows: usize) -> Vec<Line<'static>> {
         .collect()
 }
 
+/// The same pixel-perfect flower as [`flower_raster`], but as a truecolor ANSI
+/// string for non-ratatui surfaces (the CLI startup splash / banners). Each row
+/// ends with a reset + newline.
+pub fn flower_raster_ansi(rows: usize) -> String {
+    let cols = rows * 2;
+    let (pw, ph) = (cols as f32, (rows * 2) as f32);
+    let (cx, cy) = (pw / 2.0, ph / 2.0);
+    let scale = (pw / 2.0) / 74.0;
+    let px = |c: usize, r: usize| {
+        let x = (c as f32 + 0.5 - cx) / scale;
+        let y = (r as f32 + 0.5 - cy) / scale;
+        flower_pixel(x, y)
+    };
+    let mut out = String::new();
+    for row in 0..rows {
+        for col in 0..cols {
+            match (px(col, row * 2), px(col, row * 2 + 1)) {
+                (None, None) => out.push(' '),
+                (Some((r, g, b)), None) => {
+                    out.push_str(&format!("\x1b[38;2;{r};{g};{b}m\x1b[49m▀"))
+                }
+                (None, Some((r, g, b))) => {
+                    out.push_str(&format!("\x1b[38;2;{r};{g};{b}m\x1b[49m▄"))
+                }
+                (Some((tr, tg, tb)), Some((br, bg, bb))) => {
+                    out.push_str(&format!("\x1b[38;2;{tr};{tg};{tb};48;2;{br};{bg};{bb}m▀"))
+                }
+            }
+        }
+        out.push_str("\x1b[0m\n");
+    }
+    out
+}
+
 /// The animated rose mark for the TUI landing — glyphs flow through the ramp,
 /// so it shimmers when the landing is redrawn each tick.
 pub fn rose_logo(tick: usize) -> Vec<Line<'static>> {
