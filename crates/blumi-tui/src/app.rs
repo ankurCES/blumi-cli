@@ -4,7 +4,7 @@
 use crate::model::{Entry, Model, Msg, SessionRequest};
 use crate::{update, view};
 use blumi_core::SessionHandle;
-use blumi_protocol::Command;
+use blumi_protocol::{Command, Envelope};
 use blumi_task::{TaskBoard, TaskState};
 use crossterm::event::{
     DisableBracketedPaste, DisableMouseCapture, EnableBracketedPaste, EnableFocusChange,
@@ -21,6 +21,7 @@ use std::io::{self, Stdout};
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
+use tokio::sync::broadcast;
 
 pub(crate) type Term = Terminal<CrosstermBackend<Stdout>>;
 
@@ -63,6 +64,16 @@ pub trait SessionFactory: Send + Sync {
     /// Persist a provider switch (+ an optional API key) to settings.json. The
     /// app loop then reloads the session to apply it.
     async fn set_provider(&self, provider: &str, api_key: Option<String>) -> anyhow::Result<()>;
+
+    /// Configured remote-instance names (for the `/remote` picker + tab bar).
+    fn remotes(&self) -> Vec<String> {
+        Vec::new()
+    }
+
+    /// Attach to a remote instance by name, returning a proxying session handle.
+    async fn connect_remote(&self, _name: &str) -> anyhow::Result<SessionHandle> {
+        anyhow::bail!("remote instances are not supported by this host")
+    }
 }
 
 /// Everything the TUI needs besides the session handle.
@@ -146,6 +157,12 @@ async fn run_loop(
     let mut session = factory.create().await?;
     let mut events = session.subscribe();
     model.model_options = factory.model_options();
+    model.remotes = factory.remotes();
+    // Open tabs: one live handle + the saved transcript per tab, parallel to
+    // `model.tabs`. Index 0 is the local session; the active tab's transcript
+    // lives in `model.entries`, inactive tabs' in `tab_views`.
+    let mut handles: Vec<SessionHandle> = vec![session.clone()];
+    let mut tab_views: Vec<Vec<Entry>> = vec![Vec::new()];
     let mut input = EventStream::new();
     let mut tick = tokio::time::interval(Duration::from_millis(50)); // ~20fps
 
@@ -172,28 +189,87 @@ async fn run_loop(
         let Some(msg) = msg else { continue };
         update::update(&mut model, msg, &session).await;
 
-        // A command may have requested a new/resumed session — the loop owns the
-        // handle + subscription, so we swap them here (saving the current one).
+        // A command may have requested a session switch (new/resume local, or a
+        // remote tab, or switching between open tabs). The loop owns the handles
+        // + subscription, so it performs the swap here.
         if let Some(req) = model.take_session_request() {
-            factory.save(&session).await;
-            let next = match &req {
-                SessionRequest::New => factory.create().await,
-                SessionRequest::Resume(id) => factory.resume(id).await,
-            };
-            match next {
-                Ok(handle) => {
-                    if let SessionRequest::Resume(_) = req {
-                        model.load_snapshot(handle.snapshot().await);
-                    } else {
-                        model.reset_for_session();
+            match req {
+                // New / Resume always operate on the local tab (index 0).
+                SessionRequest::New | SessionRequest::Resume(_) => {
+                    factory.save(&handles[0]).await;
+                    let next = match &req {
+                        SessionRequest::Resume(id) => factory.resume(id).await,
+                        _ => factory.create().await,
+                    };
+                    match next {
+                        Ok(handle) => {
+                            // Drop any non-local tabs' stashed views back to local focus.
+                            if model.active_tab != 0 {
+                                tab_views[model.active_tab] = std::mem::take(&mut model.entries);
+                            }
+                            handles[0] = handle.clone();
+                            tab_views[0].clear();
+                            model.active_tab = 0;
+                            model.busy = false;
+                            model.pending = None;
+                            if let SessionRequest::Resume(_) = req {
+                                model.load_snapshot(handle.snapshot().await);
+                            } else {
+                                model.reset_for_session();
+                            }
+                            session = handle;
+                            events = session.subscribe();
+                            model.recent_sessions = factory.list().await;
+                        }
+                        Err(e) => model
+                            .entries
+                            .push(Entry::Notice(format!("session switch failed: {e}"))),
                     }
-                    session = handle;
-                    events = session.subscribe();
-                    model.recent_sessions = factory.list().await;
                 }
-                Err(e) => model
-                    .entries
-                    .push(Entry::Notice(format!("session switch failed: {e}"))),
+                // Attach to an existing remote tab, or open a new one.
+                SessionRequest::Remote(name) => {
+                    if let Some(i) = model.tabs.iter().position(|(n, _)| *n == name) {
+                        switch_tab(
+                            &mut model,
+                            &mut session,
+                            &mut events,
+                            &handles,
+                            &mut tab_views,
+                            i,
+                        );
+                    } else {
+                        match factory.connect_remote(&name).await {
+                            Ok(handle) => {
+                                tab_views[model.active_tab] = std::mem::take(&mut model.entries);
+                                handles.push(handle.clone());
+                                tab_views.push(Vec::new());
+                                model.tabs.push((name.clone(), true));
+                                model.active_tab = handles.len() - 1;
+                                model.busy = false;
+                                model.pending = None;
+                                model.scrollback = 0;
+                                model.entries.push(Entry::Notice(format!(
+                                    "⇆ attached to remote '{name}' — /remote local to return"
+                                )));
+                                session = handle;
+                                events = session.subscribe();
+                            }
+                            Err(e) => model
+                                .entries
+                                .push(Entry::Notice(format!("remote attach failed: {e}"))),
+                        }
+                    }
+                }
+                SessionRequest::SwitchTab(i) => {
+                    switch_tab(
+                        &mut model,
+                        &mut session,
+                        &mut events,
+                        &handles,
+                        &mut tab_views,
+                        i,
+                    );
+                }
             }
             model.mark_dirty();
         }
@@ -264,6 +340,34 @@ async fn run_loop(
 
     factory.save(&session).await; // persist on exit
     Ok(())
+}
+
+/// Switch the active tab to `i`, preserving each tab's transcript: the leaving
+/// tab's `entries` are stashed and the entering tab's restored, then the live
+/// handle + subscription are repointed.
+fn switch_tab(
+    model: &mut Model,
+    session: &mut SessionHandle,
+    events: &mut broadcast::Receiver<Envelope>,
+    handles: &[SessionHandle],
+    tab_views: &mut [Vec<Entry>],
+    i: usize,
+) {
+    if i >= handles.len() || i == model.active_tab {
+        return;
+    }
+    tab_views[model.active_tab] = std::mem::take(&mut model.entries);
+    model.entries = std::mem::take(&mut tab_views[i]);
+    model.active_tab = i;
+    model.busy = false;
+    model.pending = None;
+    model.scrollback = 0;
+    *session = handles[i].clone();
+    *events = session.subscribe();
+    let label = model.tabs[i].0.clone();
+    model
+        .entries
+        .push(Entry::Notice(format!("⇆ switched to {label}")));
 }
 
 /// Drive the in-TUI autonomous loop: when a turn finishes, advance the current

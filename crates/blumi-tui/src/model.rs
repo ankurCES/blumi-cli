@@ -59,6 +59,10 @@ pub enum SessionRequest {
     New,
     /// Resume a stored session by id.
     Resume(String),
+    /// Switch to (or open) a remote-instance tab by name.
+    Remote(String),
+    /// Switch to an already-open tab by index (0 = local).
+    SwitchTab(usize),
 }
 
 pub struct Model {
@@ -141,6 +145,12 @@ pub struct Model {
     pub loop_current: Option<(String, String)>,
     /// A pending session switch for the app loop to perform.
     pub session_request: Option<SessionRequest>,
+    /// Configured remote instances (names) available to attach via `/remote`.
+    pub remotes: Vec<String>,
+    /// Open tabs (name, is_remote); index 0 is the local session.
+    pub tabs: Vec<(String, bool)>,
+    /// Index of the active tab.
+    pub active_tab: usize,
     /// Set when the agent asked to reload itself (self-evolution). The app loop
     /// rebuilds the session in place once the turn is idle, keeping the
     /// transcript. Holds the reason for the completion notice.
@@ -206,6 +216,9 @@ impl Model {
             memory_view: None,
             usage_view: None,
             board_view: None,
+            remotes: Vec::new(),
+            tabs: vec![("local".to_string(), false)],
+            active_tab: 0,
             tasks_path: PathBuf::new(),
             loop_active: false,
             loop_review: false,
@@ -301,6 +314,24 @@ impl Model {
     /// Request resuming a stored session by id (handled by the app loop).
     pub fn request_resume(&mut self, id: impl Into<String>) {
         self.session_request = Some(SessionRequest::Resume(id.into()));
+    }
+
+    /// Request attaching to (or switching to) a remote-instance tab by name.
+    pub fn request_remote(&mut self, name: impl Into<String>) {
+        self.session_request = Some(SessionRequest::Remote(name.into()));
+    }
+
+    /// Request switching to an already-open tab by index.
+    pub fn request_tab(&mut self, index: usize) {
+        self.session_request = Some(SessionRequest::SwitchTab(index));
+    }
+
+    /// Switch to the next open tab (wraps). No-op if only the local tab is open.
+    pub fn cycle_tab(&mut self) {
+        if self.tabs.len() > 1 {
+            let next = (self.active_tab + 1) % self.tabs.len();
+            self.request_tab(next);
+        }
     }
 
     pub fn take_session_request(&mut self) -> Option<SessionRequest> {

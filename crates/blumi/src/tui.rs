@@ -112,6 +112,29 @@ impl blumi_tui::SessionFactory for TuiSessionFactory {
             api_key.as_deref(),
         )
     }
+
+    fn remotes(&self) -> Vec<String> {
+        self.fresh_config()
+            .remote
+            .instances
+            .iter()
+            .map(|r| r.name.clone())
+            .collect()
+    }
+
+    async fn connect_remote(&self, name: &str) -> anyhow::Result<blumi_core::SessionHandle> {
+        let cfg = self.fresh_config();
+        let inst = cfg
+            .remote
+            .instances
+            .iter()
+            .find(|r| r.name == name)
+            .ok_or_else(|| anyhow::anyhow!("unknown remote '{name}'"))?;
+        if inst.url.trim().is_empty() {
+            anyhow::bail!("remote '{name}' has no url");
+        }
+        Ok(crate::remote::connect(inst))
+    }
 }
 
 impl TuiSessionFactory {

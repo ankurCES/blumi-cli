@@ -511,12 +511,32 @@ fn render_header(model: &Model, f: &mut Frame, area: Rect, theme: &Theme) {
             },
             theme.accent(),
         ),
-        Span::styled("  ·  ", theme.dim()),
-        Span::styled(shorten(&model.working_dir, 32), theme.subtle()),
     ];
-    if !model.persona.is_empty() && model.persona != "default" {
+    // When more than the local tab is open, the header shows a tab strip
+    // (ralph-style) in place of the working-dir crumb.
+    if model.tabs.len() > 1 {
+        spans.push(Span::styled("   ", theme.dim()));
+        for (i, (name, remote)) in model.tabs.iter().enumerate() {
+            let active = i == model.active_tab;
+            let glyph = if *remote { "☁" } else { "▪" };
+            let chip = format!(" {glyph} {name} ");
+            let style = if active {
+                theme.bold_primary()
+            } else {
+                theme.subtle()
+            };
+            spans.push(Span::styled(chip, style));
+        }
+    } else {
         spans.push(Span::styled("  ·  ", theme.dim()));
-        spans.push(Span::styled(model.persona.clone(), theme.subtle()));
+        spans.push(Span::styled(
+            shorten(&model.working_dir, 32),
+            theme.subtle(),
+        ));
+        if !model.persona.is_empty() && model.persona != "default" {
+            spans.push(Span::styled("  ·  ", theme.dim()));
+            spans.push(Span::styled(model.persona.clone(), theme.subtle()));
+        }
     }
     f.render_widget(Paragraph::new(Line::from(spans)), left_area);
 
@@ -991,6 +1011,18 @@ mod tests {
         assert!(out.contains("local-first"), "landing tagline");
         assert!(out.contains("quick commands"), "command table heading");
         assert!(out.contains("/help"), "command table entry");
+    }
+
+    #[test]
+    fn header_shows_remote_tabs() {
+        let mut model = Model::new("m".into(), "/tmp".into());
+        model.entries.push(Entry::User("hi".into())); // non-empty so header renders
+        model.tabs = vec![("local".into(), false), ("prod-box".into(), true)];
+        model.active_tab = 1;
+        let out = render_to_string(&mut model, 100, 24);
+        assert!(out.contains("local"), "local tab shown");
+        assert!(out.contains("prod-box"), "remote tab shown");
+        assert!(out.contains('☁'), "remote glyph shown");
     }
 
     #[test]
