@@ -134,6 +134,102 @@ pub fn thinking(tick: usize) -> Vec<Span<'static>> {
     ]
 }
 
+// ── Pixel-perfect flower (half-block raster of the logo PNG) ───────────────
+
+/// Linear-interpolate two RGB colors.
+fn lerp_rgb(a: (u8, u8, u8), b: (u8, u8, u8), f: f32) -> (u8, u8, u8) {
+    let l = |x: u8, y: u8| (x as f32 + (y as f32 - x as f32) * f).round() as u8;
+    (l(a.0, b.0), l(a.1, b.1), l(a.2, b.2))
+}
+
+/// The petal gradient sampled across the flower's bounding box — top-left rose →
+/// bottom-right cyan, the diagonal sweep of the logo PNG.
+fn petal_color(x: f32, y: f32) -> (u8, u8, u8) {
+    const STOPS: [(f32, (u8, u8, u8)); 4] = [
+        (0.0, (0xFF, 0x4F, 0x87)),  // rose
+        (0.45, (0x9B, 0x86, 0xFF)), // lavender
+        (0.75, (0x6B, 0x50, 0xFF)), // violet
+        (1.0, (0x68, 0xFF, 0xD6)),  // cyan
+    ];
+    let t = ((((x + 69.0) / 138.0) + ((y + 69.0) / 138.0)) * 0.5).clamp(0.0, 1.0);
+    for w in STOPS.windows(2) {
+        let (t0, c0) = w[0];
+        let (t1, c1) = w[1];
+        if t <= t1 {
+            let f = if t1 > t0 { (t - t0) / (t1 - t0) } else { 0.0 };
+            return lerp_rgb(c0, c1, f);
+        }
+    }
+    STOPS[3].1
+}
+
+/// The color of the flower at local point (x, y) — flower-space units, centered
+/// at the origin, bbox ≈ [-69, 69]². `None` is transparent (background). Mirrors
+/// the logo SVG: a dark center dot, a cyan nucleus ring, then eight gradient
+/// petals (four cardinal + four diagonal).
+fn flower_pixel(x: f32, y: f32) -> Option<(u8, u8, u8)> {
+    let dist2 = x * x + y * y;
+    if dist2 <= 7.5 * 7.5 {
+        return Some((0x0E, 0x11, 0x16)); // center dot
+    }
+    if dist2 <= 17.0 * 17.0 {
+        return Some((0x68, 0xFF, 0xD6)); // cyan nucleus
+    }
+    // (cx, cy, rx, ry, rotation°)
+    const PETALS: [(f32, f32, f32, f32, f32); 8] = [
+        (0.0, -36.0, 19.0, 33.0, 0.0),
+        (0.0, 36.0, 19.0, 33.0, 0.0),
+        (-36.0, 0.0, 33.0, 19.0, 0.0),
+        (36.0, 0.0, 33.0, 19.0, 0.0),
+        (-26.0, -26.0, 28.0, 15.0, 45.0),
+        (26.0, 26.0, 28.0, 15.0, 45.0),
+        (26.0, -26.0, 28.0, 15.0, -45.0),
+        (-26.0, 26.0, 28.0, 15.0, -45.0),
+    ];
+    for (cx, cy, rx, ry, deg) in PETALS {
+        let (dx, dy) = (x - cx, y - cy);
+        let (s, c) = (-deg).to_radians().sin_cos();
+        let (xr, yr) = (dx * c - dy * s, dx * s + dy * c);
+        if (xr / rx).powi(2) + (yr / ry).powi(2) <= 1.0 {
+            return Some(petal_color(x, y));
+        }
+    }
+    None
+}
+
+/// Render the flower as a `rows`-tall half-block raster: each cell packs two
+/// vertical pixels (`▀` = top fg / bottom bg), giving a smooth, full-color image
+/// of the logo PNG in the terminal. Cell aspect ~1:2 makes the doubled-height
+/// pixel grid square, so the bloom stays round.
+pub fn flower_raster(rows: usize) -> Vec<Line<'static>> {
+    let cols = rows * 2; // square pixel grid (half-blocks double the height)
+    let (pw, ph) = (cols as f32, (rows * 2) as f32);
+    let (cx, cy) = (pw / 2.0, ph / 2.0);
+    let scale = (pw / 2.0) / 74.0; // flower radius ≈ 69 + a little margin
+    let sample = |px: usize, py: usize| -> Option<Color> {
+        let x = (px as f32 + 0.5 - cx) / scale;
+        let y = (py as f32 + 0.5 - cy) / scale;
+        flower_pixel(x, y).map(|(r, g, b)| Color::Rgb(r, g, b))
+    };
+    (0..rows)
+        .map(|row| {
+            let spans = (0..cols)
+                .map(
+                    |col| match (sample(col, row * 2), sample(col, row * 2 + 1)) {
+                        (None, None) => Span::raw(" "),
+                        (Some(t), None) => Span::styled("▀".to_string(), Style::default().fg(t)),
+                        (None, Some(b)) => Span::styled("▄".to_string(), Style::default().fg(b)),
+                        (Some(t), Some(b)) => {
+                            Span::styled("▀".to_string(), Style::default().fg(t).bg(b))
+                        }
+                    },
+                )
+                .collect::<Vec<_>>();
+            Line::from(spans)
+        })
+        .collect()
+}
+
 /// The animated rose mark for the TUI landing — glyphs flow through the ramp,
 /// so it shimmers when the landing is redrawn each tick.
 pub fn rose_logo(tick: usize) -> Vec<Line<'static>> {
@@ -277,6 +373,31 @@ mod tests {
         let ansi = wordmark_ansi(0);
         assert_eq!(ansi.matches('\n').count(), crate::logo::BLUMI_BLOCK.len());
         assert!(ansi.contains("\x1b[1;38;2;")); // truecolor escape
+    }
+
+    #[test]
+    fn flower_raster_paints_png_regions() {
+        let lines = flower_raster(11);
+        assert_eq!(lines.len(), 11);
+        let (mut cyan, mut dark, mut blocks) = (false, false, false);
+        for l in &lines {
+            for s in &l.spans {
+                if s.content == "▀" || s.content == "▄" {
+                    blocks = true;
+                }
+                for col in [s.style.fg, s.style.bg].into_iter().flatten() {
+                    if col == Color::Rgb(0x68, 0xFF, 0xD6) {
+                        cyan = true;
+                    }
+                    if col == Color::Rgb(0x0E, 0x11, 0x16) {
+                        dark = true;
+                    }
+                }
+            }
+        }
+        assert!(blocks, "rendered with half-block pixels");
+        assert!(cyan, "cyan nucleus present");
+        assert!(dark, "dark center dot present");
     }
 
     #[test]

@@ -986,11 +986,24 @@ fn render_header(model: &Model, f: &mut Frame, area: Rect, theme: &Theme) {
 
 fn render_landing(model: &Model, f: &mut Frame, area: Rect, theme: &Theme) {
     let mut lines = vec![Line::raw(""), Line::raw("")];
-    lines.extend(
-        crate::mascot::rose_logo(model.spinner_frame)
-            .into_iter()
-            .map(|l| l.alignment(Alignment::Center)),
-    );
+    // The flower logo, centered, above the wordmark. On a roomy terminal it's a
+    // pixel-perfect half-block raster of the PNG, sized to the height left after
+    // the rest of the landing (wordmark + tagline + command table, ~19 rows) so
+    // those always stay visible; on a cramped one it's the compact glyph bloom.
+    let avail = (area.height as usize).saturating_sub(19);
+    if area.width >= 28 && avail >= 6 {
+        lines.extend(
+            crate::mascot::flower_raster(avail.min(13))
+                .into_iter()
+                .map(|l| l.alignment(Alignment::Center)),
+        );
+    } else {
+        lines.extend(
+            crate::mascot::rose_logo(model.spinner_frame)
+                .into_iter()
+                .map(|l| l.alignment(Alignment::Center)),
+        );
+    }
     lines.push(Line::raw(""));
     if area.width >= crate::logo::BLUMI_BLOCK_WIDTH + 4 {
         lines.extend(
