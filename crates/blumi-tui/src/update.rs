@@ -134,21 +134,21 @@ async fn handle_term(model: &mut Model, ev: TermEvent, session: &SessionHandle) 
                 return;
             }
 
-            // Left sidebar focus: the workspace / session lists capture navigation.
-            if matches!(model.focus, Focus::Workspaces | Focus::Sessions) {
+            // Left explorer sidebar focus: the active tab's list captures nav;
+            // ←/→ (or [/]) switch tabs, Enter activates.
+            if model.focus == Focus::Sidebar {
                 match key.code {
                     KeyCode::Tab => model.focus = next_focus(model.focus),
                     KeyCode::Esc => model.focus = Focus::Editor,
-                    KeyCode::Up | KeyCode::Char('k') => sidebar_move(model, -1),
-                    KeyCode::Down | KeyCode::Char('j') => sidebar_move(model, 1),
-                    KeyCode::Left | KeyCode::Right => {
-                        model.focus = if model.focus == Focus::Workspaces {
-                            Focus::Sessions
-                        } else {
-                            Focus::Workspaces
-                        };
-                    }
-                    KeyCode::Enter => sidebar_select(model),
+                    KeyCode::Up | KeyCode::Char('k') => model.sidebar_move(-1),
+                    KeyCode::Down | KeyCode::Char('j') => model.sidebar_move(1),
+                    KeyCode::Left
+                    | KeyCode::Right
+                    | KeyCode::Char('h')
+                    | KeyCode::Char('l')
+                    | KeyCode::Char('[')
+                    | KeyCode::Char(']') => model.toggle_sidebar_tab(),
+                    KeyCode::Enter => model.sidebar_activate(),
                     _ => {}
                 }
                 model.mark_dirty();
@@ -609,58 +609,45 @@ fn list_click_index(
     (idx < len).then_some(idx)
 }
 
-/// Handle a left-click somewhere in the left sidebar (workspaces / sessions).
+/// Handle a left-click in the left explorer sidebar: the tab row switches tabs;
+/// a list row selects + activates.
 fn sidebar_click(model: &mut Model, col: u16, row: u16) {
-    if let Some(idx) = list_click_index(
-        model.ws_list_area,
-        model.ws_sel,
-        model.workspaces.len(),
-        col,
-        row,
-    ) {
-        model.focus = Focus::Workspaces;
-        model.ws_sel = idx;
-        model.open_selected_workspace();
-        model.mark_dirty();
-    } else if let Some(idx) = list_click_index(
-        model.sess_list_area,
-        model.sess_sel,
-        model.recent_sessions.len(),
-        col,
-        row,
-    ) {
-        model.focus = Focus::Sessions;
-        model.sess_sel = idx;
-        model.resume_selected_session();
+    use crate::model::SidebarTab;
+    // Tab bar: left half → Workspaces, right half → Sessions.
+    if let Some((x, y, w, h)) = model.sidebar_tab_area {
+        if col >= x && col < x + w && row >= y && row < y + h {
+            model.focus = Focus::Sidebar;
+            let tab = if col < x + w / 2 {
+                SidebarTab::Workspaces
+            } else {
+                SidebarTab::Sessions
+            };
+            model.set_sidebar_tab(tab);
+            return;
+        }
+    }
+    // List rows (active tab).
+    let (sel, len) = match model.sidebar_tab {
+        SidebarTab::Workspaces => (model.ws_sel, model.workspaces.len()),
+        SidebarTab::Sessions => (model.sess_sel, model.recent_sessions.len()),
+    };
+    if let Some(idx) = list_click_index(model.sidebar_list_area, sel, len, col, row) {
+        model.focus = Focus::Sidebar;
+        match model.sidebar_tab {
+            SidebarTab::Workspaces => model.ws_sel = idx,
+            SidebarTab::Sessions => model.sess_sel = idx,
+        }
+        model.sidebar_activate();
         model.mark_dirty();
     }
 }
 
-/// Cycle keyboard focus: editor → chat → workspaces → sessions → editor.
+/// Cycle keyboard focus: editor → chat → explorer sidebar → editor.
 fn next_focus(f: Focus) -> Focus {
     match f {
         Focus::Editor => Focus::Chat,
-        Focus::Chat => Focus::Workspaces,
-        Focus::Workspaces => Focus::Sessions,
-        Focus::Sessions => Focus::Editor,
-    }
-}
-
-/// Move the focused sidebar list's selection.
-fn sidebar_move(model: &mut Model, delta: isize) {
-    if model.focus == Focus::Workspaces {
-        model.ws_move(delta);
-    } else {
-        model.sess_move(delta);
-    }
-}
-
-/// Activate the focused sidebar selection (open workspace / resume session).
-fn sidebar_select(model: &mut Model) {
-    if model.focus == Focus::Workspaces {
-        model.open_selected_workspace();
-    } else {
-        model.resume_selected_session();
+        Focus::Chat => Focus::Sidebar,
+        Focus::Sidebar => Focus::Editor,
     }
 }
 
