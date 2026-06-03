@@ -49,6 +49,14 @@ export type ServerMessage = {
 
 export type Persona = { name: string; description: string }
 
+export type ProviderOption = { name: string; label: string; ready: boolean }
+export type ModelOptions = {
+  provider: string
+  model: string
+  models: string[]
+  providers: ProviderOption[]
+}
+
 export type CronJob = { id: string; name: string; schedule: string; prompt: string }
 export type SkillFull = { name: string; description: string; body: string }
 export type ModelUsage = {

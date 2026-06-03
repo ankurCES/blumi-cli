@@ -1,6 +1,16 @@
 import { useEffect, useReducer, useRef, useState } from 'react'
 import { api, SSE_EVENTS } from './api'
-import type { Approval, Clarify, Config, Entry, Persona, ServerMessage, SessionMeta, Todo } from './types'
+import type {
+  Approval,
+  Clarify,
+  Config,
+  Entry,
+  ModelOptions,
+  Persona,
+  ServerMessage,
+  SessionMeta,
+  Todo,
+} from './types'
 import { Header } from './components/Header'
 import { Sidebar } from './components/Sidebar'
 import { RunPanel } from './components/RunPanel'
@@ -159,6 +169,7 @@ export function App() {
   const [sessions, setSessions] = useState<SessionMeta[]>([])
   const [personas, setPersonas] = useState<Persona[]>([])
   const [persona, setPersona] = useState('default')
+  const [modelOpts, setModelOpts] = useState<ModelOptions | null>(null)
   const [yolo, setYolo] = useState(false)
   const [connected, setConnected] = useState(false)
   // null = unknown, false = needs login, true = authenticated (or auth off).
@@ -197,6 +208,7 @@ export function App() {
         if (p.active) setPersona(p.active)
       })
       .catch(() => {})
+    api.models().then(setModelOpts).catch(() => {})
   }, [authed])
 
   // Restore the current session's transcript on load + after a switch.
@@ -272,6 +284,23 @@ export function App() {
     setPersona(name)
     api.setPersona(name)
   }
+  function changeModel(model: string) {
+    setModelOpts((m) => (m ? { ...m, model } : m))
+    api.setModel(model)
+  }
+  async function changeProvider(provider: string) {
+    await api.setProvider(provider) // persists + reloads the session server-side
+    setStart(Date.now())
+    setActiveSecs(0)
+    setEpoch((e) => e + 1) // re-subscribe + restore transcript
+    api.models().then(setModelOpts).catch(() => {})
+  }
+  // Rebuild the agent in place (re-reads config / skills / memory), keeping the
+  // conversation — used after editing memory/skills/config.
+  async function reloadAgent() {
+    await api.reload()
+    setEpoch((e) => e + 1)
+  }
   function toggleYolo(on: boolean) {
     setYolo(on)
     api.setYolo(on)
@@ -314,6 +343,10 @@ export function App() {
         onCompact={() => api.compact()}
         onUndo={() => api.undo()}
         onCenter={() => setShowCenter(true)}
+        models={modelOpts}
+        onProvider={changeProvider}
+        onModel={changeModel}
+        onReload={reloadAgent}
       />
       <div className="main">
         <Sidebar sessions={sessions} onNew={newSession} onResume={resumeSession} />
@@ -347,7 +380,7 @@ export function App() {
           activeSecs={activeSecs}
         />
       </div>
-      {showCenter && <ControlCenter onClose={() => setShowCenter(false)} />}
+      {showCenter && <ControlCenter onClose={() => setShowCenter(false)} onReload={reloadAgent} />}
     </div>
   )
 }

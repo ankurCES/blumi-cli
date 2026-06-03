@@ -91,6 +91,25 @@ pub struct UsageStats {
     pub by_model: Vec<ModelUsage>,
 }
 
+/// A selectable provider for the header picker.
+#[derive(Clone, serde::Serialize)]
+pub struct ProviderOption {
+    pub name: String,
+    pub label: String,
+    /// Whether it has a usable key (or needs none) — unready ones are disabled.
+    pub ready: bool,
+}
+
+/// Active provider/model + suggestions for the header picker (read live).
+#[derive(Clone, Default, serde::Serialize)]
+pub struct ModelOptions {
+    pub provider: String,
+    pub model: String,
+    /// Suggested model ids for the active provider (the current model included).
+    pub models: Vec<String>,
+    pub providers: Vec<ProviderOption>,
+}
+
 /// Editable settings exposed to the control center. Secrets are never sent to
 /// the client — only a `*_set` flag indicates whether one is configured.
 #[derive(Clone, Default, serde::Serialize)]
@@ -167,6 +186,11 @@ pub trait Management: Send + Sync {
     fn settings_apply(&self, patch: SettingsPatch) -> anyhow::Result<()>;
     /// The live voice config (read fresh), or `None` when voice is disabled.
     fn voice_config(&self) -> Option<blumi_voice::VoiceConfig>;
+    /// Active provider/model + suggestions + selectable providers (read live).
+    fn model_options(&self) -> ModelOptions;
+    /// Persist the active provider (+ a default model) to settings.json. The
+    /// caller reloads the session to apply it.
+    fn set_provider(&self, provider: &str) -> anyhow::Result<()>;
 }
 
 /// Shared server state.
@@ -222,6 +246,7 @@ pub fn router(state: AppState) -> Router {
         .route("/api/config", get(api::config))
         .route("/api/models", get(api::models))
         .route("/api/model/set", post(api::set_model))
+        .route("/api/provider/set", post(api::provider_set))
         .route("/api/personas", get(api::personas))
         .route("/api/persona/set", post(api::set_persona))
         .route("/api/sessions", get(api::sessions))

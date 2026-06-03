@@ -1,4 +1,4 @@
-import type { Config, Persona } from '../types'
+import type { Config, ModelOptions, Persona } from '../types'
 
 type Props = {
   config: Config | null
@@ -12,6 +12,10 @@ type Props = {
   onCompact: () => void
   onUndo: () => void
   onCenter: () => void
+  models: ModelOptions | null
+  onProvider: (name: string) => void
+  onModel: (model: string) => void
+  onReload: () => void
 }
 
 export function Header({
@@ -26,6 +30,10 @@ export function Header({
   onCompact,
   onUndo,
   onCenter,
+  models,
+  onProvider,
+  onModel,
+  onReload,
 }: Props) {
   return (
     <header className="header">
@@ -46,10 +54,30 @@ export function Header({
             </select>
           </label>
         )}
-        {config && (
-          <span className="model" title="Active model">
-            {config.model || 'default'}
-          </span>
+        {models && models.providers.length > 0 && (
+          <label className="picker" title="LLM provider (switching reloads the agent)">
+            <span className="picker-label">provider</span>
+            <select value={models.provider} onChange={(e) => onProvider(e.target.value)}>
+              {models.providers.map((p) => (
+                <option key={p.name} value={p.name} disabled={!p.ready}>
+                  {p.label}
+                  {p.ready ? '' : ' (no key)'}
+                </option>
+              ))}
+            </select>
+          </label>
+        )}
+        {models && (
+          <label className="picker" title="Active model">
+            <span className="picker-label">model</span>
+            <select value={models.model} onChange={(e) => onModel(e.target.value)}>
+              {(models.models.length ? models.models : [models.model || 'default']).map((m) => (
+                <option key={m} value={m}>
+                  {m || 'default'}
+                </option>
+              ))}
+            </select>
+          </label>
         )}
         <button
           className={`yolo ${yolo ? 'on' : ''}`}
@@ -66,6 +94,14 @@ export function Header({
         </button>
         <button className="hbtn" onClick={onCenter} title="Control center: cron, skills, memory, usage">
           ⚙ center
+        </button>
+        <button
+          className="hbtn"
+          onClick={onReload}
+          disabled={busy}
+          title="Reload the agent (re-read config, skills, memory) — keeps the conversation"
+        >
+          ↻ reload
         </button>
         {config && (
           <span className="cwd" title={config.working_dir}>

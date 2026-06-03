@@ -1,6 +1,7 @@
 import type {
   Config,
   CronJob,
+  ModelOptions,
   Persona,
   ServerMessage,
   SessionMeta,
@@ -84,7 +85,9 @@ export const api = {
   cancel: () => postJSON('/api/chat/cancel'),
   compact: () => postJSON('/api/compact'),
   undo: () => postJSON('/api/undo'),
+  models: () => getJSON<{ options: ModelOptions }>('/api/models').then((d) => d.options),
   setModel: (model: string) => postJSON('/api/model/set', { model }),
+  setProvider: (provider: string) => postJSON('/api/provider/set', { provider }),
   setPersona: (name: string) => postJSON('/api/persona/set', { name }),
   setYolo: (on: boolean) => postJSON('/api/yolo', { on }),
   approve: (request_id: string, decision: 'allow' | 'deny', scope: 'once' | 'session') =>
