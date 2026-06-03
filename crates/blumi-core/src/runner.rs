@@ -70,6 +70,16 @@ pub trait TurnRunner: Send + Sync {
         0
     }
 
+    /// Set the auto-continue step budget at runtime (the `/autocontinue`
+    /// command). Default: no-op.
+    fn set_auto_continue(&self, _n: u32) {}
+
+    /// Token ceiling (billed input+output) for one self-woken sequence; the
+    /// actor stops auto-continuing once it's exceeded. `0` (default) = no cap.
+    fn auto_continue_token_budget(&self) -> u32 {
+        0
+    }
+
     /// Force a context compaction now (the manual `/compact`). Emits a
     /// `Compaction` event via `events` on success. Default: no-op → `false`.
     async fn compact(

@@ -59,6 +59,9 @@ pub enum Command {
     /// Enter/leave planning mode: while on, mutating tools are blocked (the
     /// agent must research read-only and propose a plan via `ExitPlanMode`).
     SetPlanMode { on: bool },
+    /// Set the auto-continue step budget at runtime (the `/autocontinue`
+    /// command). 0 disables self-wake on the per-turn iteration cap.
+    SetAutoContinue { n: u32 },
     /// Force a context compaction now (manual `/compact`).
     Compact,
     /// Revert the most recent file change (manual `/undo`).

@@ -89,6 +89,10 @@ pub const COMMANDS: &[CommandDef] = &[
         desc: "planning mode: /plan <task> to plan it, or /plan to toggle",
     },
     CommandDef {
+        name: "/autocontinue",
+        desc: "self-wake budget on the tool cap: /autocontinue <n> (0 off)",
+    },
+    CommandDef {
         name: "/remote",
         desc: "attach to a remote instance: /remote <name> | local | next",
     },
@@ -365,6 +369,32 @@ pub async fn run(model: &mut Model, session: &SessionHandle, line: &str) {
                         stream_id: None,
                     })
                     .await;
+            }
+        }
+        "/autocontinue" | "/auto" => {
+            if arg.is_empty() {
+                model.entries.push(Entry::Notice(format!(
+                    "↻ auto-continue: {} — when a turn hits the per-turn tool cap the runtime self-wakes (same session, bounded by tokens too). usage: /autocontinue <n>  (0 disables)",
+                    if model.auto_continue == 0 {
+                        "off".to_string()
+                    } else {
+                        format!("≤{} self-wakes", model.auto_continue)
+                    }
+                )));
+            } else if let Ok(n) = arg.parse::<u32>() {
+                model.auto_continue = n;
+                let _ = session.send(Command::SetAutoContinue { n }).await;
+                model.entries.push(Entry::Notice(if n == 0 {
+                    "↻ auto-continue off — a turn that hits the tool cap stops and waits for you"
+                        .into()
+                } else {
+                    format!("↻ auto-continue → ≤{n} self-wakes (still capped by the token budget)")
+                }));
+            } else {
+                model.entries.push(Entry::Notice(
+                    "usage: /autocontinue <n>   (n = max self-wakes on the tool cap, 0 disables)"
+                        .into(),
+                ));
             }
         }
         "/remote" => {
