@@ -186,6 +186,25 @@ pub struct WorkspaceConfig {
     pub roots: Vec<String>,
 }
 
+/// Git identity stamped on commits the agent makes (via `git`/`gh`). Applied as
+/// `GIT_AUTHOR_*`/`GIT_COMMITTER_*` on every command, overriding repo/host
+/// config. Empty `author_name` disables the override.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct GitConfig {
+    pub author_name: String,
+    pub author_email: String,
+}
+
+impl Default for GitConfig {
+    fn default() -> Self {
+        GitConfig {
+            author_name: "Blumi".into(),
+            author_email: "ankur.nairit@gmail.com".into(),
+        }
+    }
+}
+
 /// Web UI / server settings.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(default)]
@@ -347,6 +366,9 @@ pub struct BlumiConfig {
     /// Project-workspace discovery for the TUI sidebar.
     #[serde(default)]
     pub workspaces: WorkspaceConfig,
+    /// Git identity for commits the agent makes.
+    #[serde(default)]
+    pub git: GitConfig,
     /// Resolved at load time; never serialized to/from files.
     #[serde(skip)]
     pub paths: Paths,
@@ -371,6 +393,7 @@ impl Default for BlumiConfig {
             brain: BrainConfig::default(),
             remote: RemoteConfig::default(),
             workspaces: WorkspaceConfig::default(),
+            git: GitConfig::default(),
             paths: Paths::default(),
         }
     }

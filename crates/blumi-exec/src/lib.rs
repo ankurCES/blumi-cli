@@ -7,9 +7,11 @@
 //! the same way.)
 
 mod docker;
+mod git_identity;
 mod local;
 mod ssh;
 
 pub use docker::{DockerExecutor, CONTAINER_WORKDIR};
+pub use git_identity::GitIdentityExecutor;
 pub use local::LocalExecutor;
 pub use ssh::SshExecutor;
