@@ -250,21 +250,47 @@ impl TurnRunner for AgentTurnRunner {
                 message_id: msg_id,
                 finish,
             });
-            if usage.total() > 0 {
+            {
                 let mut st = state.lock().await;
-                st.record_usage(&usage);
-                // Context = the full prompt size: uncached input + cache read +
-                // cache write. With prompt caching, `input_tokens` alone omits
-                // the cached bulk, so the meter would read near-zero.
-                let context =
-                    usage.input_tokens + usage.cache_read_tokens + usage.cache_write_tokens;
-                ctx.events.emit(Event::Usage {
-                    input: usage.input_tokens,
-                    output: usage.output_tokens,
-                    total: usage.total(),
-                    context,
-                    cost_usd: None,
-                });
+                if usage.total() > 0 {
+                    st.record_usage(&usage);
+                    // Context = the full prompt size: uncached input + cache read +
+                    // cache write. With prompt caching, `input_tokens` alone omits
+                    // the cached bulk, so the meter would read near-zero.
+                    let context =
+                        usage.input_tokens + usage.cache_read_tokens + usage.cache_write_tokens;
+                    ctx.events.emit(Event::Usage {
+                        input: usage.input_tokens,
+                        output: usage.output_tokens,
+                        total: usage.total(),
+                        context,
+                        cost_usd: None,
+                    });
+                } else {
+                    // The provider reported no usage (many OpenAI-compatible / local
+                    // servers don't). Fall back to a local ~4-chars/token estimate so
+                    // the context meter and token counts still work, never stuck at 0.
+                    let prompt = ContextManager::estimate_tokens(&window) as u32;
+                    let resp_chars: usize = text.len()
+                        + accum
+                            .values()
+                            .map(|a| a.args.len() + a.name.as_deref().map_or(0, str::len))
+                            .sum::<usize>();
+                    let output = (resp_chars / 4).max(1) as u32;
+                    st.record_usage(&Usage {
+                        input_tokens: prompt,
+                        output_tokens: output,
+                        cache_read_tokens: 0,
+                        cache_write_tokens: 0,
+                    });
+                    ctx.events.emit(Event::Usage {
+                        input: prompt,
+                        output,
+                        total: prompt + output,
+                        context: prompt,
+                        cost_usd: None,
+                    });
+                }
             }
 
             let tool_calls = finalize_tool_calls(accum);

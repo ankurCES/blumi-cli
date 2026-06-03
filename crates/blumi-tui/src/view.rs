@@ -22,9 +22,12 @@ pub fn render(model: &mut Model, f: &mut Frame) {
     let area = f.area();
 
     let editor_h = (model.input.lines().len().clamp(1, 6) as u16) + 2;
-    let [header, chat, editor, status] = Layout::vertical([
+    // header / chat / inforule (context meter + working indicator, next to the
+    // input) / editor / status (key hints).
+    let [header, chat, inforule, editor, status] = Layout::vertical([
         Constraint::Length(1),
         Constraint::Min(3),
+        Constraint::Length(1),
         Constraint::Length(editor_h),
         Constraint::Length(1),
     ])
@@ -71,6 +74,7 @@ pub fn render(model: &mut Model, f: &mut Frame) {
     } else {
         render_chat(model, f, chat, &theme);
     }
+    render_inforule(model, f, inforule, &theme);
     render_editor(model, f, editor, &theme);
     render_status(model, f, status, &theme);
 
@@ -1120,6 +1124,108 @@ fn render_editor(model: &mut Model, f: &mut Frame, area: Rect, theme: &Theme) {
     f.render_widget(&model.input, area);
 }
 
+/// A 10-cell block context bar, hermes-style: `████░░░░░░`.
+fn ctx_bar(frac: f64, w: usize) -> String {
+    let p = (frac.clamp(0.0, 1.0) * w as f64).round() as usize;
+    format!("{}{}", "█".repeat(p), "░".repeat(w.saturating_sub(p)))
+}
+
+/// Bar color by fill, hermes thresholds: green → gold → orange → red.
+fn ctx_bar_color(frac: f64, theme: &Theme) -> Color {
+    let pct = frac * 100.0;
+    if pct >= 95.0 {
+        theme.error
+    } else if pct > 80.0 {
+        Color::Indexed(208) // orange
+    } else if pct >= 50.0 {
+        Color::Indexed(214) // amber/gold
+    } else {
+        theme.success
+    }
+}
+
+/// A rotating "still working" charm for long-running turns (hermes-style),
+/// changing every ~10s so the user knows it's alive.
+fn long_run_charm(secs: u64) -> &'static str {
+    const CHARMS: [&str; 4] = [
+        "still cooking…",
+        "polishing edges…",
+        "asking the void nicely…",
+        "almost there…",
+    ];
+    CHARMS[((secs / 10) as usize) % CHARMS.len()]
+}
+
+/// The status rule directly above the input (hermes-style): the live working
+/// indicator while busy, plus the model + context meter + tokens + cost.
+fn render_inforule(model: &Model, f: &mut Frame, area: Rect, theme: &Theme) {
+    let frac = model.context_frac();
+    let mut spans: Vec<Span> = vec![Span::styled("─ ", theme.dim())];
+
+    if model.busy {
+        // Working indicator: spinner · elapsed (· charm once it's been a while).
+        let secs = model.busy_secs();
+        spans.push(Span::styled(
+            format!("{} ", crate::mascot::spinner(model.spinner_frame)),
+            theme.accent(),
+        ));
+        let work = if secs >= 8 {
+            format!("working · {} · {}", fmt_dur(secs), long_run_charm(secs))
+        } else if secs > 0 {
+            format!("working · {}", fmt_dur(secs))
+        } else {
+            "working".to_string()
+        };
+        spans.push(Span::styled(work, theme.accent()));
+    } else {
+        let model_name = if model.model_name.is_empty() {
+            "default"
+        } else {
+            &model.model_name
+        };
+        spans.push(Span::styled(model_name.to_string(), theme.subtle()));
+    }
+
+    // Context meter: used/max [bar] pct, colored by fill.
+    spans.push(Span::styled(" │ ", theme.dim()));
+    spans.push(Span::styled(
+        format!(
+            "{}/{} ",
+            fmt_k(model.context_tokens),
+            fmt_k(model.context_size)
+        ),
+        theme.subtle(),
+    ));
+    let bar_color = ctx_bar_color(frac, theme);
+    spans.push(Span::styled(
+        format!("[{}]", ctx_bar(frac, 10)),
+        Style::default().fg(bar_color),
+    ));
+    spans.push(Span::styled(
+        format!(" {}%", (frac * 100.0).round() as u32),
+        Style::default().fg(bar_color),
+    ));
+
+    // Tokens ↑↓ and (if any) cost.
+    spans.push(Span::styled(
+        format!(
+            " │ ↑{} ↓{}",
+            fmt_k(model.input_tokens),
+            fmt_k(model.output_tokens)
+        ),
+        theme.dim(),
+    ));
+    if model.cost_usd > 0.0 {
+        spans.push(Span::styled(
+            format!(" │ ${:.4}", model.cost_usd),
+            theme.dim(),
+        ));
+    }
+
+    // A single-row Paragraph clips to the area width.
+    f.render_widget(Paragraph::new(Line::from(spans)), area);
+}
+
 fn render_status(model: &Model, f: &mut Frame, area: Rect, theme: &Theme) {
     // The autonomous loop owns the status line while running/paused (ralph-style).
     if model.loop_active || model.loop_current.is_some() {
@@ -1385,6 +1491,24 @@ mod tests {
         model.sidebar_tab = crate::model::SidebarTab::Sessions;
         let out = render_to_string(&mut model, 130, 30);
         assert!(out.contains("fix parser"), "session entry (sessions tab)");
+    }
+
+    #[test]
+    fn inforule_shows_context_meter_and_working() {
+        let mut model = Model::new("claude-sonnet".into(), "/tmp".into());
+        model.entries.push(Entry::User("hi".into()));
+        model.context_size = 1000;
+        model.context_tokens = 500;
+        let out = render_to_string(&mut model, 100, 24);
+        assert!(out.contains('█'), "context bar has filled cells");
+        assert!(out.contains("50%"), "context percent");
+        assert!(out.contains("claude-sonnet"), "model name shown when idle");
+
+        // Busy → the working indicator replaces the model label.
+        model.busy = true;
+        model.busy_since = Some(std::time::Instant::now());
+        let out = render_to_string(&mut model, 100, 24);
+        assert!(out.contains("working"), "working indicator while busy");
     }
 
     #[test]

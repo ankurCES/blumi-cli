@@ -153,6 +153,9 @@ pub struct Model {
     pub todos: Vec<Todo>,
 
     pub busy: bool,
+    /// When the current turn started working (for the live "working · Ns"
+    /// indicator + long-running reassurance). `None` when idle.
+    pub busy_since: Option<Instant>,
     pub spinner_frame: usize,
     pub turn_count: u32,
     /// Auto-approve everything (yolo). Toggled by `/yolo`; shown in the dashboard.
@@ -278,6 +281,7 @@ impl Model {
             thinking: None,
             todos: Vec::new(),
             busy: false,
+            busy_since: None,
             spinner_frame: 0,
             turn_count: 0,
             yolo: false,
@@ -601,6 +605,11 @@ impl Model {
     /// Seconds since the session started.
     pub fn uptime_secs(&self) -> u64 {
         self.started.elapsed().as_secs()
+    }
+
+    /// Seconds the current turn has been working (0 when idle).
+    pub fn busy_secs(&self) -> u64 {
+        self.busy_since.map(|t| t.elapsed().as_secs()).unwrap_or(0)
     }
 
     /// Number of tool calls in the transcript.
