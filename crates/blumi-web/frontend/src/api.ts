@@ -87,7 +87,8 @@ export const api = {
   undo: () => postJSON('/api/undo'),
   models: () => getJSON<{ options: ModelOptions }>('/api/models').then((d) => d.options),
   setModel: (model: string) => postJSON('/api/model/set', { model }),
-  setProvider: (provider: string) => postJSON('/api/provider/set', { provider }),
+  setProvider: (provider: string, api_key?: string) =>
+    postJSON('/api/provider/set', { provider, api_key }),
   setPersona: (name: string) => postJSON('/api/persona/set', { name }),
   setYolo: (on: boolean) => postJSON('/api/yolo', { on }),
   approve: (request_id: string, decision: 'allow' | 'deny', scope: 'once' | 'session') =>

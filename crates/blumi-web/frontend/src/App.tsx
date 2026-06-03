@@ -288,8 +288,8 @@ export function App() {
     setModelOpts((m) => (m ? { ...m, model } : m))
     api.setModel(model)
   }
-  async function changeProvider(provider: string) {
-    await api.setProvider(provider) // persists + reloads the session server-side
+  async function changeProvider(provider: string, key?: string) {
+    await api.setProvider(provider, key) // persists (+ key) + reloads server-side
     setStart(Date.now())
     setActiveSecs(0)
     setEpoch((e) => e + 1) // re-subscribe + restore transcript

@@ -188,9 +188,9 @@ pub trait Management: Send + Sync {
     fn voice_config(&self) -> Option<blumi_voice::VoiceConfig>;
     /// Active provider/model + suggestions + selectable providers (read live).
     fn model_options(&self) -> ModelOptions;
-    /// Persist the active provider (+ a default model) to settings.json. The
-    /// caller reloads the session to apply it.
-    fn set_provider(&self, provider: &str) -> anyhow::Result<()>;
+    /// Persist the active provider (+ a default model) to settings.json, plus an
+    /// optional API key for that provider. The caller reloads to apply it.
+    fn set_provider(&self, provider: &str, api_key: Option<&str>) -> anyhow::Result<()>;
 }
 
 /// Shared server state.

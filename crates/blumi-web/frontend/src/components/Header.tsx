@@ -1,3 +1,4 @@
+import { useState } from 'react'
 import type { Config, ModelOptions, Persona } from '../types'
 
 type Props = {
@@ -13,7 +14,7 @@ type Props = {
   onUndo: () => void
   onCenter: () => void
   models: ModelOptions | null
-  onProvider: (name: string) => void
+  onProvider: (name: string, key?: string) => void
   onModel: (model: string) => void
   onReload: () => void
 }
@@ -35,6 +36,9 @@ export function Header({
   onModel,
   onReload,
 }: Props) {
+  // When an unready provider is picked, prompt for its key inline.
+  const [pendingKey, setPendingKey] = useState<string | null>(null)
+  const [keyInput, setKeyInput] = useState('')
   return (
     <header className="header">
       <div className="brand">
@@ -57,15 +61,50 @@ export function Header({
         {models && models.providers.length > 0 && (
           <label className="picker" title="LLM provider (switching reloads the agent)">
             <span className="picker-label">provider</span>
-            <select value={models.provider} onChange={(e) => onProvider(e.target.value)}>
+            <select
+              value={models.provider}
+              onChange={(e) => {
+                const p = models.providers.find((x) => x.name === e.target.value)
+                if (p && !p.ready) {
+                  setPendingKey(p.name)
+                  setKeyInput('')
+                } else {
+                  onProvider(e.target.value)
+                }
+              }}
+            >
               {models.providers.map((p) => (
-                <option key={p.name} value={p.name} disabled={!p.ready}>
+                <option key={p.name} value={p.name}>
                   {p.label}
-                  {p.ready ? '' : ' (no key)'}
+                  {p.ready ? '' : ' (add key)'}
                 </option>
               ))}
             </select>
           </label>
+        )}
+        {pendingKey && (
+          <form
+            className="keyform"
+            onSubmit={(e) => {
+              e.preventDefault()
+              onProvider(pendingKey, keyInput)
+              setPendingKey(null)
+            }}
+          >
+            <input
+              type="password"
+              autoFocus
+              placeholder={`${pendingKey} API key`}
+              value={keyInput}
+              onChange={(e) => setKeyInput(e.target.value)}
+            />
+            <button className="hbtn" type="submit" disabled={!keyInput.trim()}>
+              connect
+            </button>
+            <button className="hbtn" type="button" onClick={() => setPendingKey(null)}>
+              cancel
+            </button>
+          </form>
         )}
         {models && (
           <label className="picker" title="Active model">
