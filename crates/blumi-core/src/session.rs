@@ -15,6 +15,10 @@ pub struct SessionState {
     pub total_input_tokens: u32,
     pub total_output_tokens: u32,
     pub total_cache_read_tokens: u32,
+    /// The provider-measured prompt size (input + cache read + cache write) of
+    /// the most recent request — the *real* current context-window usage, used
+    /// as a floor for the compaction decision so we never overflow.
+    pub last_prompt_tokens: u32,
     /// Number of completed user→assistant turns.
     pub turn_count: u32,
     pub started_at: OffsetDateTime,
@@ -30,16 +34,23 @@ impl SessionState {
             total_input_tokens: 0,
             total_output_tokens: 0,
             total_cache_read_tokens: 0,
+            last_prompt_tokens: 0,
             turn_count: 0,
             started_at: OffsetDateTime::now_utc(),
         }
     }
 
-    /// Fold a usage report into the running totals.
+    /// Fold a usage report into the running totals. `total_input_tokens` counts
+    /// the *full* prompt (uncached input + cache read + cache write) so the
+    /// input meter reflects real tokens processed — not just the uncached
+    /// remainder, which is ~0 once prompt caching kicks in. Also records the
+    /// latest prompt size as the live context measurement.
     pub fn record_usage(&mut self, usage: &Usage) {
-        self.total_input_tokens += usage.input_tokens;
+        let prompt = usage.input_tokens + usage.cache_read_tokens + usage.cache_write_tokens;
+        self.total_input_tokens += prompt;
         self.total_output_tokens += usage.output_tokens;
         self.total_cache_read_tokens += usage.cache_read_tokens;
+        self.last_prompt_tokens = prompt;
     }
 
     pub fn total_tokens(&self) -> u32 {

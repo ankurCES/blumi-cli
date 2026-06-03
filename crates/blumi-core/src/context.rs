@@ -14,6 +14,8 @@ use tokio_util::sync::CancellationToken;
 
 /// Rough chars-per-token used to estimate window size without a tokenizer.
 const CHARS_PER_TOKEN: usize = 4;
+/// Per-message overhead (role markers, delimiters) in characters.
+const MESSAGE_OVERHEAD_CHARS: usize = 16;
 
 pub struct ContextManager {
     context_size: u32,
@@ -32,9 +34,23 @@ impl ContextManager {
         }
     }
 
-    /// Estimated token count of a set of messages.
+    /// Estimated token count of a set of messages. Counts text, per-message
+    /// overhead, AND tool-call arguments — the latter aren't part of `text()`
+    /// but are sent to the model and often dominate (e.g. a `FileWrite` carries
+    /// the whole file in its arguments). Undercounting here was letting the
+    /// window overflow before compaction fired.
     pub fn estimate_tokens(messages: &[Message]) -> usize {
-        messages.iter().map(|m| m.text().len()).sum::<usize>() / CHARS_PER_TOKEN
+        let chars: usize = messages
+            .iter()
+            .map(|m| {
+                let mut n = m.text().len() + MESSAGE_OVERHEAD_CHARS;
+                for tc in &m.tool_calls {
+                    n += tc.name.len() + tc.arguments.to_string().len();
+                }
+                n
+            })
+            .sum();
+        chars / CHARS_PER_TOKEN
     }
 
     fn budget(&self) -> usize {
@@ -78,7 +94,10 @@ impl ContextManager {
     ) -> bool {
         let messages = {
             let st = state.lock().await;
-            if !force && Self::estimate_tokens(&st.messages) < self.budget() {
+            // Use the larger of our estimate and the provider's last measured
+            // prompt size, so a real-but-underestimated context still compacts.
+            let used = Self::estimate_tokens(&st.messages).max(st.last_prompt_tokens as usize);
+            if !force && used < self.budget() {
                 return false;
             }
             if st.messages.len() <= self.keep_messages + 2 {
@@ -204,6 +223,56 @@ mod tests {
         let small = [Message::user("hi")];
         let big = [Message::user("x".repeat(4000))];
         assert!(ContextManager::estimate_tokens(&big) > ContextManager::estimate_tokens(&small));
+    }
+
+    #[test]
+    fn estimate_counts_tool_call_args() {
+        use blumi_protocol::{ToolCall, ToolCallId};
+        // Tiny visible text, but a huge tool-call argument (e.g. a file write):
+        // the estimate must reflect the args, which `text()` omits.
+        let mut m = Message::assistant_tool_calls(
+            Some("ok".into()),
+            vec![ToolCall {
+                id: ToolCallId::from("c1"),
+                name: "FileWrite".into(),
+                arguments: serde_json::json!({ "content": "x".repeat(8000) }),
+            }],
+        );
+        let with_args = ContextManager::estimate_tokens(std::slice::from_ref(&m));
+        m.tool_calls.clear();
+        let text_only = ContextManager::estimate_tokens(std::slice::from_ref(&m));
+        assert!(
+            with_args > text_only + 1000,
+            "tool args must be counted: {with_args} vs {text_only}"
+        );
+    }
+
+    #[tokio::test]
+    async fn compacts_on_measured_context_floor() {
+        // Short messages (low char estimate) but the provider reported a large
+        // prompt — compaction must still fire off the measured floor.
+        let cm = ContextManager::new(100);
+        let state = Arc::new(Mutex::new(SessionState::new(SessionId::from("s"), "m")));
+        {
+            let mut st = state.lock().await;
+            for i in 0..12 {
+                st.messages.push(Message::user(format!("m{i}")));
+            }
+            st.last_prompt_tokens = 95; // ≥ 80% of 100 → over budget
+        }
+        let (etx, _erx) = tokio::sync::mpsc::unbounded_channel();
+        let events = EventEmitter::new(etx);
+        let llm: Arc<dyn LlmClient> = Arc::new(SummaryLlm);
+        let compacted = cm
+            .maybe_compact(
+                &llm,
+                &state,
+                &LlmOptions::default(),
+                &events,
+                &CancellationToken::new(),
+            )
+            .await;
+        assert!(compacted, "should compact off the measured context floor");
     }
 
     #[tokio::test]
