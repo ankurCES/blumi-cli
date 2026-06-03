@@ -1,9 +1,9 @@
 import { useEffect, useState } from 'react'
 import { api } from '../api'
-import type { CronJob, SkillFull, Usage } from '../types'
+import type { CronJob, SettingsView, SkillFull, Usage } from '../types'
 
-type Tab = 'cron' | 'skills' | 'memory' | 'usage'
-const TABS: Tab[] = ['cron', 'skills', 'memory', 'usage']
+type Tab = 'cron' | 'skills' | 'memory' | 'usage' | 'settings'
+const TABS: Tab[] = ['cron', 'skills', 'memory', 'usage', 'settings']
 
 export function ControlCenter({ onClose }: { onClose: () => void }) {
   const [tab, setTab] = useState<Tab>('cron')
@@ -32,6 +32,7 @@ export function ControlCenter({ onClose }: { onClose: () => void }) {
           {tab === 'skills' && <SkillsTab />}
           {tab === 'memory' && <MemoryTab />}
           {tab === 'usage' && <UsageTab />}
+          {tab === 'settings' && <SettingsTab />}
         </div>
       </div>
     </div>
@@ -196,5 +197,162 @@ function Stat({ label, value }: { label: string; value: string }) {
       <div className="cc-stat-val">{value}</div>
       <div className="cc-stat-lbl">{label}</div>
     </div>
+  )
+}
+
+function SettingsTab() {
+  const [s, setS] = useState<SettingsView | null>(null)
+  const [saved, setSaved] = useState(false)
+  const [voice, setVoice] = useState({
+    enabled: false,
+    stt_base_url: '',
+    stt_model: '',
+    tts_provider: 'openai',
+    tts_base_url: '',
+    tts_model: '',
+    tts_voice: '',
+  })
+  const [gw, setGw] = useState({ yolo: false, whatsapp_phone_number_id: '', whatsapp_verify_token: '' })
+  const blankSecrets = {
+    voice_api_key: '',
+    tts_api_key: '',
+    telegram_token: '',
+    discord_token: '',
+    slack_bot_token: '',
+    slack_app_token: '',
+    whatsapp_token: '',
+  }
+  const [secrets, setSecrets] = useState({ ...blankSecrets })
+
+  function load(d: SettingsView) {
+    setS(d)
+    setVoice({
+      enabled: d.voice.enabled,
+      stt_base_url: d.voice.stt_base_url,
+      stt_model: d.voice.stt_model,
+      tts_provider: d.voice.tts_provider || 'openai',
+      tts_base_url: d.voice.tts_base_url,
+      tts_model: d.voice.tts_model,
+      tts_voice: d.voice.tts_voice,
+    })
+    setGw({
+      yolo: d.gateway.yolo,
+      whatsapp_phone_number_id: d.gateway.whatsapp_phone_number_id,
+      whatsapp_verify_token: d.gateway.whatsapp_verify_token,
+    })
+  }
+  useEffect(() => {
+    api.settingsGet().then(load).catch(() => {})
+  }, [])
+  if (!s) return <div className="cc-empty">loading…</div>
+
+  async function save() {
+    const patch: Record<string, unknown> = {
+      voice_enabled: voice.enabled,
+      stt_base_url: voice.stt_base_url,
+      stt_model: voice.stt_model,
+      tts_provider: voice.tts_provider,
+      tts_base_url: voice.tts_base_url,
+      tts_model: voice.tts_model,
+      tts_voice: voice.tts_voice,
+      gateway_yolo: gw.yolo,
+      whatsapp_phone_number_id: gw.whatsapp_phone_number_id,
+      whatsapp_verify_token: gw.whatsapp_verify_token,
+    }
+    for (const [k, val] of Object.entries(secrets)) if (val) patch[k] = val
+    await api.settingsSet(patch)
+    setSecrets({ ...blankSecrets })
+    setSaved(true)
+    setTimeout(() => setSaved(false), 1500)
+    api.settingsGet().then(load).catch(() => {})
+  }
+
+  const ph = (set: boolean) => (set ? '•••••••• (set — type to replace)' : 'not set')
+  const setSecret = (k: keyof typeof blankSecrets, v: string) => setSecrets({ ...secrets, [k]: v })
+
+  return (
+    <div className="cc-pane">
+      <div className="cc-section">Voice</div>
+      <label className="cc-check">
+        <input
+          type="checkbox"
+          checked={voice.enabled}
+          onChange={(e) => setVoice({ ...voice, enabled: e.target.checked })}
+        />{' '}
+        enabled
+      </label>
+      <Field label="STT base URL" value={voice.stt_base_url} onChange={(x) => setVoice({ ...voice, stt_base_url: x })} />
+      <Field label="STT model" value={voice.stt_model} onChange={(x) => setVoice({ ...voice, stt_model: x })} />
+      <Secret label="STT API key" placeholder={ph(s.voice.api_key_set)} value={secrets.voice_api_key} onChange={(x) => setSecret('voice_api_key', x)} />
+      <label className="cc-field">
+        <span>TTS provider</span>
+        <select value={voice.tts_provider} onChange={(e) => setVoice({ ...voice, tts_provider: e.target.value })}>
+          <option value="openai">OpenAI-compatible</option>
+          <option value="elevenlabs">ElevenLabs</option>
+        </select>
+      </label>
+      {voice.tts_provider === 'elevenlabs' ? (
+        <>
+          <Field label="ElevenLabs model" value={voice.tts_model} onChange={(x) => setVoice({ ...voice, tts_model: x })} />
+          <Field label="ElevenLabs voice id" value={voice.tts_voice} onChange={(x) => setVoice({ ...voice, tts_voice: x })} />
+          <Secret label="ElevenLabs API key" placeholder={ph(s.voice.tts_api_key_set)} value={secrets.tts_api_key} onChange={(x) => setSecret('tts_api_key', x)} />
+        </>
+      ) : (
+        <>
+          <Field label="TTS base URL" value={voice.tts_base_url} onChange={(x) => setVoice({ ...voice, tts_base_url: x })} />
+          <Field label="TTS model" value={voice.tts_model} onChange={(x) => setVoice({ ...voice, tts_model: x })} />
+          <Field label="TTS voice" value={voice.tts_voice} onChange={(x) => setVoice({ ...voice, tts_voice: x })} />
+          <Secret label="TTS API key" placeholder={ph(s.voice.tts_api_key_set)} value={secrets.tts_api_key} onChange={(x) => setSecret('tts_api_key', x)} />
+        </>
+      )}
+
+      <div className="cc-section">Gateways</div>
+      <label className="cc-check">
+        <input type="checkbox" checked={gw.yolo} onChange={(e) => setGw({ ...gw, yolo: e.target.checked })} /> auto-approve
+        tool calls (sandbox recommended)
+      </label>
+      <Secret label="Telegram token" placeholder={ph(s.gateway.telegram_token_set)} value={secrets.telegram_token} onChange={(x) => setSecret('telegram_token', x)} />
+      <Secret label="Discord token" placeholder={ph(s.gateway.discord_token_set)} value={secrets.discord_token} onChange={(x) => setSecret('discord_token', x)} />
+      <Secret label="Slack bot token" placeholder={ph(s.gateway.slack_bot_token_set)} value={secrets.slack_bot_token} onChange={(x) => setSecret('slack_bot_token', x)} />
+      <Secret label="Slack app token" placeholder={ph(s.gateway.slack_app_token_set)} value={secrets.slack_app_token} onChange={(x) => setSecret('slack_app_token', x)} />
+      <Secret label="WhatsApp token" placeholder={ph(s.gateway.whatsapp_token_set)} value={secrets.whatsapp_token} onChange={(x) => setSecret('whatsapp_token', x)} />
+      <Field label="WhatsApp phone_number_id" value={gw.whatsapp_phone_number_id} onChange={(x) => setGw({ ...gw, whatsapp_phone_number_id: x })} />
+      <Field label="WhatsApp verify token" value={gw.whatsapp_verify_token} onChange={(x) => setGw({ ...gw, whatsapp_verify_token: x })} />
+
+      <button className="cc-save" onClick={save}>
+        {saved ? 'saved ✓' : 'Save settings'}
+      </button>
+      <div className="cc-dim">
+        Voice changes apply immediately. Gateway changes apply when you start <code>blumi gateway</code>.
+      </div>
+    </div>
+  )
+}
+
+function Field({ label, value, onChange }: { label: string; value: string; onChange: (v: string) => void }) {
+  return (
+    <label className="cc-field">
+      <span>{label}</span>
+      <input value={value} onChange={(e) => onChange(e.target.value)} />
+    </label>
+  )
+}
+
+function Secret({
+  label,
+  placeholder,
+  value,
+  onChange,
+}: {
+  label: string
+  placeholder: string
+  value: string
+  onChange: (v: string) => void
+}) {
+  return (
+    <label className="cc-field">
+      <span>{label}</span>
+      <input type="password" placeholder={placeholder} value={value} onChange={(e) => onChange(e.target.value)} />
+    </label>
   )
 }

@@ -91,9 +91,65 @@ pub struct UsageStats {
     pub by_model: Vec<ModelUsage>,
 }
 
-/// Control-center data + actions (cron, skills, memory, usage) — the seam the
-/// binary implements over the cron store, skill catalog, memory files, and the
-/// persistence store.
+/// Editable settings exposed to the control center. Secrets are never sent to
+/// the client — only a `*_set` flag indicates whether one is configured.
+#[derive(Clone, Default, serde::Serialize)]
+pub struct SettingsView {
+    pub voice: VoiceView,
+    pub gateway: GatewayView,
+}
+
+#[derive(Clone, Default, serde::Serialize)]
+pub struct VoiceView {
+    pub enabled: bool,
+    pub stt_base_url: String,
+    pub stt_model: String,
+    pub tts_provider: String,
+    pub tts_base_url: String,
+    pub tts_model: String,
+    pub tts_voice: String,
+    pub api_key_set: bool,
+    pub tts_api_key_set: bool,
+}
+
+#[derive(Clone, Default, serde::Serialize)]
+pub struct GatewayView {
+    pub yolo: bool,
+    pub telegram_token_set: bool,
+    pub discord_token_set: bool,
+    pub slack_bot_token_set: bool,
+    pub slack_app_token_set: bool,
+    pub whatsapp_token_set: bool,
+    pub whatsapp_phone_number_id: String,
+    pub whatsapp_verify_token: String,
+}
+
+/// A settings update from the control center. All fields optional; secret fields
+/// are applied only when non-empty (blank = keep the existing secret).
+#[derive(Default, serde::Deserialize)]
+pub struct SettingsPatch {
+    pub voice_enabled: Option<bool>,
+    pub stt_base_url: Option<String>,
+    pub stt_model: Option<String>,
+    pub voice_api_key: Option<String>,
+    pub tts_provider: Option<String>,
+    pub tts_base_url: Option<String>,
+    pub tts_model: Option<String>,
+    pub tts_voice: Option<String>,
+    pub tts_api_key: Option<String>,
+    pub gateway_yolo: Option<bool>,
+    pub telegram_token: Option<String>,
+    pub discord_token: Option<String>,
+    pub slack_bot_token: Option<String>,
+    pub slack_app_token: Option<String>,
+    pub whatsapp_token: Option<String>,
+    pub whatsapp_phone_number_id: Option<String>,
+    pub whatsapp_verify_token: Option<String>,
+}
+
+/// Control-center data + actions (cron, skills, memory, usage, settings) — the
+/// seam the binary implements over the cron store, skill catalog, memory files,
+/// the persistence store, and settings.json.
 #[async_trait::async_trait]
 pub trait Management: Send + Sync {
     async fn cron_list(&self) -> Vec<CronJobInfo>;
@@ -105,6 +161,12 @@ pub trait Management: Send + Sync {
     /// `which` is "memory" or "user".
     fn memory_set(&self, which: &str, content: &str) -> anyhow::Result<()>;
     async fn usage(&self) -> UsageStats;
+    /// Current voice + gateway settings (secrets redacted to `*_set` flags).
+    fn settings_view(&self) -> SettingsView;
+    /// Apply a settings patch to settings.json.
+    fn settings_apply(&self, patch: SettingsPatch) -> anyhow::Result<()>;
+    /// The live voice config (read fresh), or `None` when voice is disabled.
+    fn voice_config(&self) -> Option<blumi_voice::VoiceConfig>;
 }
 
 /// Shared server state.
@@ -115,7 +177,6 @@ pub struct AppState {
     mgmt: Arc<dyn Management>,
     pub config: Arc<WebConfig>,
     auth: Option<Arc<Auth>>,
-    voice: Option<Arc<blumi_voice::VoiceConfig>>,
 }
 
 impl AppState {
@@ -152,10 +213,6 @@ impl AppState {
     pub(crate) fn auth(&self) -> Option<&Arc<Auth>> {
         self.auth.as_ref()
     }
-
-    pub(crate) fn voice(&self) -> Option<&Arc<blumi_voice::VoiceConfig>> {
-        self.voice.as_ref()
-    }
 }
 
 /// Build the axum router for a given state.
@@ -187,6 +244,10 @@ pub fn router(state: AppState) -> Router {
         .route("/api/skills", get(api::skills))
         .route("/api/memory", get(api::memory_get).post(api::memory_set))
         .route("/api/usage", get(api::usage))
+        .route(
+            "/api/settings",
+            get(api::settings_get).post(api::settings_set),
+        )
         .route("/api/voice/transcribe", post(api::voice_transcribe))
         .route("/api/voice/speak", post(api::voice_speak))
         .fallback(assets::static_handler)
@@ -205,7 +266,6 @@ pub async fn serve(
     config: WebConfig,
     addr: SocketAddr,
     auth: Option<Auth>,
-    voice: Option<blumi_voice::VoiceConfig>,
 ) -> anyhow::Result<()> {
     let session = provider.create().await?;
     let state = AppState {
@@ -214,7 +274,6 @@ pub async fn serve(
         mgmt,
         config: Arc::new(config),
         auth: auth.map(Arc::new),
-        voice: voice.map(Arc::new),
     };
     let app = router(state.clone());
     let listener = tokio::net::TcpListener::bind(addr).await?;
