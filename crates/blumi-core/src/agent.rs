@@ -39,6 +39,8 @@ pub struct AgentTurnRunner {
     executor: Arc<dyn Executor>,
     options: LlmOptions,
     max_iterations: u32,
+    /// Auto-continue budget surfaced to the actor (see `TurnRunner`).
+    auto_continue: u32,
     system_prompt: String,
     working_dir: PathBuf,
     context: ContextManager,
@@ -70,6 +72,7 @@ impl AgentTurnRunner {
             executor,
             options,
             max_iterations,
+            auto_continue: 0,
             system_prompt,
             working_dir,
             context: ContextManager::new(context_size),
@@ -83,6 +86,13 @@ impl AgentTurnRunner {
     /// Enable sub-agent delegation (the `delegate` tool's backend).
     pub fn with_spawner(mut self, spawner: Arc<dyn SubAgentSpawner>) -> Self {
         self.spawner = Some(spawner);
+        self
+    }
+
+    /// Set how many times the runtime may auto-continue after the per-turn
+    /// iteration cap (the actor reads this via `auto_continue_budget`).
+    pub fn with_auto_continue(mut self, n: u32) -> Self {
+        self.auto_continue = n;
         self
     }
 
@@ -289,10 +299,15 @@ impl TurnRunner for AgentTurnRunner {
             }
         }
 
-        emit_error(
-            &ctx,
-            "reached the maximum number of tool iterations for this turn",
-        );
+        // When auto-continue is enabled the actor self-wakes and narrates it, so
+        // a turn-level error here would be misleading. Only surface the error
+        // when auto-continue is off (then the turn really does stop).
+        if self.auto_continue == 0 {
+            emit_error(
+                &ctx,
+                "reached the maximum number of tool iterations for this turn",
+            );
+        }
         DoneReason::MaxIterations
     }
 
@@ -318,6 +333,10 @@ impl TurnRunner for AgentTurnRunner {
 
     fn plan_mode(&self) -> bool {
         self.perms.is_plan_mode()
+    }
+
+    fn auto_continue_budget(&self) -> u32 {
+        self.auto_continue
     }
 
     async fn compact(

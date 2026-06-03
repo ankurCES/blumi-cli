@@ -63,6 +63,13 @@ pub trait TurnRunner: Send + Sync {
         false
     }
 
+    /// How many times the actor may auto-continue a turn that stopped only
+    /// because it hit the per-turn iteration cap. `0` (default) disables it —
+    /// mock runners never auto-continue, so tests can't loop.
+    fn auto_continue_budget(&self) -> u32 {
+        0
+    }
+
     /// Force a context compaction now (the manual `/compact`). Emits a
     /// `Compaction` event via `events` on success. Default: no-op → `false`.
     async fn compact(
