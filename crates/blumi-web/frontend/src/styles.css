@@ -455,7 +455,9 @@ pre.code {
 }
 .yolo.on {
   border-color: var(--rose);
-  color: var(--rose);
+  background: var(--rose);
+  color: #1a1024;
+  font-weight: 600;
 }
 
 /* ── Task progress ──────────────────────────────────────── */

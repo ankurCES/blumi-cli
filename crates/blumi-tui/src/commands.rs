@@ -78,7 +78,7 @@ pub const COMMANDS: &[CommandDef] = &[
     },
     CommandDef {
         name: "/yolo",
-        desc: "toggle auto-approve (yolo)",
+        desc: "toggle auto-approve — skip all permission prompts (ctrl+y)",
     },
     CommandDef {
         name: "/brain",
@@ -153,6 +153,20 @@ pub fn matching(input: &str) -> Vec<&'static CommandDef> {
         .iter()
         .filter(|c| c.name.starts_with(head))
         .collect()
+}
+
+/// Toggle yolo (auto-approve): skip every permission prompt and run tools
+/// straight away. Shared by the `/yolo` command and the Ctrl+Y shortcut, so
+/// both stay in sync (flip local state, tell the core, announce it loudly).
+pub(crate) async fn toggle_yolo(model: &mut Model, session: &SessionHandle) {
+    model.yolo = !model.yolo;
+    let _ = session.send(Command::SetYolo { on: model.yolo }).await;
+    model.entries.push(Entry::Notice(if model.yolo {
+        "⚡ yolo ON — tools run without asking (ctrl+y or /yolo to undo)".into()
+    } else {
+        "yolo off — tools will ask for approval".into()
+    }));
+    model.mark_dirty();
 }
 
 /// Run a slash command line (e.g. "/model claude-x").
@@ -278,18 +292,7 @@ pub async fn run(model: &mut Model, session: &SessionHandle, line: &str) {
                 let _ = session.send(Command::Undo).await;
             }
         }
-        "/yolo" => {
-            model.yolo = !model.yolo;
-            let _ = session.send(Command::SetYolo { on: model.yolo }).await;
-            model.entries.push(Entry::Notice(
-                if model.yolo {
-                    "auto-approve ON — blumi will run tools without asking. /yolo again to undo"
-                } else {
-                    "auto-approve off — tools will ask for approval"
-                }
-                .into(),
-            ));
-        }
+        "/yolo" => toggle_yolo(model, session).await,
         "/brain" => {
             if arg.is_empty() {
                 model.entries.push(Entry::Notice(format!(

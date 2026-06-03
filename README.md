@@ -88,3 +88,7 @@ skills + dual memory, FTS5 session search, cron, Docker/SSH executors, LSP, play
 gateways (Telegram/Discord/Slack/WhatsApp) + voice, a persistent task board with an autonomous
 `blumi loop` (also runnable in-TUI), a local-LLM **approval brain** (`/brain`
 off/advisory/auto), and **remote-instance tabs** to drive other `blumi web` servers from the TUI.
+
+Permissions are interactive by default; a toggleable **YOLO mode** skips every prompt and runs
+tools straight away — `ctrl+y` or `/yolo` in the TUI, the auto-approve button in the web header,
+or `--yolo` for headless `blumi run` / `blumi loop`. The header shows a glaring badge while it's on.
