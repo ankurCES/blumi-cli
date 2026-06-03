@@ -44,15 +44,22 @@ pub async fn models(State(state): State<AppState>) -> Json<Value> {
 #[derive(Deserialize)]
 pub struct ProviderBody {
     pub provider: String,
+    /// Optional API key to store for this provider (for unconfigured ones).
+    #[serde(default)]
+    pub api_key: Option<String>,
 }
 
-/// Switch the active provider: persist it (+ a default model), then rebuild the
-/// session so the new provider's client is used. The conversation is preserved.
+/// Switch the active provider: persist it (+ a default model, + an optional key),
+/// then rebuild the session so the new provider's client is used. The
+/// conversation is preserved.
 pub async fn provider_set(
     State(state): State<AppState>,
     Json(body): Json<ProviderBody>,
 ) -> Json<Value> {
-    if let Err(e) = state.mgmt().set_provider(&body.provider) {
+    if let Err(e) = state
+        .mgmt()
+        .set_provider(&body.provider, body.api_key.as_deref())
+    {
         return Json(json!({ "ok": false, "error": e.to_string() }));
     }
     match state.reload_current().await {

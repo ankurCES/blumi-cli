@@ -1088,3 +1088,22 @@ pre.code {
 .speak-btn:hover {
   opacity: 1;
 }
+
+/* ── Inline provider key form (header) ───────────────────── */
+.keyform {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+.keyform input {
+  padding: 4px 8px;
+  border: 1px solid var(--accent);
+  border-radius: 6px;
+  background: var(--bg);
+  color: var(--fg);
+  font-size: 12px;
+  width: 160px;
+}
+.keyform input:focus {
+  outline: none;
+}

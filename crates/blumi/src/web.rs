@@ -317,7 +317,7 @@ impl Management for WebManagement {
         }
     }
 
-    fn set_provider(&self, provider: &str) -> anyhow::Result<()> {
+    fn set_provider(&self, provider: &str, api_key: Option<&str>) -> anyhow::Result<()> {
         let c = self.fresh_config();
         if !c.providers.contains_key(provider) {
             anyhow::bail!("unknown provider '{provider}'");
@@ -326,9 +326,13 @@ impl Management for WebManagement {
             .into_iter()
             .next()
             .unwrap_or_default();
+        let key = api_key.map(str::trim).filter(|k| !k.is_empty());
         merge_settings_json(&self.config.paths.settings_json(), |root| {
             set_path(root, &["llm", "provider"], json!(provider));
             set_path(root, &["llm", "model"], json!(default_model));
+            if let Some(k) = key {
+                set_path(root, &["providers", provider, "api_key"], json!(k));
+            }
         })
     }
 }
