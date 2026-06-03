@@ -188,7 +188,7 @@ async fn handle_term(model: &mut Model, ev: TermEvent, session: &SessionHandle) 
             // ←/→ (or [/]) switch tabs, Enter activates.
             if model.focus == Focus::Sidebar {
                 match key.code {
-                    KeyCode::Tab => model.focus = next_focus(model.focus),
+                    KeyCode::Tab => model.focus = next_focus(model),
                     KeyCode::Esc => model.focus = Focus::Editor,
                     KeyCode::Up | KeyCode::Char('k') => model.sidebar_move(-1),
                     KeyCode::Down | KeyCode::Char('j') => model.sidebar_move(1),
@@ -205,6 +205,23 @@ async fn handle_term(model: &mut Model, ev: TermEvent, session: &SessionHandle) 
                 return;
             }
 
+            // Right dashboard focus: scroll the agent pane independently.
+            if model.focus == Focus::Dashboard {
+                match key.code {
+                    KeyCode::Tab => model.focus = next_focus(model),
+                    KeyCode::Esc => model.focus = Focus::Editor,
+                    KeyCode::Up | KeyCode::Char('k') => model.scroll_dashboard(-1),
+                    KeyCode::Down | KeyCode::Char('j') => model.scroll_dashboard(1),
+                    KeyCode::PageUp => model.scroll_dashboard(-10),
+                    KeyCode::PageDown => model.scroll_dashboard(10),
+                    KeyCode::Home | KeyCode::Char('g') => model.scroll_dashboard(isize::MIN),
+                    KeyCode::End | KeyCode::Char('G') => model.scroll_dashboard(isize::MAX),
+                    _ => {}
+                }
+                model.mark_dirty();
+                return;
+            }
+
             match key.code {
                 KeyCode::Esc => {
                     if model.busy {
@@ -213,7 +230,7 @@ async fn handle_term(model: &mut Model, ev: TermEvent, session: &SessionHandle) 
                         model.clear_input();
                     }
                 }
-                KeyCode::Tab => model.focus = next_focus(model.focus),
+                KeyCode::Tab => model.focus = next_focus(model),
                 KeyCode::Char('j') if ctrl => model.input.insert_newline(),
                 KeyCode::Enter
                     if key
@@ -292,8 +309,17 @@ async fn handle_term(model: &mut Model, ev: TermEvent, session: &SessionHandle) 
                         }
                         model.mark_dirty();
                     } else if model.dialog.is_none() {
-                        // Click a sidebar row: focus it, select, and activate.
-                        sidebar_click(model, me.column, me.row);
+                        // Click in the dashboard pane → focus it (for keyboard
+                        // scroll); otherwise treat it as a sidebar click.
+                        let in_dash = model.dash_area.is_some_and(|(x, y, w, h)| {
+                            me.column >= x && me.column < x + w && me.row >= y && me.row < y + h
+                        });
+                        if in_dash {
+                            model.focus = Focus::Dashboard;
+                            model.mark_dirty();
+                        } else {
+                            sidebar_click(model, me.column, me.row);
+                        }
                     }
                 }
                 _ => {}
@@ -744,12 +770,20 @@ fn sidebar_click(model: &mut Model, col: u16, row: u16) {
     }
 }
 
-/// Cycle keyboard focus: editor → chat → explorer sidebar → editor.
-fn next_focus(f: Focus) -> Focus {
-    match f {
+/// Cycle keyboard focus: editor → chat → explorer → dashboard → editor,
+/// skipping panes that aren't currently on screen (their areas are only
+/// recorded while rendered).
+fn next_focus(model: &Model) -> Focus {
+    let sidebar = model.sidebar_list_area.is_some();
+    let dash = model.dash_area.is_some();
+    match model.focus {
         Focus::Editor => Focus::Chat,
-        Focus::Chat => Focus::Sidebar,
+        Focus::Chat if sidebar => Focus::Sidebar,
+        Focus::Chat if dash => Focus::Dashboard,
+        Focus::Chat => Focus::Editor,
+        Focus::Sidebar if dash => Focus::Dashboard,
         Focus::Sidebar => Focus::Editor,
+        Focus::Dashboard => Focus::Editor,
     }
 }
 
@@ -901,6 +935,19 @@ mod tests {
     }
     fn test_session() -> SessionHandle {
         blumi_core::spawn_session(blumi_protocol::SessionId::new(), "m", Arc::new(NoopRunner))
+    }
+
+    #[test]
+    fn dashboard_keyboard_scroll_clamps() {
+        let mut m = Model::new("m".into(), "/tmp".into());
+        m.dash_area = Some((50, 2, 30, 10)); // visible height 10
+        m.dash_lines = 25; // max scroll = 25 - 10 = 15
+        m.scroll_dashboard(100); // PgDn past the end → clamps
+        assert_eq!(m.dash_scroll, 15);
+        m.scroll_dashboard(isize::MIN); // Home → top
+        assert_eq!(m.dash_scroll, 0);
+        m.scroll_dashboard(isize::MAX); // End → bottom
+        assert_eq!(m.dash_scroll, 15);
     }
 
     #[test]

@@ -255,15 +255,25 @@ fn render_dashboard(model: &mut Model, f: &mut Frame, area: Rect, theme: &Theme)
     } else {
         crate::mascot::pulse_color(0x4F, 0xE0, 0xA0, model.spinner_frame)
     };
+    let focused = model.focus == Focus::Dashboard;
     let block = Block::default()
         .borders(Borders::LEFT)
-        .border_style(theme.dim())
+        .border_style(if focused {
+            theme.bold_primary()
+        } else {
+            theme.dim()
+        })
         .title(Line::from(vec![
             Span::styled(
                 format!(" {} ", icon::DOT),
                 Style::default().fg(dot_color).add_modifier(Modifier::BOLD),
             ),
             Span::styled("agent ", theme.bold_primary()),
+            if focused {
+                Span::styled("▾ scroll ", theme.subtle())
+            } else {
+                Span::raw("")
+            },
         ]));
     let inner = block.inner(area);
     f.render_widget(block, area);
