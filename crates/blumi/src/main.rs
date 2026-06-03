@@ -9,6 +9,7 @@ mod onboarding;
 mod playbook;
 mod prompt;
 mod providers;
+mod remote;
 mod run;
 mod session;
 mod task;

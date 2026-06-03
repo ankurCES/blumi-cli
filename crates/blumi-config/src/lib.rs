@@ -147,6 +147,26 @@ impl Default for BrainConfig {
     }
 }
 
+/// A remote blumi instance the TUI can attach to as a tab (ralph-tui style).
+/// Each is a running `blumi web` server reachable over HTTP/SSE.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(default)]
+pub struct RemoteInstance {
+    /// Short label shown on the tab.
+    pub name: String,
+    /// Base URL of the remote `blumi web` server, e.g. `http://10.0.0.5:8080`.
+    pub url: String,
+    /// Password for the remote (if it has auth enabled). Blank = open instance.
+    pub password: String,
+}
+
+/// Remote instances for the TUI's tab bar.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(default)]
+pub struct RemoteConfig {
+    pub instances: Vec<RemoteInstance>,
+}
+
 /// Web UI / server settings.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(default)]
@@ -302,6 +322,9 @@ pub struct BlumiConfig {
     /// Local-LLM "brain" that reviews tool approvals.
     #[serde(default)]
     pub brain: BrainConfig,
+    /// Remote blumi instances the TUI can attach to as tabs.
+    #[serde(default)]
+    pub remote: RemoteConfig,
     /// Resolved at load time; never serialized to/from files.
     #[serde(skip)]
     pub paths: Paths,
@@ -324,6 +347,7 @@ impl Default for BlumiConfig {
             web: WebSettings::default(),
             voice: VoiceSettings::default(),
             brain: BrainConfig::default(),
+            remote: RemoteConfig::default(),
             paths: Paths::default(),
         }
     }

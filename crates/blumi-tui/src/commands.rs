@@ -85,6 +85,10 @@ pub const COMMANDS: &[CommandDef] = &[
         desc: "local-LLM approvals: /brain off|advisory|auto",
     },
     CommandDef {
+        name: "/remote",
+        desc: "attach to a remote instance: /remote <name> | local | next",
+    },
+    CommandDef {
         name: "/persona",
         desc: "switch persona: /persona [name]",
     },
@@ -315,6 +319,32 @@ pub async fn run(model: &mut Model, session: &SessionHandle, line: &str) {
                 model
                     .entries
                     .push(Entry::Notice("usage: /brain off|advisory|auto".into()));
+            }
+        }
+        "/remote" => {
+            let a = arg.trim();
+            if a.is_empty() {
+                let mut s = String::from("remote instances:");
+                if model.remotes.is_empty() {
+                    s.push_str("\n  (none configured — add under [remote] in settings.json)");
+                } else {
+                    for n in &model.remotes {
+                        let open = model.tabs.iter().any(|(t, r)| *r && t == n);
+                        s.push_str(&format!("\n  - {n}{}", if open { "  (open)" } else { "" }));
+                    }
+                }
+                s.push_str("\n  usage: /remote <name> · /remote local · /remote next");
+                model.entries.push(Entry::Notice(s));
+            } else if a.eq_ignore_ascii_case("local") {
+                model.request_tab(0);
+            } else if a.eq_ignore_ascii_case("next") {
+                model.cycle_tab();
+            } else if model.remotes.iter().any(|n| n == a) {
+                model.request_remote(a);
+            } else {
+                model.entries.push(Entry::Notice(format!(
+                    "unknown remote '{a}' — /remote to list configured instances"
+                )));
             }
         }
         "/persona" => {
