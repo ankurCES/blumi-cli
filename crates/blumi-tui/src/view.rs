@@ -100,6 +100,10 @@ fn render_dashboard(model: &Model, f: &mut Frame, area: Rect, theme: &Theme) {
         &model.model_name
     };
 
+    // ── Animated brand wordmark crowning the pane ──────────────
+    lines.push(crate::mascot::wordmark_line(model.spinner_frame));
+    lines.push(Line::raw(""));
+
     // ── Session ───────────────────────────────────────────────
     lines.push(section("Session", theme));
     lines.push(Line::from(vec![
@@ -177,6 +181,13 @@ fn render_dashboard(model: &Model, f: &mut Frame, area: Rect, theme: &Theme) {
     ));
     lines.push(kv("turns", &model.turn_count.to_string(), theme));
     lines.push(kv("tools", &model.tools_run().to_string(), theme));
+    // Estimated spend (list price × billed tokens); "n/a" for unpriced models.
+    let cost = if crate::cost::is_priced(&model.model_name) {
+        format!("~${:.4}", model.cost_usd)
+    } else {
+        "n/a".to_string()
+    };
+    lines.push(kv("cost", &cost, theme));
 
     // ── Goal (if set) ─────────────────────────────────────────
     if !model.goal.is_empty() {

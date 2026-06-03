@@ -167,6 +167,8 @@ pub struct Model {
 
     pub input_tokens: u32,
     pub output_tokens: u32,
+    /// Estimated session spend in USD (from billed tokens × list price).
+    pub cost_usd: f64,
 
     pub should_quit: bool,
     dirty: bool,
@@ -233,6 +235,7 @@ impl Model {
             theme_idx: 0,
             input_tokens: 0,
             output_tokens: 0,
+            cost_usd: 0.0,
             should_quit: false,
             dirty: true,
         }
@@ -376,6 +379,7 @@ impl Model {
         self.turn_count = 0;
         self.input_tokens = 0;
         self.output_tokens = 0;
+        self.cost_usd = 0.0;
         self.context_tokens = 0;
         self.active_ms = 0;
         self.started = Instant::now();

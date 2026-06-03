@@ -392,11 +392,18 @@ async fn handle_core(model: &mut Model, event: Event, session: &SessionHandle) {
                 .await;
         }
         Event::TodoUpdate { items } => model.todos = items,
-        Event::Usage { input, output, .. } => {
+        Event::Usage {
+            input,
+            output,
+            context,
+            ..
+        } => {
             model.input_tokens += input;
             model.output_tokens += output;
-            // The latest request's input size ≈ current context usage.
-            model.context_tokens = input;
+            model.cost_usd += crate::cost::estimate(&model.model_name, input, output);
+            // `context` is the full prompt size (incl. cached tokens) — the real
+            // context-window usage. Fall back to `input` for old events.
+            model.context_tokens = if context > 0 { context } else { input };
         }
         Event::Compaction {
             messages_compressed,

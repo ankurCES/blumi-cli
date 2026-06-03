@@ -51,6 +51,29 @@ pub fn ramp_color(tick: usize) -> Color {
     Color::Rgb(r, g, b)
 }
 
+/// A compact one-line animated wordmark ("✿ blumi") for the sidebar/header: the
+/// rose→cyan gradient flows across the glyphs and shifts each `tick`, so it
+/// shimmers when redrawn. Bold for presence in a narrow pane.
+pub fn wordmark_line(tick: usize) -> Line<'static> {
+    let spans = "✿ blumi"
+        .chars()
+        .enumerate()
+        .map(|(i, ch)| {
+            if ch == ' ' {
+                Span::raw(" ")
+            } else {
+                Span::styled(
+                    ch.to_string(),
+                    Style::default()
+                        .fg(ramp_color(tick + i * 2))
+                        .add_modifier(Modifier::BOLD),
+                )
+            }
+        })
+        .collect::<Vec<_>>();
+    Line::from(spans)
+}
+
 /// A braille spinner frame for in-flight work (terminal-friendly).
 pub fn spinner(tick: usize) -> char {
     const FRAMES: [char; 10] = ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏'];

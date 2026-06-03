@@ -126,6 +126,13 @@ pub enum Event {
         input: u32,
         output: u32,
         total: u32,
+        /// The full prompt size of the latest request (input + cache read +
+        /// cache write) — i.e. how much is currently in the context window.
+        /// Distinct from `input`, which (with prompt caching on) counts only the
+        /// uncached tokens and so badly understates context usage. Drives the
+        /// context-progress meter. Defaults to `input` for old events.
+        #[serde(default)]
+        context: u32,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         cost_usd: Option<f64>,
     },
@@ -223,6 +230,7 @@ mod tests {
                 input: 1,
                 output: 2,
                 total: 3,
+                context: 1,
                 cost_usd: None,
             },
         };

@@ -225,10 +225,16 @@ impl TurnRunner for AgentTurnRunner {
             if usage.total() > 0 {
                 let mut st = state.lock().await;
                 st.record_usage(&usage);
+                // Context = the full prompt size: uncached input + cache read +
+                // cache write. With prompt caching, `input_tokens` alone omits
+                // the cached bulk, so the meter would read near-zero.
+                let context =
+                    usage.input_tokens + usage.cache_read_tokens + usage.cache_write_tokens;
                 ctx.events.emit(Event::Usage {
                     input: usage.input_tokens,
                     output: usage.output_tokens,
                     total: usage.total(),
+                    context,
                     cost_usd: None,
                 });
             }
