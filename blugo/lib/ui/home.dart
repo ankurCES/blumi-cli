@@ -1,9 +1,11 @@
 import 'package:flutter/material.dart';
 import '../data/events.dart';
 import '../data/models.dart';
+import '../data/voice.dart';
 import '../state/app.dart';
 import '../state/session.dart';
 import 'control.dart';
+import 'palette.dart';
 
 /// Fold-responsive shell. Wide (fold-open) shows explorer | chat | agent rail;
 /// narrow (portrait) shows chat with the explorer + agent rail as drawers —
@@ -14,6 +16,9 @@ class HomeShell extends StatelessWidget {
   const HomeShell(this.app, {super.key});
 
   static const double _wide = 840;
+
+  VoidCallback _cmd(BuildContext context) =>
+      () => showCommandPalette(context, app);
 
   @override
   Widget build(BuildContext context) {
@@ -32,12 +37,12 @@ class HomeShell extends StatelessWidget {
                     children: [
                       SizedBox(width: 260, child: SessionsPane(app)),
                       const VerticalDivider(width: 1),
-                      Expanded(child: ChatPane(session)),
+                      Expanded(child: ChatPane(session, onCommand: _cmd(context))),
                       const VerticalDivider(width: 1),
                       SizedBox(width: 320, child: AgentRail(session)),
                     ],
                   )
-                : ChatPane(session),
+                : ChatPane(session, onCommand: _cmd(context)),
           ),
         );
       },
@@ -113,7 +118,8 @@ class _Header extends StatelessWidget implements PreferredSizeWidget {
 /// The chat column: transcript + thinking/streaming + approval + composer.
 class ChatPane extends StatefulWidget {
   final BlumiSession session;
-  const ChatPane(this.session, {super.key});
+  final VoidCallback? onCommand;
+  const ChatPane(this.session, {this.onCommand, super.key});
   @override
   State<ChatPane> createState() => _ChatPaneState();
 }
@@ -152,6 +158,34 @@ class _ChatPaneState extends State<ChatPane> {
     widget.session.send(t);
   }
 
+  bool _recording = false;
+
+  /// Mic toggle: start/stop recording, then transcribe into the composer.
+  Future<void> _toggleMic() async {
+    final messenger = ScaffoldMessenger.of(context);
+    if (voice.recording) {
+      final bytes = await voice.stop();
+      if (mounted) setState(() => _recording = false);
+      if (bytes == null || bytes.isEmpty) return;
+      try {
+        final text = await widget.session.api.transcribe(bytes);
+        if (text.trim().isNotEmpty) {
+          _input.text = '${_input.text} ${text.trim()}'.trim();
+        }
+      } catch (e) {
+        messenger.showSnackBar(SnackBar(content: Text('voice: $e')));
+      }
+    } else {
+      final ok = await voice.start();
+      if (!ok) {
+        messenger.showSnackBar(
+            const SnackBar(content: Text('microphone permission denied')));
+        return;
+      }
+      if (mounted) setState(() => _recording = true);
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final s = widget.session;
@@ -177,7 +211,14 @@ class _ChatPaneState extends State<ChatPane> {
             ),
             if (s.pendingApproval != null) ApprovalCard(s, s.pendingApproval!),
             if (s.pendingClarify != null) ClarifyCard(s, s.pendingClarify!),
-            _Composer(input: _input, busy: s.busy, onSend: _send, onStop: s.cancel),
+            _Composer(
+                input: _input,
+                busy: s.busy,
+                onSend: _send,
+                onStop: s.cancel,
+                onCommand: widget.onCommand,
+                recording: _recording,
+                onMic: _toggleMic),
           ],
         );
       },
@@ -450,11 +491,17 @@ class _Composer extends StatelessWidget {
   final bool busy;
   final VoidCallback onSend;
   final VoidCallback onStop;
+  final VoidCallback? onCommand;
+  final bool recording;
+  final VoidCallback? onMic;
   const _Composer(
       {required this.input,
       required this.busy,
       required this.onSend,
-      required this.onStop});
+      required this.onStop,
+      this.onCommand,
+      this.recording = false,
+      this.onMic});
 
   @override
   Widget build(BuildContext context) {
@@ -463,6 +510,13 @@ class _Composer extends StatelessWidget {
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.end,
         children: [
+          if (onMic != null)
+            IconButton(
+              tooltip: recording ? 'Stop recording' : 'Voice input',
+              onPressed: onMic,
+              icon: Icon(recording ? Icons.mic : Icons.mic_none,
+                  color: recording ? Theme.of(context).colorScheme.error : null),
+            ),
           Expanded(
             child: TextField(
               controller: input,
@@ -470,6 +524,13 @@ class _Composer extends StatelessWidget {
               maxLines: 6,
               textInputAction: TextInputAction.send,
               onSubmitted: (_) => onSend(),
+              onChanged: (v) {
+                // Typing `/` on an empty composer opens the command palette.
+                if (v == '/' && onCommand != null) {
+                  input.clear();
+                  onCommand!();
+                }
+              },
               decoration: const InputDecoration(
                 hintText: 'Ask blumi…  (/ for commands)',
                 border: OutlineInputBorder(),
