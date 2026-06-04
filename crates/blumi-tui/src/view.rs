@@ -1501,19 +1501,43 @@ fn render_status(model: &Model, f: &mut Frame, area: Rect, theme: &Theme) {
             ("^c", "quit"),
         ]
     };
+    // Leading state chip (mode indicator, tuxedo-style): reflects busy / a pending
+    // permission / an open picker, else the focused pane.
+    let (label, chip_style) = if model.busy {
+        ("BUSY", theme.warn_badge())
+    } else if model.pending.is_some() {
+        (
+            "PERM",
+            Style::default()
+                .fg(theme.fg)
+                .bg(theme.error)
+                .add_modifier(Modifier::BOLD),
+        )
+    } else if model.dialog.is_some() {
+        (
+            "FIND",
+            theme.bold_primary().add_modifier(Modifier::REVERSED),
+        )
+    } else {
+        let l = match model.focus {
+            Focus::Editor => "EDIT",
+            Focus::Chat => "CHAT",
+            Focus::Sidebar => "EXPL",
+            Focus::Dashboard => "AGENT",
+        };
+        (l, theme.bold_primary().add_modifier(Modifier::REVERSED))
+    };
     let avail = area.width as usize;
-    let mut spans: Vec<Span> = Vec::new();
-    let mut used = 0usize;
-    for (i, (k, l)) in chips.iter().enumerate() {
-        let chip_w = k.chars().count() + l.chars().count() + 3; // " k l "
-        let sep = usize::from(i > 0);
-        if used + sep + chip_w > avail {
+    let mut spans: Vec<Span> = vec![Span::styled(format!(" {label} "), chip_style)];
+    let mut used = label.chars().count() + 2;
+    // Key-chips: a bright keycap + a subtle label on a raised surface, each
+    // preceded by a separating space; width-greedily shed from the right.
+    for (k, l) in chips.iter() {
+        let chip_w = 1 + k.chars().count() + l.chars().count() + 3; // sep + " k l "
+        if used + chip_w > avail {
             break;
         }
-        if i > 0 {
-            spans.push(Span::raw(" "));
-            used += 1;
-        }
+        spans.push(Span::raw(" "));
         spans.push(Span::styled(format!(" {k} "), theme.chip_key()));
         spans.push(Span::styled(format!("{l} "), theme.chip_label()));
         used += chip_w;
