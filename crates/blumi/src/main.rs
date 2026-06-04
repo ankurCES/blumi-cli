@@ -270,16 +270,38 @@ enum SessionCmd {
     Show { id: String },
 }
 
+/// Initialize tracing. In TUI mode `log_file` is `Some(path)` and logs are
+/// written there (the alternate screen must stay clean — anything on stderr
+/// paints over the UI); otherwise logs go to stderr as usual. If the log file
+/// can't be opened in TUI mode we discard logs rather than risk corrupting the UI.
+fn init_tracing(log_file: Option<PathBuf>) {
+    use tracing_subscriber::EnvFilter;
+    let filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("warn"));
+    match log_file {
+        Some(path) => match std::fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(&path)
+        {
+            Ok(file) => tracing_subscriber::fmt()
+                .with_env_filter(filter)
+                .with_ansi(false)
+                .with_writer(std::sync::Mutex::new(file))
+                .init(),
+            Err(_) => tracing_subscriber::fmt()
+                .with_env_filter(filter)
+                .with_writer(std::io::sink)
+                .init(),
+        },
+        None => tracing_subscriber::fmt()
+            .with_env_filter(filter)
+            .with_writer(std::io::stderr)
+            .init(),
+    }
+}
+
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
-    tracing_subscriber::fmt()
-        .with_env_filter(
-            tracing_subscriber::EnvFilter::try_from_default_env()
-                .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("warn")),
-        )
-        .with_writer(std::io::stderr)
-        .init();
-
     let cli = Cli::parse();
     let provider_flag = cli.provider.is_some();
     let is_bare = cli.command.is_none();
@@ -287,6 +309,15 @@ async fn main() -> anyhow::Result<()> {
     let working_dir = std::env::current_dir()?;
     let home_override = std::env::var("BLUMI_HOME").ok().map(PathBuf::from);
     let mut config = blumi_config::BlumiConfig::load(&working_dir, home_override)?;
+    config.paths.ensure_dirs().ok();
+
+    // Logging must not touch stderr while the TUI owns the alternate screen (it
+    // would paint over the UI). In TUI mode send tracing — and the MCP servers'
+    // forwarded stderr — to ~/.blumi/blumi.log; every other command logs to
+    // stderr as before.
+    let tui_mode = matches!(cli.command, None | Some(Commands::Tui));
+    init_tracing(tui_mode.then(|| config.paths.home.join("blumi.log")));
+
     if let Some(p) = cli.provider {
         config.llm.provider = p;
     }
@@ -302,7 +333,6 @@ async fn main() -> anyhow::Result<()> {
 
     // Pre-bundled skills: materialize the binary's bundled SKILL.md collections
     // into ~/.blumi/skills on first run (idempotent; never clobbers user skills).
-    config.paths.ensure_dirs().ok();
     if let Err(e) = blumi_skills::sync_bundled_skills(&config.paths.skills, false) {
         tracing::warn!("could not sync bundled skills: {e}");
     }

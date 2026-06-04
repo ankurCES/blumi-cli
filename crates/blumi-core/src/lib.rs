@@ -40,8 +40,8 @@ pub use runner::{TurnContext, TurnRunner};
 pub use session::{SessionSnapshot, SessionState};
 pub use subagent::{builtin_agents, AgentDef, AgentSpawner};
 pub use tool::{
-    parse_input, schema_for, ChangeJournal, FileChange, SubAgentSpawner, Tool, ToolContext, Typed,
-    TypedTool,
+    coerce_tool_input, parse_input, schema_for, ChangeJournal, FileChange, SubAgentSpawner, Tool,
+    ToolContext, Typed, TypedTool,
 };
 
 // Re-export the protocol vocabulary so downstream crates can depend on just
