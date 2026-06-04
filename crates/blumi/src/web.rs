@@ -735,6 +735,12 @@ pub async fn run(
     // Receiver is blocking), feeding the shared registry. Excludes our own
     // advertisement by mDNS fullname. Runs for the process lifetime.
     if let (Some(gid), Some(reg)) = (grid_id, grid_registry) {
+        // When the grid is on, excess local sub-agents overflow to a peer for
+        // remote execution (process-global hook read by blumi-core's spawner).
+        blumi_core::set_grid_overflow(std::sync::Arc::new(crate::grid::GridOverflowHook {
+            registry: reg.clone(),
+            secret: grid_secret.clone().unwrap_or_default(),
+        }));
         let self_id = _beacon.as_ref().map(|b| b.fullname().to_string());
         std::thread::spawn(move || {
             crate::grid::browse_into(
