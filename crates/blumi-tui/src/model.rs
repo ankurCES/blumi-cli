@@ -851,16 +851,31 @@ impl Model {
             "running {} · queued {} · review {} · done {}",
             c.doing, c.todo, c.review, c.done
         );
+        // Tasks executing on a remote grid runtime carry an `owner` (peer name).
+        let remote_n = board
+            .tasks()
+            .iter()
+            .filter(|t| t.owner.as_deref().is_some_and(|o| !o.is_empty()))
+            .count();
+        if remote_n > 0 {
+            s.push_str(&format!(" · {} remote {remote_n}", crate::icons::remote()));
+        }
         if board.is_empty() {
             s.push_str("\n\nno tasks yet — add with `blumi task add`, then `blumi loop`");
         } else {
             for (i, t) in board.tasks().iter().enumerate() {
+                // Show the remote runtime (icon + peer) for handed-off tasks.
+                let owner = match t.owner.as_deref().filter(|o| !o.is_empty()) {
+                    Some(host) => format!("  {} {host}", crate::icons::remote()),
+                    None => String::new(),
+                };
                 s.push_str(&format!(
-                    "\n{:>2}. {} P{}  {}",
+                    "\n{:>2}. {} P{}  {}{}",
                     i + 1,
                     t.state.icon(),
                     t.priority,
-                    t.title
+                    t.title,
+                    owner
                 ));
             }
         }
