@@ -2,6 +2,7 @@ import 'dart:convert';
 import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../data/api.dart';
+import '../data/cache.dart';
 import '../data/discovery.dart';
 import '../data/models.dart';
 import '../data/saved_server.dart';
@@ -16,6 +17,16 @@ class AppController extends ChangeNotifier {
   String status = '';
   bool connecting = false;
   List<SessionInfo> sessions = [];
+
+  /// Stale-while-revalidate cache so views paint from last-known data.
+  final DataCache cache = DataCache();
+
+  /// Cached control-center metadata (rarely changes) — hydrated from [cache]
+  /// instantly and revalidated by [loadMeta].
+  List<String> models = [];
+  List<PersonaInfo> personas = [];
+  String activePersona = '';
+  List<String> skills = [];
 
   /// Saved gateways, newest last. Persisted under `servers`.
   List<SavedServer> servers = [];
@@ -93,6 +104,7 @@ class AppController extends ChangeNotifier {
   /// On launch: load saved servers and silently reconnect to the last one if it
   /// still has a usable token. Returns true once a session is live.
   Future<bool> tryAutoConnect() async {
+    await cache.init();
     await _loadServers();
     notifyListeners();
     if (servers.isEmpty) return false;
@@ -245,9 +257,17 @@ class AppController extends ChangeNotifier {
     connecting = false;
     status = 'connected';
     await _syncSavedServer();
-    await refreshSessions();
+    // Paint the sessions list + control metadata from cache instantly, then
+    // revalidate over the network.
+    final cachedSessions = cache.peek(ck('sessions'));
+    if (cachedSessions != null) sessions = _parseSessions(cachedSessions);
     notifyListeners();
+    await refreshSessions();
+    loadMeta();
   }
+
+  /// Cache key namespaced by the connected gateway.
+  String ck(String key) => '${currentServerId ?? '_'}/$key';
 
   /// Persist the freshest token, and auto-label a still-host-named server (e.g.
   /// a migrated connection) with the gateway's machine hostname.
@@ -274,10 +294,89 @@ class AppController extends ChangeNotifier {
     final s = session;
     if (s == null) return;
     try {
-      sessions = await s.api.sessions();
+      final raw = await s.api.getJson('/api/sessions');
+      cache.put(ck('sessions'), raw);
+      sessions = _parseSessions(raw);
       notifyListeners();
     } catch (_) {}
   }
+
+  List<SessionInfo> _parseSessions(dynamic raw) =>
+      (((raw as Map)['sessions'] as List?) ?? [])
+          .map((e) => SessionInfo.fromMap(e as Map<String, dynamic>))
+          .toList();
+
+  /// Control-center metadata (models/personas/skills): hydrate from cache
+  /// instantly, then revalidate over the network only if stale (long TTL —
+  /// these rarely change).
+  Future<void> loadMeta({bool force = false}) async {
+    final s = session;
+    if (s == null) return;
+    final cm = cache.peek(ck('models'));
+    if (cm != null) models = _parseModels(cm);
+    final cp = cache.peek(ck('personas'));
+    if (cp != null) {
+      final (p, a) = _parsePersonas(cp);
+      personas = p;
+      activePersona = a;
+    }
+    final cs = cache.peek(ck('skills'));
+    if (cs != null) skills = _parseSkills(cs);
+    notifyListeners();
+
+    const ttl = Duration(minutes: 10);
+    if (!force &&
+        cache.isFresh(ck('models'), ttl) &&
+        cache.isFresh(ck('personas'), ttl) &&
+        cache.isFresh(ck('skills'), ttl)) {
+      return;
+    }
+    try {
+      final m = await s.api.getJson('/api/models');
+      cache.put(ck('models'), m);
+      models = _parseModels(m);
+    } catch (_) {}
+    try {
+      final p = await s.api.getJson('/api/personas');
+      cache.put(ck('personas'), p);
+      final (list, a) = _parsePersonas(p);
+      personas = list;
+      activePersona = a;
+    } catch (_) {}
+    try {
+      final k = await s.api.getJson('/api/skills');
+      cache.put(ck('skills'), k);
+      skills = _parseSkills(k);
+    } catch (_) {}
+    notifyListeners();
+  }
+
+  /// Optimistically move the persona selection, then persist.
+  void setPersona(String name) {
+    activePersona = name;
+    notifyListeners();
+    session?.api.setPersona(name);
+  }
+
+  List<String> _parseModels(dynamic raw) =>
+      (((raw as Map)['options'] as List?) ?? [])
+          .map((o) => o is Map ? (o['id'] ?? o['name'] ?? '$o').toString() : '$o')
+          .where((s) => s.isNotEmpty)
+          .toList();
+
+  (List<PersonaInfo>, String) _parsePersonas(dynamic raw) {
+    final m = raw as Map;
+    final list = ((m['personas'] as List?) ?? [])
+        .map((p) => PersonaInfo(
+            (p as Map)['name']?.toString() ?? '', p['description']?.toString() ?? ''))
+        .toList();
+    return (list, m['active']?.toString() ?? '');
+  }
+
+  List<String> _parseSkills(dynamic raw) =>
+      (((raw as Map)['skills'] as List?) ?? [])
+          .map((s) => s is Map ? (s['name'] ?? '$s').toString() : '$s')
+          .toList();
 
   Future<void> newSession() async {
     final s = session;

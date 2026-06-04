@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
 import '../data/api.dart';
+import '../data/cache.dart';
 import '../state/app.dart';
 import 'theme.dart';
 
@@ -75,45 +76,83 @@ class _ControlCenter extends StatelessWidget {
 
 // --- async helper (loading / retry-on-error / content) ---------------------
 
-/// FutureBuilder that shows a spinner while loading, a Retry on error (instead
-/// of spinning forever), and [builder] on success. [load] (re)creates the
-/// future; the builder gets a `refresh` callback.
+/// Stale-while-revalidate view: paints cached data instantly (a thin progress
+/// bar shows while revalidating), only hits the network when the entry is
+/// stale, and shows Retry on error when there's nothing cached.
 class _AsyncView<T> extends StatefulWidget {
-  final Future<T> Function() load;
+  final DataCache cache;
+  final String cacheKey;
+  final Duration ttl;
+  final Future<dynamic> Function() fetch; // raw JSON, cached as-is
+  final T Function(dynamic raw) parse;
   final Widget Function(BuildContext, T, Future<void> Function()) builder;
-  const _AsyncView({required this.load, required this.builder});
+  const _AsyncView({
+    required this.cache,
+    required this.cacheKey,
+    required this.ttl,
+    required this.fetch,
+    required this.parse,
+    required this.builder,
+  });
   @override
   State<_AsyncView<T>> createState() => _AsyncViewState<T>();
 }
 
 class _AsyncViewState<T> extends State<_AsyncView<T>> {
-  late Future<T> _f;
+  T? _data;
+  Object? _error;
+  bool _loading = false;
+
   @override
   void initState() {
     super.initState();
-    _f = widget.load();
+    final cached = widget.cache.peek(widget.cacheKey);
+    if (cached != null) {
+      try {
+        _data = widget.parse(cached);
+      } catch (_) {}
+    }
+    if (_data == null || !widget.cache.isFresh(widget.cacheKey, widget.ttl)) {
+      WidgetsBinding.instance.addPostFrameCallback((_) => _refresh());
+    }
   }
 
-  Future<void> _refresh() {
-    final f = widget.load();
-    setState(() => _f = f);
-    return f.then((_) {}).catchError((_) {});
+  Future<void> _refresh() async {
+    if (_loading) return;
+    if (mounted) setState(() => _loading = true);
+    try {
+      final raw = await widget.fetch();
+      widget.cache.put(widget.cacheKey, raw);
+      final parsed = widget.parse(raw);
+      if (mounted) {
+        setState(() {
+          _data = parsed;
+          _error = null;
+        });
+      }
+    } catch (e) {
+      if (mounted) setState(() => _error = e);
+    } finally {
+      if (mounted) setState(() => _loading = false);
+    }
   }
 
   @override
   Widget build(BuildContext context) {
-    return FutureBuilder<T>(
-      future: _f,
-      builder: (context, snap) {
-        if (snap.connectionState == ConnectionState.waiting) {
-          return const Center(child: CircularProgressIndicator());
-        }
-        if (snap.hasError || !snap.hasData) {
-          return _errorRetry(Theme.of(context).colorScheme, _refresh);
-        }
-        return widget.builder(context, snap.data as T, _refresh);
-      },
-    );
+    final cs = Theme.of(context).colorScheme;
+    if (_data != null) {
+      return Stack(children: [
+        Positioned.fill(child: widget.builder(context, _data as T, _refresh)),
+        if (_loading)
+          const Positioned(
+              top: 0,
+              left: 0,
+              right: 0,
+              child: LinearProgressIndicator(minHeight: 2)),
+      ]);
+    }
+    if (_error != null) return _errorRetry(cs, _refresh);
+    return const Center(child: CircularProgressIndicator());
   }
 }
 
@@ -142,9 +181,6 @@ class _SettingsTab extends StatefulWidget {
 }
 
 class _SettingsTabState extends State<_SettingsTab> {
-  late Future<List<String>> _models;
-  late Future<(List<PersonaInfo>, String)> _personas;
-
   // Voice config (loaded from /api/settings; key fields are write-only).
   final _ttsKey = TextEditingController();
   final _ttsVoice = TextEditingController();
@@ -158,8 +194,7 @@ class _SettingsTabState extends State<_SettingsTab> {
   @override
   void initState() {
     super.initState();
-    _models = _api.models();
-    _personas = _api.personas();
+    widget.app.loadMeta(); // SWR: paints from cache, revalidates if stale
     _loadVoice();
   }
 
@@ -237,65 +272,53 @@ class _SettingsTabState extends State<_SettingsTab> {
           ),
           const SizedBox(height: 18),
           _label('Model', cs),
-          FutureBuilder<List<String>>(
-            future: _models,
-            builder: (context, snap) {
-              final models = snap.data ?? [];
-              final current = app.session?.modelName ?? '';
-              if (models.isEmpty) {
-                return Text(current.isEmpty ? '(loading…)' : current,
-                    style: TextStyle(color: cs.onSurface.withValues(alpha: 0.7)));
-              }
-              return Wrap(
-                spacing: 8,
-                runSpacing: 8,
-                children: [
-                  for (final m in models)
-                    ChoiceChip(
-                      label: Text(m),
-                      selected: current == m,
-                      onSelected: (_) {
-                        app.session?.applyModel(m); // optimistic: UI updates now
-                        _api.setModel(m); // fire-and-forget
-                      },
-                    ),
-                ],
-              );
-            },
-          ),
+          Builder(builder: (context) {
+            final models = app.models;
+            final current = app.session?.modelName ?? '';
+            if (models.isEmpty) {
+              return Text(current.isEmpty ? '(loading…)' : current,
+                  style: TextStyle(color: cs.onSurface.withValues(alpha: 0.7)));
+            }
+            return Wrap(
+              spacing: 8,
+              runSpacing: 8,
+              children: [
+                for (final m in models)
+                  ChoiceChip(
+                    label: Text(m),
+                    selected: current == m,
+                    onSelected: (_) {
+                      app.session?.applyModel(m); // optimistic
+                      _api.setModel(m);
+                    },
+                  ),
+              ],
+            );
+          }),
           const SizedBox(height: 18),
           _label('Persona', cs),
-          FutureBuilder<(List<PersonaInfo>, String)>(
-            future: _personas,
-            builder: (context, snap) {
-              final data = snap.data;
-              if (data == null) return const Text('(loading…)');
-              final (list, active) = data;
-              return Column(
-                children: [
-                  for (final p in list)
-                    ListTile(
-                      dense: true,
-                      contentPadding: EdgeInsets.zero,
-                      selected: active == p.name,
-                      leading: Icon(active == p.name
-                          ? Icons.radio_button_checked
-                          : Icons.radio_button_unchecked),
-                      title: Text(p.name),
-                      subtitle: p.description.isEmpty
-                          ? null
-                          : Text(p.description,
-                              maxLines: 2, overflow: TextOverflow.ellipsis),
-                      onTap: () {
-                        // optimistic: move the selection now, then persist
-                        setState(() => _personas = Future.value((list, p.name)));
-                        _api.setPersona(p.name);
-                      },
-                    ),
-                ],
-              );
-            },
-          ),
+          if (app.personas.isEmpty)
+            const Text('(loading…)')
+          else
+            Column(
+              children: [
+                for (final p in app.personas)
+                  ListTile(
+                    dense: true,
+                    contentPadding: EdgeInsets.zero,
+                    selected: app.activePersona == p.name,
+                    leading: Icon(app.activePersona == p.name
+                        ? Icons.radio_button_checked
+                        : Icons.radio_button_unchecked),
+                    title: Text(p.name),
+                    subtitle: p.description.isEmpty
+                        ? null
+                        : Text(p.description,
+                            maxLines: 2, overflow: TextOverflow.ellipsis),
+                    onTap: () => app.setPersona(p.name), // optimistic in AppController
+                  ),
+              ],
+            ),
           const SizedBox(height: 8),
           SwitchListTile(
             contentPadding: EdgeInsets.zero,
@@ -686,13 +709,14 @@ class _UsageTab extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final cs = Theme.of(context).colorScheme;
-    return FutureBuilder<Map<String, dynamic>>(
-      future: app.session!.api.usage(),
-      builder: (context, snap) {
-        if (!snap.hasData) {
-          return const Center(child: CircularProgressIndicator());
-        }
-        final u = snap.data!;
+    return _AsyncView<Map<String, dynamic>>(
+      cache: app.cache,
+      cacheKey: app.ck('usage'),
+      ttl: const Duration(seconds: 20),
+      fetch: () => app.session!.api.getJson('/api/usage'),
+      parse: (raw) =>
+          ((raw as Map)['usage'] as Map?)?.cast<String, dynamic>() ?? {},
+      builder: (context, u, refresh) {
         if (u.isEmpty) {
           return Center(
               child: Text('(no usage yet)',
@@ -731,13 +755,15 @@ class _SkillsTab extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final cs = Theme.of(context).colorScheme;
-    return FutureBuilder<List<String>>(
-      future: app.session!.api.skills(),
-      builder: (context, snap) {
-        if (!snap.hasData) {
-          return const Center(child: CircularProgressIndicator());
-        }
-        final skills = snap.data!;
+    return _AsyncView<List<String>>(
+      cache: app.cache,
+      cacheKey: app.ck('skills'),
+      ttl: const Duration(minutes: 10),
+      fetch: () => app.session!.api.getJson('/api/skills'),
+      parse: (raw) => (((raw as Map)['skills'] as List?) ?? [])
+          .map((s) => s is Map ? (s['name'] ?? '$s').toString() : '$s')
+          .toList(),
+      builder: (context, skills, refresh) {
         if (skills.isEmpty) {
           return Center(
               child: Text('(no skills)',
@@ -770,13 +796,17 @@ class _MemoryTab extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final cs = Theme.of(context).colorScheme;
-    return FutureBuilder<(String, String)>(
-      future: app.session!.api.memory(),
-      builder: (context, snap) {
-        if (!snap.hasData) {
-          return const Center(child: CircularProgressIndicator());
-        }
-        final (project, user) = snap.data!;
+    return _AsyncView<(String, String)>(
+      cache: app.cache,
+      cacheKey: app.ck('memory'),
+      ttl: const Duration(seconds: 60),
+      fetch: () => app.session!.api.getJson('/api/memory'),
+      parse: (raw) => (
+        (raw as Map)['memory']?.toString() ?? '',
+        raw['user']?.toString() ?? '',
+      ),
+      builder: (context, mem, refresh) {
+        final (project, user) = mem;
         return ListView(
           controller: scroll,
           padding: const EdgeInsets.all(16),

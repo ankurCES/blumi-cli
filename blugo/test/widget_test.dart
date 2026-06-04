@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:blugo/data/cache.dart';
 import 'package:blugo/data/events.dart';
 import 'package:blugo/data/saved_server.dart';
 import 'package:blugo/state/app.dart';
@@ -75,6 +76,20 @@ void main() {
       expect(sparse.name, '1.2.3.4');
       expect(sparse.id, '1.2.3.4:7777');
       expect(sparse.token, isNull);
+    });
+  });
+
+  group('DataCache', () {
+    test('peek/put/isFresh (stale-while-revalidate primitives)', () {
+      final c = DataCache();
+      expect(c.peek('k'), isNull);
+      expect(c.isFresh('k', const Duration(seconds: 5)), isFalse);
+      c.put('k', {'a': 1});
+      expect((c.peek('k') as Map)['a'], 1);
+      expect(c.isFresh('k', const Duration(seconds: 5)), isTrue);
+      expect(c.isFresh('missing', const Duration(seconds: 5)), isFalse);
+      c.clear(); // cancels the debounced save timer
+      expect(c.peek('k'), isNull);
     });
   });
 
