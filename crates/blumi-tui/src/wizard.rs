@@ -3,7 +3,8 @@
 //! API-key based (no OAuth, by design — see the project notes).
 
 use crate::app::{setup_terminal, teardown_terminal, Term};
-use crate::theme::{icon, Theme};
+use crate::icons;
+use crate::theme::Theme;
 use blumi_config::ProviderKind;
 use crossterm::event::{Event, EventStream, KeyCode, KeyEventKind, KeyModifiers};
 use futures::StreamExt;
@@ -215,7 +216,7 @@ fn draw(w: &Wizard, f: &mut Frame) {
         .borders(Borders::ALL)
         .border_style(Style::default().fg(t.primary))
         .title(Span::styled(
-            format!(" {} blumi setup ", icon::FLOWER),
+            format!(" {} blumi setup ", icons::agent()),
             t.bold_primary(),
         ));
     let inner = block.inner(area);

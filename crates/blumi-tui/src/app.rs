@@ -136,12 +136,15 @@ pub struct TuiConfig {
     pub brain_mode: String,
     /// Auto-continue step budget (dashboard display + `/autocontinue` default).
     pub auto_continue: u32,
+    /// User themes loaded from ~/.blumi/themes/*.toml (appended to the built-ins).
+    pub themes: Vec<crate::theme::Theme>,
 }
 
 /// Run the interactive TUI, sourcing sessions from `factory`. Restores the
 /// terminal on exit (including on error).
 pub async fn run(factory: Arc<dyn SessionFactory>, cfg: TuiConfig) -> anyhow::Result<()> {
     crate::theme::init_fill_from_env();
+    crate::icons::init_from_env();
     let mut terminal = setup_terminal()?;
     let result = run_loop(&mut terminal, factory, cfg).await;
     let _ = teardown_terminal(&mut terminal);
@@ -191,6 +194,15 @@ async fn run_loop(
     model.tasks_path = cfg.tasks_path;
     model.brain_mode = cfg.brain_mode;
     model.auto_continue = cfg.auto_continue;
+    // Built-in palettes + any user themes from ~/.blumi/themes; re-sync the active
+    // theme in case a user theme overrides the default (rose) at index 0.
+    model.themes = crate::theme::ThemeRegistry::builtin().with_user(cfg.themes);
+    model.theme = model.themes.get(model.theme_idx);
+
+    // Cinematic motion: honor env switches, then play a launch "scene-in".
+    model.motion = crate::motion::Motion::from_env();
+    model.motion.scene_in();
+    model.mark_dirty();
 
     let mut session = factory.create().await?;
     let mut events = session.subscribe();

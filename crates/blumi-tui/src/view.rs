@@ -1,7 +1,9 @@
 //! Rendering.
 
+use crate::icons;
 use crate::model::{fmt_dur, Entry, Focus, Model};
-use crate::theme::{icon, Theme};
+use crate::primitives::{centered_rect, shorten, truncate};
+use crate::theme::Theme;
 use blumi_protocol::TodoStatus;
 use ratatui::layout::{Alignment, Constraint, Layout, Rect};
 use ratatui::style::{Color, Modifier, Style};
@@ -23,6 +25,25 @@ const MAX_CONTENT_WIDTH: u16 = 100;
 /// terminals keep every row for the conversation.
 const MIN_PANELED_CHAT_H: u16 = 12;
 
+/// Which side rails are visible at a given body `width`. Honors the explorer/
+/// agent open flags AND the width breakpoints, with the agent rail winning ties
+/// (so showing the explorer never displaces the agent rail). Returns
+/// `(show_left, show_right)`.
+///
+/// Tiers (body width): the agent rail needs `DASHBOARD_MIN_WIDTH`; the explorer
+/// needs another `SIDEBAR_WIDTH` on top of it (or `SIDEBAR_WIDTH + 60` when the
+/// agent rail is hidden, so it can show on medium terminals).
+fn rail_visibility(model: &Model, width: u16) -> (bool, bool) {
+    let show_right = model.show_dashboard && !model.is_empty() && width >= DASHBOARD_MIN_WIDTH;
+    let show_left = model.explorer_open
+        && if show_right {
+            width >= DASHBOARD_MIN_WIDTH + SIDEBAR_WIDTH
+        } else {
+            width >= SIDEBAR_WIDTH + 60
+        };
+    (show_left, show_right)
+}
+
 pub fn render(model: &mut Model, f: &mut Frame) {
     let theme = model.theme;
     let area = f.area();
@@ -41,16 +62,10 @@ pub fn render(model: &mut Model, f: &mut Frame) {
 
     render_header(model, f, header, &theme);
 
-    // Body columns: optional left sidebar (workspaces + sessions) | center chat |
-    // optional right dashboard (logo + cost + active agents). The dashboard keeps
-    // its established threshold; the sidebar only appears when there's room left
-    // over for it (so adding it never displaces the dashboard).
-    let show_right = model.show_dashboard && !model.is_empty() && chat.width >= DASHBOARD_MIN_WIDTH;
-    let show_left = if show_right {
-        chat.width >= DASHBOARD_MIN_WIDTH + SIDEBAR_WIDTH
-    } else {
-        chat.width >= SIDEBAR_WIDTH + 60
-    };
+    // Body columns: optional left explorer | center chat | optional right agent
+    // rail. Visibility honors the open flags + width breakpoints (see
+    // `rail_visibility`).
+    let (show_left, show_right) = rail_visibility(model, chat.width);
 
     let mut constraints: Vec<Constraint> = Vec::new();
     if show_left {
@@ -114,32 +129,14 @@ pub fn render(model: &mut Model, f: &mut Frame) {
     if model.slash_active() {
         render_slash_popup(model, f, editor, &theme);
     }
+
+    // Cinematic motion (tachyonfx) — applied last, over the fully-drawn frame.
+    model.motion.process(f.buffer_mut(), area);
 }
 
-/// A rounded, titled pane block (posting-style): a quiet border when idle; a
-/// bright border + `▍` title accent + raised surface fill when focused.
+/// A rounded, titled pane block — see [`crate::primitives::panel`].
 fn pane_block(title: &str, focused: bool, theme: &Theme) -> Block<'static> {
-    let title = if focused {
-        Line::from(vec![
-            Span::styled("▍", theme.accent()),
-            Span::styled(format!("{title} "), theme.panel_focus()),
-        ])
-    } else {
-        Line::from(Span::styled(format!(" {title} "), theme.subtle()))
-    };
-    let mut block = Block::default()
-        .borders(Borders::ALL)
-        .border_type(BorderType::Rounded)
-        .border_style(if focused {
-            theme.panel_focus()
-        } else {
-            theme.border()
-        })
-        .title(title);
-    if focused {
-        block = block.style(theme.surface());
-    }
-    block
+    crate::primitives::panel(title, focused, theme)
 }
 
 /// Render one selectable list into `inner`, windowed around `sel`. Returns the
@@ -189,9 +186,9 @@ fn render_sidebar(model: &mut Model, f: &mut Frame, area: Rect, theme: &Theme) {
     let inner = block.inner(area);
     f.render_widget(block, area);
 
-    // Tab bar (row 0) + active list (the rest).
+    // Tab bar (2 rows — too many tabs for one 26-col row) + active list.
     let [tabs_row, list_area] =
-        Layout::vertical([Constraint::Length(1), Constraint::Min(0)]).areas(inner);
+        Layout::vertical([Constraint::Length(2), Constraint::Min(0)]).areas(inner);
     model.sidebar_tab_area = Some((tabs_row.x, tabs_row.y, tabs_row.width, tabs_row.height));
     model.sidebar_list_area = Some((list_area.x, list_area.y, list_area.width, list_area.height));
 
@@ -207,11 +204,14 @@ fn render_sidebar(model: &mut Model, f: &mut Frame, area: Rect, theme: &Theme) {
         }
     };
     f.render_widget(
-        Paragraph::new(Line::from(vec![
-            chip("Workspaces", tab == SidebarTab::Workspaces),
-            Span::raw(" "),
-            chip("Sessions", tab == SidebarTab::Sessions),
-        ])),
+        Paragraph::new(vec![
+            Line::from(vec![
+                chip("Workspaces", tab == SidebarTab::Workspaces),
+                Span::raw(" "),
+                chip("Sessions", tab == SidebarTab::Sessions),
+            ]),
+            Line::from(vec![chip("Skills", tab == SidebarTab::Skills)]),
+        ]),
         tabs_row,
     );
 
@@ -229,7 +229,7 @@ fn render_sidebar(model: &mut Model, f: &mut Frame, area: Rect, theme: &Theme) {
                 theme,
                 "(no projects)",
                 |ws, i| {
-                    let star = if ws.pinned { "★" } else { " " };
+                    let star = if ws.pinned { icons::pin() } else { " " };
                     let style = if i == model.ws_sel { sel_style } else { body };
                     vec![
                         Span::styled(format!("{star} "), theme.accent()),
@@ -259,6 +259,26 @@ fn render_sidebar(model: &mut Model, f: &mut Frame, area: Rect, theme: &Theme) {
                 },
             );
         }
+        SidebarTab::Skills => {
+            let name_w = list_area.width.saturating_sub(2) as usize;
+            render_list(
+                f,
+                list_area,
+                &model.skills,
+                model.skill_sel,
+                focused,
+                theme,
+                "(no skills)",
+                |(name, _desc), i| {
+                    let style = if i == model.skill_sel {
+                        sel_style
+                    } else {
+                        body
+                    };
+                    vec![Span::styled(format!(" {}", truncate(name, name_w)), style)]
+                },
+            );
+        }
     }
 }
 
@@ -271,7 +291,7 @@ fn render_dashboard(model: &mut Model, f: &mut Frame, area: Rect, theme: &Theme)
     // A full rounded box (posting-style), with a live ● dot + "agent" title.
     let title = Line::from(vec![
         Span::styled(
-            format!(" {} ", icon::DOT),
+            format!(" {} ", icons::dot()),
             Style::default().fg(dot_color).add_modifier(Modifier::BOLD),
         ),
         Span::styled(
@@ -436,7 +456,7 @@ fn metrics_lines(model: &Model, theme: &Theme, w: usize, dot_color: Color) -> Ve
     lines.push(Line::from(vec![
         Span::styled(format!("{:>7} ", "status"), theme.dim()),
         Span::styled(
-            format!("{} ", icon::DOT),
+            format!("{} ", icons::dot()),
             Style::default().fg(dot_color).add_modifier(Modifier::BOLD),
         ),
         Span::styled(
@@ -549,10 +569,10 @@ fn agent_lines(model: &Model, theme: &Theme, w: usize) -> Vec<Line<'static>> {
                 theme.accent(),
             ),
             crate::model::AgentStatus::Done => {
-                (icon::OK.to_string(), Style::default().fg(theme.success))
+                (icons::ok().to_string(), Style::default().fg(theme.success))
             }
             crate::model::AgentStatus::Failed => {
-                ("✗".to_string(), Style::default().fg(theme.error))
+                (icons::fail().to_string(), Style::default().fg(theme.error))
             }
         };
         lines.push(Line::from(vec![
@@ -592,7 +612,7 @@ fn task_lines(model: &Model, theme: &Theme, w: usize) -> Vec<Line<'static>> {
         .collect();
     for todo in &model.todos {
         let (mark, style) = match todo.status {
-            TodoStatus::Completed => (icon::OK.to_string(), Style::default().fg(theme.success)),
+            TodoStatus::Completed => (icons::ok().to_string(), Style::default().fg(theme.success)),
             TodoStatus::InProgress => (
                 crate::mascot::spinner(model.spinner_frame).to_string(),
                 theme.accent(),
@@ -633,8 +653,8 @@ fn activity_lines(model: &Model, theme: &Theme, w: usize) -> Vec<Line<'static>> 
     let mut lines: Vec<Line> = Vec::new();
     for (name, ok) in tools {
         let (mark, style) = match ok {
-            Some(true) => (icon::OK.to_string(), Style::default().fg(theme.success)),
-            Some(false) => (icon::ERR.to_string(), Style::default().fg(theme.error)),
+            Some(true) => (icons::ok().to_string(), Style::default().fg(theme.success)),
+            Some(false) => (icons::err().to_string(), Style::default().fg(theme.error)),
             None => (
                 crate::mascot::spinner(model.spinner_frame).to_string(),
                 theme.accent(),
@@ -900,11 +920,15 @@ fn render_dialog(model: &mut Model, f: &mut Frame, area: Rect, theme: &Theme) {
         .as_ref()
         .map(|d| d.title.clone())
         .unwrap_or_default();
+    // Tuxedo-style title: "✿ blumi · <title>" (keeps the picker name as a substring).
     let block = Block::default()
         .borders(Borders::ALL)
         .border_type(BorderType::Rounded)
         .border_style(Style::default().fg(theme.primary))
-        .title(Span::styled(format!(" {title} "), theme.bold_primary()));
+        .title(Span::styled(
+            format!(" {} blumi · {title} ", icons::agent()),
+            theme.bold_primary(),
+        ));
     let inner = block.inner(popup);
     f.render_widget(block, popup);
 
@@ -919,21 +943,32 @@ fn render_dialog(model: &mut Model, f: &mut Frame, area: Rect, theme: &Theme) {
     ]);
     f.render_widget(Paragraph::new(filter_line), filter_area);
 
+    // Rows: marker + label (left) … key/hint (right-aligned), with the selected
+    // row filled (selection surface) for a clear focus, tuxedo-style.
+    let total = list_area.width as usize;
     let rows: Vec<Line> = d
         .rows()
         .into_iter()
         .map(|(label, hint, selected)| {
             let marker = if selected { "❯ " } else { "  " };
-            let label_style = if selected {
-                theme.bold_primary()
+            let used = 2 + label.chars().count() + hint.chars().count() + 1;
+            let pad = total.saturating_sub(used);
+            let (mk, lbl, fill, key) = if selected {
+                let base = theme.selection();
+                (
+                    base.fg(theme.accent).add_modifier(Modifier::BOLD),
+                    base.add_modifier(Modifier::BOLD),
+                    base,
+                    base.fg(theme.fg_subtle),
+                )
             } else {
-                theme.body()
+                (theme.accent(), theme.body(), Style::default(), theme.dim())
             };
             Line::from(vec![
-                Span::styled(marker, theme.accent()),
-                Span::styled(label.to_string(), label_style),
-                Span::raw("   "),
-                Span::styled(hint.to_string(), theme.dim()),
+                Span::styled(marker, mk),
+                Span::styled(label.to_string(), lbl),
+                Span::styled(" ".repeat(pad), fill),
+                Span::styled(format!("{hint} "), key),
             ])
         })
         .collect();
@@ -944,27 +979,35 @@ fn render_header(model: &Model, f: &mut Frame, area: Rect, theme: &Theme) {
     let [left_area, right_area] =
         Layout::horizontal([Constraint::Min(0), Constraint::Length(40)]).areas(area);
 
-    let title = if model.session_title.is_empty() {
-        "blumi".to_string()
-    } else {
-        model.session_title.clone()
-    };
+    // Segment divider (tuxedo-style): a thin `│` in the dim color.
+    let div = || Span::styled(" │ ", theme.dim());
+    // Brand segment: the bowtie mark + flower + wordmark. Always "blumi" — the
+    // session title is its own segment so the brand stays a stable app signature.
     let mut spans = vec![
-        Span::styled(format!("{} {title}", icon::FLOWER), theme.bold_primary()),
-        Span::styled("  ·  ", theme.dim()),
-        Span::styled(
-            if model.model_name.is_empty() {
-                "default".to_string()
-            } else {
-                model.model_name.clone()
-            },
-            theme.accent(),
-        ),
+        Span::styled("▶▮◀ ", theme.dim()),
+        Span::styled(format!("{} blumi", icons::agent()), theme.bold_primary()),
     ];
-    // Skipping permissions is dangerous — surface it loudly and always, not just
-    // in the (hideable) dashboard. A black-on-amber badge right in the header.
+    if !model.session_title.is_empty() {
+        spans.push(div());
+        spans.push(Span::styled(
+            truncate(&model.session_title, 28),
+            theme.subtle(),
+        ));
+    }
+    // Model segment.
+    spans.push(div());
+    spans.push(Span::styled(
+        if model.model_name.is_empty() {
+            "default".to_string()
+        } else {
+            model.model_name.clone()
+        },
+        theme.accent(),
+    ));
+
+    // Badge cluster. YOLO (skipping permissions) is surfaced loudly + always.
     if model.yolo {
-        spans.push(Span::styled("  ", theme.dim()));
+        spans.push(Span::raw("  "));
         spans.push(Span::styled(
             " ⚡ YOLO ",
             Style::default()
@@ -973,9 +1016,8 @@ fn render_header(model: &Model, f: &mut Frame, area: Rect, theme: &Theme) {
                 .add_modifier(Modifier::BOLD),
         ));
     }
-    // Planning mode: read-only until a plan is approved.
     if model.plan_mode {
-        spans.push(Span::styled("  ", theme.dim()));
+        spans.push(Span::raw("  "));
         spans.push(Span::styled(
             " ◑ PLAN ",
             Style::default()
@@ -984,13 +1026,33 @@ fn render_header(model: &Model, f: &mut Frame, area: Rect, theme: &Theme) {
                 .add_modifier(Modifier::BOLD),
         ));
     }
+    // Compact mirrors of state that's detailed elsewhere (status bar / inforule).
+    if model.loop_active || model.loop_current.is_some() {
+        spans.push(Span::raw("  "));
+        spans.push(Span::styled(
+            "⟳",
+            theme.accent().add_modifier(Modifier::BOLD),
+        ));
+    }
+    if model.bg_count > 0 {
+        spans.push(Span::raw("  "));
+        spans.push(Span::styled(
+            format!("⬢ {}", model.bg_count),
+            theme.accent(),
+        ));
+    }
+
     // When more than the local tab is open, the header shows a tab strip
     // (ralph-style) in place of the working-dir crumb.
     if model.tabs.len() > 1 {
         spans.push(Span::styled("   ", theme.dim()));
         for (i, (name, remote)) in model.tabs.iter().enumerate() {
             let active = i == model.active_tab;
-            let glyph = if *remote { "☁" } else { "▪" };
+            let glyph = if *remote {
+                icons::remote()
+            } else {
+                icons::local()
+            };
             let chip = format!(" {glyph} {name} ");
             let style = if active {
                 theme.bold_primary()
@@ -1000,13 +1062,13 @@ fn render_header(model: &Model, f: &mut Frame, area: Rect, theme: &Theme) {
             spans.push(Span::styled(chip, style));
         }
     } else {
-        spans.push(Span::styled("  ·  ", theme.dim()));
+        spans.push(div());
         spans.push(Span::styled(
-            shorten(&model.working_dir, 32),
+            shorten(&model.working_dir, 28),
             theme.subtle(),
         ));
         if !model.persona.is_empty() && model.persona != "default" {
-            spans.push(Span::styled("  ·  ", theme.dim()));
+            spans.push(div());
             spans.push(Span::styled(model.persona.clone(), theme.subtle()));
         }
     }
@@ -1134,13 +1196,20 @@ fn build_lines(model: &Model, width: usize, theme: &Theme) -> Vec<Line<'static>>
         match entry {
             Entry::User(t) => {
                 let content = wrap_lines(t, inner, theme.body());
-                push_card(&mut lines, icon::USER, "you", theme.accent, content, width);
+                push_card(
+                    &mut lines,
+                    icons::user(),
+                    "you",
+                    theme.accent,
+                    content,
+                    width,
+                );
             }
             Entry::Assistant(t) => {
                 let content = crate::markdown::render_markdown(t, inner, theme);
                 push_card(
                     &mut lines,
-                    icon::FLOWER,
+                    icons::agent(),
                     "blumi",
                     theme.primary,
                     content,
@@ -1161,10 +1230,10 @@ fn build_lines(model: &Model, width: usize, theme: &Theme) -> Vec<Line<'static>>
                         crate::mascot::spinner(model.spinner_frame).to_string(),
                         theme.accent,
                     ),
-                    Some(true) => (icon::OK.to_string(), theme.success),
-                    Some(false) => (icon::ERR.to_string(), theme.error),
+                    Some(true) => (icons::ok().to_string(), theme.success),
+                    Some(false) => (icons::err().to_string(), theme.error),
                 };
-                let mut label = format!("{} {name}", icon::TOOL);
+                let mut label = format!("{} {name}", icons::tool());
                 if let Some(d) = diff_stat {
                     label.push_str(&format!("  {d}"));
                 }
@@ -1217,7 +1286,7 @@ fn build_lines(model: &Model, width: usize, theme: &Theme) -> Vec<Line<'static>>
         let content = crate::markdown::render_markdown(s, inner, theme);
         push_card(
             &mut lines,
-            icon::FLOWER,
+            icons::agent(),
             "blumi",
             theme.primary,
             content,
@@ -1253,24 +1322,24 @@ fn push_card(
     content: Vec<Line<'static>>,
     width: usize,
 ) {
-    let head = format!("{} {glyph} {label} ", icon::TL);
+    let head = format!("{} {glyph} {label} ", icons::tl());
     let used = head.chars().count();
-    let rule = icon::H.repeat(width.saturating_sub(used).max(1));
+    let rule = icons::h().repeat(width.saturating_sub(used).max(1));
     out.push(Line::from(Span::styled(
         format!("{head}{rule}"),
         Style::default().fg(color).add_modifier(Modifier::BOLD),
     )));
     let gutter = Style::default().fg(color);
     for l in content {
-        let mut spans = vec![Span::styled(format!("{} ", icon::V), gutter)];
+        let mut spans = vec![Span::styled(format!("{} ", icons::v()), gutter)];
         spans.extend(l.spans);
         out.push(Line::from(spans));
     }
     out.push(Line::from(Span::styled(
         format!(
             "{}{}",
-            icon::BL,
-            icon::H.repeat(width.saturating_sub(1).max(1))
+            icons::bl(),
+            icons::h().repeat(width.saturating_sub(1).max(1))
         ),
         gutter,
     )));
@@ -1282,8 +1351,8 @@ fn bar(frac: f64, width: usize) -> String {
     let filled = (frac.clamp(0.0, 1.0) * w as f64).round() as usize;
     format!(
         "{}{}",
-        icon::BAR_FULL.repeat(filled),
-        icon::BAR_EMPTY.repeat(w - filled)
+        icons::bar_full().repeat(filled),
+        icons::bar_empty().repeat(w - filled)
     )
 }
 
@@ -1494,23 +1563,50 @@ fn render_status(model: &Model, f: &mut Frame, area: Rect, theme: &Theme) {
             ("/", "cmd"),
             ("^p", "palette"),
             ("tab", "focus"),
+            ("esc", "nav"),
+            ("^b", "rails"),
             ("^y", "yolo"),
             ("^c", "quit"),
         ]
     };
+    // Leading state chip (mode indicator, tuxedo-style): reflects busy / a pending
+    // permission / an open picker, else the focused pane.
+    let (label, chip_style) = if model.busy {
+        ("BUSY", theme.warn_badge())
+    } else if model.pending.is_some() {
+        (
+            "PERM",
+            Style::default()
+                .fg(theme.fg)
+                .bg(theme.error)
+                .add_modifier(Modifier::BOLD),
+        )
+    } else if model.dialog.is_some() {
+        (
+            "FIND",
+            theme.bold_primary().add_modifier(Modifier::REVERSED),
+        )
+    } else {
+        let l = match model.focus {
+            Focus::Editor if model.mode == crate::model::Mode::Nav => "NAV",
+            Focus::Editor => "INSERT",
+            Focus::Chat => "CHAT",
+            Focus::Sidebar => "EXPL",
+            Focus::Dashboard => "AGENT",
+        };
+        (l, theme.bold_primary().add_modifier(Modifier::REVERSED))
+    };
     let avail = area.width as usize;
-    let mut spans: Vec<Span> = Vec::new();
-    let mut used = 0usize;
-    for (i, (k, l)) in chips.iter().enumerate() {
-        let chip_w = k.chars().count() + l.chars().count() + 3; // " k l "
-        let sep = usize::from(i > 0);
-        if used + sep + chip_w > avail {
+    let mut spans: Vec<Span> = vec![Span::styled(format!(" {label} "), chip_style)];
+    let mut used = label.chars().count() + 2;
+    // Key-chips: a bright keycap + a subtle label on a raised surface, each
+    // preceded by a separating space; width-greedily shed from the right.
+    for (k, l) in chips.iter() {
+        let chip_w = 1 + k.chars().count() + l.chars().count() + 3; // sep + " k l "
+        if used + chip_w > avail {
             break;
         }
-        if i > 0 {
-            spans.push(Span::raw(" "));
-            used += 1;
-        }
+        spans.push(Span::raw(" "));
         spans.push(Span::styled(format!(" {k} "), theme.chip_key()));
         spans.push(Span::styled(format!("{l} "), theme.chip_label()));
         used += chip_w;
@@ -1607,46 +1703,6 @@ fn render_approval(model: &Model, f: &mut Frame, area: Rect, theme: &Theme) {
     f.render_widget(Paragraph::new(lines), inner);
 }
 
-fn centered_rect(percent_x: u16, percent_y: u16, area: Rect) -> Rect {
-    let vertical = Layout::vertical([
-        Constraint::Percentage((100 - percent_y) / 2),
-        Constraint::Percentage(percent_y),
-        Constraint::Percentage((100 - percent_y) / 2),
-    ])
-    .split(area);
-    Layout::horizontal([
-        Constraint::Percentage((100 - percent_x) / 2),
-        Constraint::Percentage(percent_x),
-        Constraint::Percentage((100 - percent_x) / 2),
-    ])
-    .split(vertical[1])[1]
-}
-
-fn shorten(s: &str, max: usize) -> String {
-    if s.chars().count() <= max {
-        s.to_string()
-    } else {
-        let tail: String = s
-            .chars()
-            .rev()
-            .take(max.saturating_sub(1))
-            .collect::<Vec<_>>()
-            .into_iter()
-            .rev()
-            .collect();
-        format!("…{tail}")
-    }
-}
-
-fn truncate(s: &str, max: usize) -> String {
-    if s.chars().count() <= max {
-        s.to_string()
-    } else {
-        let head: String = s.chars().take(max.saturating_sub(1)).collect();
-        format!("{head}…")
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1656,6 +1712,8 @@ mod tests {
     use ratatui::Terminal;
 
     fn render_to_string(model: &mut Model, w: u16, h: u16) -> String {
+        // Motion mutates the buffer over time — keep snapshots deterministic.
+        model.motion.set_level(crate::motion::MotionLevel::Off);
         let mut terminal = Terminal::new(TestBackend::new(w, h)).unwrap();
         terminal.draw(|f| render(model, f)).unwrap();
         let buf = terminal.backend().buffer().clone();
@@ -1667,6 +1725,28 @@ mod tests {
             s.push('\n');
         }
         s
+    }
+
+    #[test]
+    fn rail_visibility_breakpoints() {
+        let mut m = Model::new("m".into(), "/tmp".into());
+        m.entries.push(Entry::User("hi".into())); // non-empty → agent rail eligible
+        m.show_dashboard = true;
+        m.explorer_open = true;
+        assert_eq!(rail_visibility(&m, 130), (true, true), "XL: both rails");
+        assert_eq!(
+            rail_visibility(&m, 100),
+            (false, true),
+            "L: agent rail only"
+        );
+        assert_eq!(rail_visibility(&m, 70), (false, false), "S: neither");
+        // Explorer closed → never shows, even when wide.
+        m.explorer_open = false;
+        assert_eq!(rail_visibility(&m, 130), (false, true));
+        // Agent rail closed → explorer can show on a medium terminal.
+        m.explorer_open = true;
+        m.show_dashboard = false;
+        assert_eq!(rail_visibility(&m, 100), (true, false));
     }
 
     #[test]
@@ -1731,6 +1811,7 @@ mod tests {
         assert!(out.contains("explorer"), "explorer pane");
         assert!(out.contains("Workspaces"), "workspaces tab");
         assert!(out.contains("Sessions"), "sessions tab");
+        assert!(out.contains("Skills"), "skills tab");
         assert!(out.contains("blumi-cli"), "workspace entry (active tab)");
         assert!(
             out.to_lowercase().contains("active agents"),
@@ -1742,6 +1823,12 @@ mod tests {
         model.sidebar_tab = crate::model::SidebarTab::Sessions;
         let out = render_to_string(&mut model, 130, 30);
         assert!(out.contains("fix parser"), "session entry (sessions tab)");
+
+        // Switch to the Skills tab → bundled/available skills show.
+        model.skills = vec![("rust-core".into(), "idiomatic rust".into())];
+        model.sidebar_tab = crate::model::SidebarTab::Skills;
+        let out = render_to_string(&mut model, 130, 30);
+        assert!(out.contains("rust-core"), "skill entry (skills tab)");
     }
 
     #[test]
