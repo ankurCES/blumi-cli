@@ -924,27 +924,35 @@ fn render_header(model: &Model, f: &mut Frame, area: Rect, theme: &Theme) {
     let [left_area, right_area] =
         Layout::horizontal([Constraint::Min(0), Constraint::Length(40)]).areas(area);
 
-    let title = if model.session_title.is_empty() {
-        "blumi".to_string()
-    } else {
-        model.session_title.clone()
-    };
+    // Segment divider (tuxedo-style): a thin `│` in the dim color.
+    let div = || Span::styled(" │ ", theme.dim());
+    // Brand segment: the bowtie mark + flower + wordmark. Always "blumi" — the
+    // session title is its own segment so the brand stays a stable app signature.
     let mut spans = vec![
-        Span::styled(format!("{} {title}", icon::FLOWER), theme.bold_primary()),
-        Span::styled("  ·  ", theme.dim()),
-        Span::styled(
-            if model.model_name.is_empty() {
-                "default".to_string()
-            } else {
-                model.model_name.clone()
-            },
-            theme.accent(),
-        ),
+        Span::styled("▶▮◀ ", theme.dim()),
+        Span::styled(format!("{} blumi", icon::FLOWER), theme.bold_primary()),
     ];
-    // Skipping permissions is dangerous — surface it loudly and always, not just
-    // in the (hideable) dashboard. A black-on-amber badge right in the header.
+    if !model.session_title.is_empty() {
+        spans.push(div());
+        spans.push(Span::styled(
+            truncate(&model.session_title, 28),
+            theme.subtle(),
+        ));
+    }
+    // Model segment.
+    spans.push(div());
+    spans.push(Span::styled(
+        if model.model_name.is_empty() {
+            "default".to_string()
+        } else {
+            model.model_name.clone()
+        },
+        theme.accent(),
+    ));
+
+    // Badge cluster. YOLO (skipping permissions) is surfaced loudly + always.
     if model.yolo {
-        spans.push(Span::styled("  ", theme.dim()));
+        spans.push(Span::raw("  "));
         spans.push(Span::styled(
             " ⚡ YOLO ",
             Style::default()
@@ -953,9 +961,8 @@ fn render_header(model: &Model, f: &mut Frame, area: Rect, theme: &Theme) {
                 .add_modifier(Modifier::BOLD),
         ));
     }
-    // Planning mode: read-only until a plan is approved.
     if model.plan_mode {
-        spans.push(Span::styled("  ", theme.dim()));
+        spans.push(Span::raw("  "));
         spans.push(Span::styled(
             " ◑ PLAN ",
             Style::default()
@@ -964,6 +971,22 @@ fn render_header(model: &Model, f: &mut Frame, area: Rect, theme: &Theme) {
                 .add_modifier(Modifier::BOLD),
         ));
     }
+    // Compact mirrors of state that's detailed elsewhere (status bar / inforule).
+    if model.loop_active || model.loop_current.is_some() {
+        spans.push(Span::raw("  "));
+        spans.push(Span::styled(
+            "⟳",
+            theme.accent().add_modifier(Modifier::BOLD),
+        ));
+    }
+    if model.bg_count > 0 {
+        spans.push(Span::raw("  "));
+        spans.push(Span::styled(
+            format!("⬢ {}", model.bg_count),
+            theme.accent(),
+        ));
+    }
+
     // When more than the local tab is open, the header shows a tab strip
     // (ralph-style) in place of the working-dir crumb.
     if model.tabs.len() > 1 {
@@ -980,13 +1003,13 @@ fn render_header(model: &Model, f: &mut Frame, area: Rect, theme: &Theme) {
             spans.push(Span::styled(chip, style));
         }
     } else {
-        spans.push(Span::styled("  ·  ", theme.dim()));
+        spans.push(div());
         spans.push(Span::styled(
-            shorten(&model.working_dir, 32),
+            shorten(&model.working_dir, 28),
             theme.subtle(),
         ));
         if !model.persona.is_empty() && model.persona != "default" {
-            spans.push(Span::styled("  ·  ", theme.dim()));
+            spans.push(div());
             spans.push(Span::styled(model.persona.clone(), theme.subtle()));
         }
     }
