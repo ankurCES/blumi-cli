@@ -9,7 +9,7 @@
 //! Sources (MIT or BSD-3-Clause; see NOTICE): obra/superpowers (`sp-*`),
 //! leonxlnx/taste-skill (`taste-*`), jeffallan/claude-skills (`cs-*`),
 //! udapy/rust-agentic-skills (`ras-*`), flutter/skills (`flutter-*`),
-//! dart-lang/skills (`dart-*`).
+//! dart-lang/skills (`dart-*`), workos/auth.md (`workos-auth`).
 
 use include_dir::{include_dir, Dir};
 use std::path::Path;
@@ -18,8 +18,8 @@ static BUNDLED: Dir<'_> = include_dir!("$CARGO_MANIFEST_DIR/bundled/skills");
 
 /// Bumped whenever the vendored snapshot changes, so an upgraded binary
 /// re-materializes its bundled skills. v2 adds flutter/skills, dart-lang/skills,
-/// and udapy/rust-agentic-skills.
-const BUNDLE_VERSION: &str = "2";
+/// and udapy/rust-agentic-skills; v3 adds workos/auth.md (`workos-auth`).
+const BUNDLE_VERSION: &str = "3";
 /// Ownership marker written into each bundled skill dir.
 const MARKER: &str = ".bundled";
 
@@ -122,6 +122,10 @@ mod tests {
         assert!(
             names.iter().any(|n| n == "ras-rust-core"),
             "rust-agentic skill"
+        );
+        assert!(
+            names.iter().any(|n| n == "workos-auth"),
+            "workos auth.md skill"
         );
     }
 
