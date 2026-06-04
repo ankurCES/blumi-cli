@@ -142,7 +142,12 @@ class _AsyncViewState<T> extends State<_AsyncView<T>> {
     final cs = Theme.of(context).colorScheme;
     if (_data != null) {
       return Stack(children: [
-        Positioned.fill(child: widget.builder(context, _data as T, _refresh)),
+        Positioned.fill(
+          child: RefreshIndicator(
+            onRefresh: _refresh, // pull down to force-refresh (bypass TTL)
+            child: widget.builder(context, _data as T, _refresh),
+          ),
+        ),
         if (_loading)
           const Positioned(
               top: 0,

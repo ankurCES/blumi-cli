@@ -198,6 +198,18 @@ class BlumiSession extends ChangeNotifier {
     } catch (_) {}
   }
 
+  /// Approve (proceed) or revise (reject) a proposed plan. The gateway resolves
+  /// a PlanReview via the same approval channel.
+  Future<void> answerPlan(bool approve) async {
+    final req = pendingPlan;
+    if (req == null) return;
+    pendingPlan = null;
+    notifyListeners();
+    try {
+      await api.approve(req.requestId, allow: approve);
+    } catch (_) {}
+  }
+
   /// Optimistically reflect a model change made via the control center.
   void applyModel(String model) {
     modelName = model;
