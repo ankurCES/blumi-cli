@@ -13,7 +13,8 @@ use std::net::IpAddr;
 use std::path::PathBuf;
 use std::process::Command;
 
-const LABEL: &str = "com.blumi.serve";
+#[cfg(target_os = "macos")]
+const LABEL: &str = "com.blumi.serve"; // launchd job label (macOS only)
 const DEFAULT_PORT: u16 = 7777;
 
 pub async fn run(config: BlumiConfig, action: ServeCmd) -> anyhow::Result<()> {
