@@ -14,7 +14,7 @@ mod logo;
 mod markdown;
 mod mascot;
 mod model;
-mod theme;
+pub mod theme;
 mod update;
 mod view;
 mod wizard;
