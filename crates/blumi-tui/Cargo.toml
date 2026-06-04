@@ -34,3 +34,4 @@ tachyonfx = "0.14"
 tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
 tokio-util.workspace = true
 tempfile = "3"
+insta = "1"

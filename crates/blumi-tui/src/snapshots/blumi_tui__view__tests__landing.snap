@@ -1,0 +1,34 @@
+---
+source: crates/blumi-tui/src/view.rs
+expression: "render_to_string(&mut model, 100, 30)"
+---
+▶▮◀ ✿ blumi │ claude-sonnet │ /tmp/proj                                          ctx 0% · 0s · ↑0 ↓0
+╭ explorer ◂ ────────────╮                                                                          
+│ Workspaces   Sessions  │                                                                          
+│ Skills                 │                                   ✿   ✿                                  
+│  (no projects)         │                                     ✿                                    
+│                        │                                  ✿  ◉  ✿                                 
+│                        │                                     ✿                                    
+│                        │                                   ✿   ✿                                  
+│                        │                                                                          
+│                        │                  ██████╗ ██╗     ██╗   ██╗███╗   ███╗██╗                 
+│                        │                  ██╔══██╗██║     ██║   ██║████╗ ████║██║                 
+│                        │                  ██████╔╝██║     ██║   ██║██╔████╔██║██║                 
+│                        │                  ██╔══██╗██║     ██║   ██║██║╚██╔╝██║██║                 
+│                        │                  ██████╔╝███████╗╚██████╔╝██║ ╚═╝ ██║██║                 
+│                        │                  ╚═════╝ ╚══════╝ ╚═════╝ ╚═╝     ╚═╝╚═╝                 
+│                        │                                                                          
+│                        │                 the local-first agentic coding companion                 
+│                        │                                                                          
+│                        │                            ─ quick commands ─                            
+│                        │         /help    list commands        /persona switch persona            
+│                        │         /model   switch model         /usage   usage analytics           
+│                        │         /theme   change theme         /tasks   toggle dashboard          
+│                        │         /memory  view memory          /quit    exit blumi                
+│                        │                                                                          
+╰────────────────────────╯        type a message and press Enter · / for the command palette        
+─ claude-sonnet │ 0/131.1k [░░░░░░░░░░] 0% │ ↑0 ↓0                                                  
+╭ message ─────────────────────────────────────────────────────────────────────────────────────────╮
+│ Ask blumi to build, fix, or explain… (/ for commands)                                            │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+ INSERT   enter send   / cmd   ^p palette   tab focus   esc nav   ^b rails   ^y yolo   ^c quit

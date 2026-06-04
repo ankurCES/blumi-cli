@@ -2115,4 +2115,50 @@ mod tests {
         assert!(out.contains("Context"), "context section");
         assert!(out.contains("tasks"), "tasks sub-panel");
     }
+
+    // ── Golden full-frame snapshots (insta) ─────────────────────────────────
+    // Deterministic: render_to_string forces motion off, spinner_frame defaults
+    // to 0, the default theme is rose, and icons default to unicode. These guard
+    // whole-frame layout/spacing that the substring tests can't capture. Run
+    // `cargo insta review` (or INSTA_UPDATE=always) after an intentional change.
+
+    #[test]
+    fn snapshot_landing() {
+        let mut model = Model::new("claude-sonnet".into(), "/tmp/proj".into());
+        insta::assert_snapshot!("landing", render_to_string(&mut model, 100, 30));
+    }
+
+    #[test]
+    fn snapshot_conversation() {
+        let mut model = Model::new("claude-sonnet".into(), "/tmp/proj".into());
+        model
+            .entries
+            .push(Entry::User("refactor the parser".into()));
+        model.entries.push(Entry::Assistant(
+            "Here's the plan:\n\n1. tokenize\n2. parse".into(),
+        ));
+        model.entries.push(Entry::Tool {
+            id: ToolCallId::from("c1"),
+            name: "FileEdit".into(),
+            summary: "src/parser.rs".into(),
+            ok: Some(true),
+            preview: Some("Edited src/parser.rs".into()),
+            diff_stat: Some("+8 -2".into()),
+            diff: None,
+        });
+        insta::assert_snapshot!("conversation", render_to_string(&mut model, 100, 30));
+    }
+
+    #[test]
+    fn snapshot_dashboard_full() {
+        let mut model = Model::new("claude-sonnet".into(), "/tmp/proj".into());
+        model.entries.push(Entry::User("hi".into()));
+        model.todos.push(blumi_protocol::Todo {
+            id: "1".into(),
+            content: "extract tokenize".into(),
+            status: TodoStatus::Completed,
+        });
+        // Wide enough that both rails render (XL tier).
+        insta::assert_snapshot!("dashboard_full", render_to_string(&mut model, 130, 30));
+    }
 }
