@@ -1,4 +1,6 @@
 import 'package:flutter/material.dart';
+import '../data/models.dart';
+import '../data/voice.dart';
 import '../state/app.dart';
 import 'control.dart';
 
@@ -42,6 +44,19 @@ class _Palette extends StatelessWidget {
           app.yolo ? 'Disable YOLO' : 'Enable YOLO', () async => app.setYolo(!app.yolo)),
       _PaletteCmd(Icons.tune, 'Control center',
           () async => showControlCenter(host, app)),
+      _PaletteCmd(Icons.volume_up_outlined, 'Speak last reply', () async {
+        String? text;
+        for (final e in s?.entries.reversed ?? const <Entry>[]) {
+          if (e is AssistantEntry) {
+            text = e.text;
+            break;
+          }
+        }
+        if (text == null || text.trim().isEmpty) return;
+        try {
+          await voice.play(await s!.api.speak(text));
+        } catch (_) {}
+      }),
       _PaletteCmd(Icons.dns_outlined, 'Switch gateway', () async => app.disconnect()),
     ];
 

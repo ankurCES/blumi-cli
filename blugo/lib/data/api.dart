@@ -148,6 +148,30 @@ class ApiClient {
       _post('/api/loop/start', {'review': review});
   Future<void> loopStop() => _post('/api/loop/stop', const {});
 
+  // --- voice -----------------------------------------------------------------
+
+  /// Transcribe recorded audio (raw bytes + its mime) → text.
+  Future<String> transcribe(List<int> audio, {String mime = 'audio/m4a'}) async {
+    final r = await _http.post(
+      _u('/api/voice/transcribe'),
+      headers: {
+        'Content-Type': mime,
+        if (conn.token != null) 'Authorization': 'Bearer ${conn.token}',
+      },
+      body: audio,
+    );
+    if (r.statusCode != 200) throw ApiException('transcribe → ${r.statusCode}');
+    return (jsonDecode(r.body) as Map<String, dynamic>)['text'] as String? ?? '';
+  }
+
+  /// Synthesize speech for [text] → audio bytes (mp3).
+  Future<List<int>> speak(String text) async {
+    final r = await _http.post(_u('/api/voice/speak'),
+        headers: _headers(), body: jsonEncode({'text': text}));
+    if (r.statusCode != 200) throw ApiException('speak → ${r.statusCode}');
+    return r.bodyBytes;
+  }
+
   Future<Map<String, dynamic>> usage() async {
     final j = await _getJson('/api/usage');
     return (j['usage'] as Map?)?.cast<String, dynamic>() ?? {};
