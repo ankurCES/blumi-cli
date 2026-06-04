@@ -73,6 +73,13 @@ else
   how="source"
 fi
 
+# macOS (esp. 26+) kills a binary at runtime when its code signature doesn't
+# match its bytes ("killed: Code Signature Invalid") — which happens to a
+# downloaded or copied binary. Re-sign ad-hoc so it runs. Best-effort.
+if [ "$(uname -s)" = "Darwin" ] && have codesign; then
+  codesign --force --sign - "$BIN_DIR/$BIN" >/dev/null 2>&1 || true
+fi
+
 say ""
 say "${cyan}✓${off} installed ${BIN} (${how}) → ${BIN_DIR}/${BIN}"
 
