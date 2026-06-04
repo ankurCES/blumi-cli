@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:blugo/data/cache.dart';
+import 'package:blugo/data/elevenlabs.dart';
 import 'package:blugo/data/events.dart';
 import 'package:blugo/data/saved_server.dart';
 import 'package:blugo/state/app.dart';
@@ -90,6 +91,33 @@ void main() {
       expect(c.isFresh('missing', const Duration(seconds: 5)), isFalse);
       c.clear(); // cancels the debounced save timer
       expect(c.peek('k'), isNull);
+    });
+  });
+
+  group('ElevenLabs voices', () {
+    test('parses voice_id/name, drops empties, sorts by name', () {
+      final voices = parseElevenLabsVoices('''
+        {"voices":[
+          {"voice_id":"v2","name":"Rachel"},
+          {"voice_id":"v1","name":"Adam"},
+          {"voice_id":"","name":"Bad"},
+          {"name":"NoId"},
+          {"voice_id":"v3"}
+        ]}''');
+      // 3 valid (v2, v1, v3); the empty-id and id-less ones are dropped.
+      expect(voices.length, 3);
+      // sorted case-insensitively by name: Adam, Rachel, then v3 (name == id)
+      expect(voices[0].id, 'v1');
+      expect(voices[0].name, 'Adam');
+      expect(voices[1].name, 'Rachel');
+      // missing name falls back to the id
+      expect(voices[2].id, 'v3');
+      expect(voices[2].name, 'v3');
+    });
+
+    test('tolerates an empty/absent voices list', () {
+      expect(parseElevenLabsVoices('{"voices":[]}'), isEmpty);
+      expect(parseElevenLabsVoices('{}'), isEmpty);
     });
   });
 

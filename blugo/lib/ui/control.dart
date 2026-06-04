@@ -2,6 +2,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import '../data/api.dart';
 import '../data/cache.dart';
+import '../data/elevenlabs.dart';
 import '../state/app.dart';
 import 'theme.dart';
 
@@ -194,6 +195,11 @@ class _SettingsTabState extends State<_SettingsTab> {
   bool _voiceEnabled = false;
   bool _ttsKeySet = false;
 
+  // ElevenLabs voice picker — populated by authenticating with the entered key.
+  List<VoiceOption> _voices = [];
+  bool _loadingVoices = false;
+  String? _voiceError;
+
   ApiClient get _api => widget.app.session!.api;
 
   @override
@@ -223,6 +229,42 @@ class _SettingsTabState extends State<_SettingsTab> {
         _ttsKeySet = v['tts_api_key_set'] as bool? ?? false;
       });
     } catch (_) {}
+  }
+
+  /// Authenticate the entered ElevenLabs key and load its voices into the
+  /// dropdown. The key is write-only on the gateway, so we use what the user
+  /// just typed — re-enter it to (re)load.
+  Future<void> _loadVoices() async {
+    final key = _ttsKey.text.trim();
+    if (key.isEmpty) {
+      setState(() => _voiceError = _ttsKeySet
+          ? 'Re-enter your API key to load voices'
+          : 'Enter your API key first');
+      return;
+    }
+    setState(() {
+      _loadingVoices = true;
+      _voiceError = null;
+    });
+    try {
+      final list = await fetchElevenLabsVoices(key);
+      if (!mounted) return;
+      setState(() {
+        _voices = list;
+        _loadingVoices = false;
+        if (list.isEmpty) {
+          _voiceError = 'no voices on this account';
+        } else if (!list.any((v) => v.id == _ttsVoice.text.trim())) {
+          _ttsVoice.text = list.first.id; // default to the first voice
+        }
+      });
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _loadingVoices = false;
+        _voiceError = '$e';
+      });
+    }
   }
 
   Future<void> _saveVoice() async {
@@ -346,13 +388,19 @@ class _SettingsTabState extends State<_SettingsTab> {
               ChoiceChip(
                 label: Text(p),
                 selected: _ttsProvider == p,
-                onSelected: (_) => setState(() => _ttsProvider = p),
+                onSelected: (_) => setState(() {
+                  _ttsProvider = p;
+                  _voices = [];
+                  _voiceError = null;
+                }),
               ),
           ]),
           const SizedBox(height: 12),
           TextField(
             controller: _ttsKey,
             obscureText: true,
+            onSubmitted:
+                _ttsProvider == 'elevenlabs' ? (_) => _loadVoices() : null,
             decoration: InputDecoration(
               labelText: _ttsProvider == 'elevenlabs'
                   ? 'ElevenLabs API key'
@@ -361,15 +409,74 @@ class _SettingsTabState extends State<_SettingsTab> {
               border: const OutlineInputBorder(),
             ),
           ),
-          const SizedBox(height: 12),
-          TextField(
-            controller: _ttsVoice,
-            decoration: InputDecoration(
-              labelText:
-                  _ttsProvider == 'elevenlabs' ? 'Voice ID' : 'Voice (e.g. alloy)',
-              border: const OutlineInputBorder(),
+          // ElevenLabs: authenticate the key and pick the voice from a dropdown.
+          if (_ttsProvider == 'elevenlabs') ...[
+            const SizedBox(height: 10),
+            Row(children: [
+              OutlinedButton.icon(
+                onPressed: _loadingVoices ? null : _loadVoices,
+                icon: _loadingVoices
+                    ? const SizedBox(
+                        width: 16,
+                        height: 16,
+                        child: CircularProgressIndicator(strokeWidth: 2))
+                    : const Icon(Icons.podcasts, size: 18),
+                label: Text(_voices.isEmpty
+                    ? 'Authenticate & load voices'
+                    : 'Reload voices'),
+              ),
+              const SizedBox(width: 10),
+              if (_voices.isNotEmpty)
+                Text('✓ ${_voices.length} voices',
+                    style: const TextStyle(
+                        color: Color(0xFF4FE0A0),
+                        fontWeight: FontWeight.w600)),
+            ]),
+            if (_voiceError != null)
+              Padding(
+                padding: const EdgeInsets.only(top: 6),
+                child: Text(_voiceError!,
+                    style: TextStyle(color: cs.error, fontSize: 12.5)),
+              ),
+            const SizedBox(height: 12),
+            if (_voices.isNotEmpty)
+              DropdownButtonFormField<String>(
+                initialValue:
+                    _voices.any((v) => v.id == _ttsVoice.text.trim())
+                        ? _ttsVoice.text.trim()
+                        : null,
+                isExpanded: true,
+                decoration: const InputDecoration(
+                  labelText: 'Voice',
+                  border: OutlineInputBorder(),
+                ),
+                items: [
+                  for (final v in _voices)
+                    DropdownMenuItem(
+                        value: v.id,
+                        child: Text(v.name, overflow: TextOverflow.ellipsis)),
+                ],
+                onChanged: (id) =>
+                    setState(() => _ttsVoice.text = id ?? ''),
+              )
+            else
+              TextField(
+                controller: _ttsVoice,
+                decoration: const InputDecoration(
+                  labelText: 'Voice ID (or load voices above)',
+                  border: OutlineInputBorder(),
+                ),
+              ),
+          ] else ...[
+            const SizedBox(height: 12),
+            TextField(
+              controller: _ttsVoice,
+              decoration: const InputDecoration(
+                labelText: 'Voice (e.g. alloy)',
+                border: OutlineInputBorder(),
+              ),
             ),
-          ),
+          ],
           const SizedBox(height: 12),
           TextField(
             controller: _sttKey,
