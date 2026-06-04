@@ -47,6 +47,20 @@ class BlumiSession extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// True while a session switch/new/resume is loading its transcript.
+  bool switching = false;
+
+  /// Immediate feedback for a session switch: clear the transcript and show a
+  /// loading state right away, before the (async) restore lands.
+  void beginSwitch() {
+    entries.clear();
+    streaming = null;
+    thinking = null;
+    busy = false;
+    switching = true;
+    notifyListeners();
+  }
+
   /// (Re)load the server's config + current transcript — called on connect and
   /// after a session switch/new/resume.
   Future<void> restore() async {
@@ -69,6 +83,7 @@ class BlumiSession extends ChangeNotifier {
     streaming = null;
     thinking = null;
     busy = false;
+    switching = false;
     notifyListeners();
   }
 

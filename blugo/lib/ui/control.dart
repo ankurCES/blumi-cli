@@ -73,6 +73,64 @@ class _ControlCenter extends StatelessWidget {
   }
 }
 
+// --- async helper (loading / retry-on-error / content) ---------------------
+
+/// FutureBuilder that shows a spinner while loading, a Retry on error (instead
+/// of spinning forever), and [builder] on success. [load] (re)creates the
+/// future; the builder gets a `refresh` callback.
+class _AsyncView<T> extends StatefulWidget {
+  final Future<T> Function() load;
+  final Widget Function(BuildContext, T, Future<void> Function()) builder;
+  const _AsyncView({required this.load, required this.builder});
+  @override
+  State<_AsyncView<T>> createState() => _AsyncViewState<T>();
+}
+
+class _AsyncViewState<T> extends State<_AsyncView<T>> {
+  late Future<T> _f;
+  @override
+  void initState() {
+    super.initState();
+    _f = widget.load();
+  }
+
+  Future<void> _refresh() {
+    final f = widget.load();
+    setState(() => _f = f);
+    return f.then((_) {}).catchError((_) {});
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return FutureBuilder<T>(
+      future: _f,
+      builder: (context, snap) {
+        if (snap.connectionState == ConnectionState.waiting) {
+          return const Center(child: CircularProgressIndicator());
+        }
+        if (snap.hasError || !snap.hasData) {
+          return _errorRetry(Theme.of(context).colorScheme, _refresh);
+        }
+        return widget.builder(context, snap.data as T, _refresh);
+      },
+    );
+  }
+}
+
+Widget _errorRetry(ColorScheme cs, Future<void> Function() onRetry) => Center(
+      child: Column(mainAxisSize: MainAxisSize.min, children: [
+        Icon(Icons.cloud_off, color: cs.onSurface.withValues(alpha: 0.4)),
+        const SizedBox(height: 8),
+        Text('couldn’t load',
+            style: TextStyle(color: cs.onSurface.withValues(alpha: 0.6))),
+        const SizedBox(height: 8),
+        OutlinedButton.icon(
+            onPressed: onRetry,
+            icon: const Icon(Icons.refresh),
+            label: const Text('Retry')),
+      ]),
+    );
+
 // --- Settings --------------------------------------------------------------
 
 class _SettingsTab extends StatefulWidget {
@@ -196,9 +254,9 @@ class _SettingsTabState extends State<_SettingsTab> {
                     ChoiceChip(
                       label: Text(m),
                       selected: current == m,
-                      onSelected: (_) async {
-                        await _api.setModel(m);
-                        app.session?.applyModel(m);
+                      onSelected: (_) {
+                        app.session?.applyModel(m); // optimistic: UI updates now
+                        _api.setModel(m); // fire-and-forget
                       },
                     ),
                 ],
@@ -228,12 +286,10 @@ class _SettingsTabState extends State<_SettingsTab> {
                           ? null
                           : Text(p.description,
                               maxLines: 2, overflow: TextOverflow.ellipsis),
-                      onTap: () async {
-                        await _api.setPersona(p.name);
-                        if (mounted) {
-                          setState(
-                              () => _personas = Future.value((list, p.name)));
-                        }
+                      onTap: () {
+                        // optimistic: move the selection now, then persist
+                        setState(() => _personas = Future.value((list, p.name)));
+                        _api.setPersona(p.name);
                       },
                     ),
                 ],
@@ -330,6 +386,12 @@ class _StatusTabState extends State<_StatusTab> {
     _status = widget.app.session!.api.status();
   }
 
+  Future<void> _reload() {
+    final f = widget.app.session!.api.status();
+    setState(() => _status = f);
+    return f.then((_) {}).catchError((_) {});
+  }
+
   String _fmtUptime(num secs) {
     final s = secs.toInt();
     final h = s ~/ 3600, m = (s % 3600) ~/ 60, sec = s % 60;
@@ -344,8 +406,11 @@ class _StatusTabState extends State<_StatusTab> {
     return FutureBuilder<Map<String, dynamic>>(
       future: _status,
       builder: (context, snap) {
-        if (!snap.hasData) {
+        if (snap.connectionState == ConnectionState.waiting) {
           return const Center(child: CircularProgressIndicator());
+        }
+        if (snap.hasError || !snap.hasData) {
+          return _errorRetry(cs, _reload);
         }
         final st = snap.data!;
         final s = widget.app.session!;
@@ -451,6 +516,7 @@ class _TasksTabState extends State<_TasksTab> {
 
   Future<void> _toggleLoop() async {
     final running = (_loop['running'] as bool?) ?? false;
+    setState(() => _loop = {..._loop, 'running': !running}); // optimistic
     try {
       running ? await _api.loopStop() : await _api.loopStart();
     } catch (_) {}
@@ -520,8 +586,15 @@ class _TasksTabState extends State<_TasksTab> {
     return FutureBuilder<List<TaskItem>>(
       future: _tasks,
       builder: (context, snap) {
-        if (!snap.hasData) {
+        if (snap.connectionState == ConnectionState.waiting) {
           return const Center(child: CircularProgressIndicator());
+        }
+        if (snap.hasError || !snap.hasData) {
+          return _errorRetry(cs, () {
+            final f = _api.tasks();
+            setState(() => _tasks = f);
+            return f.then((_) {}).catchError((_) {});
+          });
         }
         final tasks = snap.data!;
         if (tasks.isEmpty) {
