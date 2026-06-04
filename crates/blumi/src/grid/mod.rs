@@ -11,6 +11,8 @@
 //! without exposing the secret. The secret itself is presented (and verified)
 //! only when one node actually talks to another's `/api/grid/*` surface.
 
+pub mod client;
+
 use blumi_config::GridConfig;
 use mdns_sd::{ServiceDaemon, ServiceEvent};
 use sha2::{Digest, Sha256};
@@ -63,8 +65,7 @@ pub struct Peer {
 }
 
 impl Peer {
-    /// Base URL for talking to this peer's gateway. Used by grid dispatch (Phase 3).
-    #[allow(dead_code)]
+    /// Base URL for talking to this peer's gateway.
     pub fn base_url(&self) -> String {
         format!("http://{}:{}", self.host, self.port)
     }
@@ -115,8 +116,7 @@ impl PeerRegistry {
         out
     }
 
-    /// Look up a peer by id (mDNS fullname). Used by grid dispatch (Phase 3).
-    #[allow(dead_code)]
+    /// Look up a peer by id (mDNS fullname).
     pub fn get(&self, id: &str) -> Option<Peer> {
         self.inner.lock().ok()?.get(id).cloned()
     }

@@ -218,6 +218,27 @@ pub trait Management: Send + Sync {
     fn grid_peers(&self) -> serde_json::Value {
         serde_json::json!({ "enabled": false, "peers": [] })
     }
+    /// Live grid peer ids (mDNS fullnames) for round-robin dispatch. Empty when
+    /// the grid is disabled or no peers are online.
+    fn grid_peer_ids(&self) -> Vec<String> {
+        Vec::new()
+    }
+    /// The next todo as `{ id, prompt, title }` WITHOUT marking it doing
+    /// (read-only peek), or `None`. Used by grid dispatch to claim with an owner.
+    fn task_peek_next(&self) -> Option<serde_json::Value> {
+        None
+    }
+    /// Dispatch a task to a grid peer: claim it (doing + owner), run it on the
+    /// peer's runtime, then advance (done/review) or release (→ todo) it.
+    /// Returns a JSON status. Default: grid disabled.
+    async fn grid_dispatch(
+        &self,
+        _task_id: &str,
+        _peer_id: &str,
+        _review: bool,
+    ) -> serde_json::Value {
+        serde_json::json!({ "ok": false, "error": "grid disabled" })
+    }
 }
 
 /// Autonomous-loop state, surfaced over `/api/loop/status`.
@@ -238,6 +259,9 @@ pub struct AppState {
     auth: Option<Arc<Auth>>,
     started: std::time::Instant,
     loop_status: Arc<RwLock<LoopStatus>>,
+    /// Shared grid secret (when the grid is enabled), used to authenticate
+    /// peer→peer `/api/grid/run` requests. `None` = grid disabled.
+    grid_secret: Option<Arc<String>>,
 }
 
 impl AppState {
@@ -282,6 +306,11 @@ impl AppState {
     pub(crate) fn loop_status(&self) -> &Arc<RwLock<LoopStatus>> {
         &self.loop_status
     }
+
+    /// The shared grid secret, when the grid is enabled.
+    pub(crate) fn grid_secret(&self) -> Option<&str> {
+        self.grid_secret.as_deref().map(|s| s.as_str())
+    }
 }
 
 /// Build the axum router for a given state.
@@ -314,6 +343,8 @@ pub fn router(state: AppState) -> Router {
         .route("/api/skills", get(api::skills))
         .route("/api/tasks", get(api::tasks))
         .route("/api/grid/peers", get(api::grid_peers))
+        .route("/api/grid/dispatch", post(api::grid_dispatch))
+        .route("/api/grid/run", post(api::grid_run))
         .route("/api/memory", get(api::memory_get).post(api::memory_set))
         .route("/api/usage", get(api::usage))
         .route("/api/status", get(api::status))
@@ -342,6 +373,7 @@ pub async fn serve(
     config: WebConfig,
     addr: SocketAddr,
     auth: Option<Auth>,
+    grid_secret: Option<String>,
 ) -> anyhow::Result<()> {
     let session = provider.create().await?;
     let state = AppState {
@@ -352,6 +384,7 @@ pub async fn serve(
         auth: auth.map(Arc::new),
         started: std::time::Instant::now(),
         loop_status: Arc::new(RwLock::new(LoopStatus::default())),
+        grid_secret: grid_secret.map(Arc::new),
     };
     let app = router(state.clone());
     let listener = tokio::net::TcpListener::bind(addr).await?;

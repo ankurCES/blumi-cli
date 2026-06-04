@@ -210,6 +210,82 @@ impl Management for WebManagement {
         }
     }
 
+    fn grid_peer_ids(&self) -> Vec<String> {
+        match &self.grid {
+            Some(g) => g.registry.live().into_iter().map(|p| p.id).collect(),
+            None => Vec::new(),
+        }
+    }
+
+    fn task_peek_next(&self) -> Option<serde_json::Value> {
+        let board = blumi_task::TaskBoard::load(crate::task::board_path(&self.config));
+        let task = board.next_todo()?;
+        let prompt = if task.detail.trim().is_empty() {
+            task.title.clone()
+        } else {
+            format!("{}\n\n{}", task.title, task.detail)
+        };
+        Some(serde_json::json!({ "id": task.id, "prompt": prompt, "title": task.title }))
+    }
+
+    async fn grid_dispatch(&self, task_id: &str, peer_id: &str, review: bool) -> serde_json::Value {
+        use blumi_task::{TaskBoard, TaskState};
+        let Some(grid) = &self.grid else {
+            return serde_json::json!({ "ok": false, "error": "grid disabled" });
+        };
+        let secret = self.config.grid.secret.clone();
+        if secret.trim().is_empty() {
+            return serde_json::json!({ "ok": false, "error": "no grid secret" });
+        }
+        let Some(peer) = grid.registry.get(peer_id) else {
+            return serde_json::json!({ "ok": false, "error": "peer offline" });
+        };
+
+        // Claim: mark doing + owner, and build the prompt from the task.
+        let path = crate::task::board_path(&self.config);
+        let mut board = TaskBoard::load(&path);
+        let Some(task) = board.tasks().iter().find(|t| t.id == task_id).cloned() else {
+            return serde_json::json!({ "ok": false, "error": "task not found" });
+        };
+        board.set_state_now(task_id, TaskState::Doing);
+        board.set_owner(task_id, Some(peer.name.clone()));
+        board.save().ok();
+        let prompt = if task.detail.trim().is_empty() {
+            task.title.clone()
+        } else {
+            format!("{}\n\n{}", task.title, task.detail)
+        };
+
+        // Run on the peer's own runtime, then advance (done/review) on success or
+        // release (→ todo, clear owner) on failure.
+        let client = crate::grid::client::Client::for_peer(&peer, &secret);
+        let res = client
+            .run_task(prompt, std::time::Duration::from_secs(900))
+            .await;
+        let mut board = TaskBoard::load(&path);
+        match res {
+            Ok(summary) => {
+                let to = if review {
+                    TaskState::Review
+                } else {
+                    TaskState::Done
+                };
+                board.set_state_now(task_id, to);
+                // Keep `owner` so the UI shows which peer ran it.
+                board.save().ok();
+                serde_json::json!({ "ok": true, "peer": peer.name, "summary": summary })
+            }
+            Err(e) => {
+                board.set_state_now(task_id, TaskState::Todo);
+                board.set_owner(task_id, None);
+                board.save().ok();
+                serde_json::json!({
+                    "ok": false, "peer": peer.name, "error": e.to_string(), "released": true
+                })
+            }
+        }
+    }
+
     fn memory(&self) -> (String, String) {
         let mem = std::fs::read_to_string(self.config.paths.memory_md()).unwrap_or_default();
         let usr = std::fs::read_to_string(self.config.paths.user_md()).unwrap_or_default();
@@ -504,6 +580,27 @@ pub async fn run(
     // peer registry that the mDNS browser (spawned after we advertise) feeds.
     let grid_id = crate::grid::grid_id(&config.grid);
     let grid_registry = grid_id.as_ref().map(|_| crate::grid::PeerRegistry::new());
+    // The shared grid secret authenticates peer→peer execution (None = disabled).
+    let grid_secret = grid_id.as_ref().map(|_| config.grid.secret.clone());
+    // Recover orphaned grid work: tasks left "doing" with an owner (a peer was
+    // mid-execution when this orchestrator last stopped) go back to "todo".
+    {
+        use blumi_task::{TaskBoard, TaskState};
+        let mut board = TaskBoard::load(crate::task::board_path(&config));
+        let orphans: Vec<String> = board
+            .tasks()
+            .iter()
+            .filter(|t| t.state == TaskState::Doing && t.owner.is_some())
+            .map(|t| t.id.clone())
+            .collect();
+        if !orphans.is_empty() {
+            for id in &orphans {
+                board.set_state_now(id, TaskState::Todo);
+                board.set_owner(id, None);
+            }
+            board.save().ok();
+        }
+    }
     let grid_shared = match (&grid_id, &grid_registry) {
         (Some(gid), Some(reg)) => Some(crate::grid::GridShared {
             grid_id: gid.clone(),
@@ -567,7 +664,7 @@ pub async fn run(
         });
     }
 
-    let result = blumi_web::serve(provider, mgmt, web, addr, auth).await;
+    let result = blumi_web::serve(provider, mgmt, web, addr, auth, grid_secret).await;
     let _ = std::fs::remove_file(&lock);
     result
 }

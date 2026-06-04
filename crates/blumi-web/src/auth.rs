@@ -137,7 +137,10 @@ pub async fn require_auth(
     let exempt = !path.starts_with("/api/")
         || path == "/api/login"
         || path == "/api/health"
-        || path == "/api/config";
+        || path == "/api/config"
+        // Peer→peer grid execution authenticates with the shared grid secret
+        // (checked inside the handler), not the human password/token.
+        || path == "/api/grid/run";
     if exempt {
         return next.run(req).await;
     }

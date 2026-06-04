@@ -406,6 +406,10 @@ pub async fn loop_status(State(state): State<AppState>) -> Json<Value> {
 pub struct LoopBody {
     #[serde(default)]
     pub review: bool,
+    /// "local" (default) or "grid". In grid mode the loop dispatches each task
+    /// to a live peer (round-robin), falling back to local when no peers exist.
+    #[serde(default)]
+    pub mode: Option<String>,
 }
 
 /// Start the autonomous loop: work the task board top-down against the current
@@ -422,7 +426,8 @@ pub async fn loop_start(State(state): State<AppState>, Json(body): Json<LoopBody
         st.current = String::new();
     }
     let runner = state.clone();
-    tokio::spawn(async move { run_loop(runner, body.review).await });
+    let grid = body.mode.as_deref() == Some("grid");
+    tokio::spawn(async move { run_loop(runner, body.review, grid).await });
     Json(json!({ "ok": true }))
 }
 
@@ -433,11 +438,45 @@ pub async fn loop_stop(State(state): State<AppState>) -> Json<Value> {
 
 /// The loop body: pull the next todo, run it on the current session, advance it,
 /// repeat until the board is empty or someone stops it.
-async fn run_loop(state: AppState, review: bool) {
+async fn run_loop(state: AppState, review: bool, grid: bool) {
+    let mut rr: usize = 0; // round-robin cursor over live peers
+    let mut fails: usize = 0; // consecutive grid dispatch failures
     loop {
         if !state.loop_status().read().await.running {
             break;
         }
+
+        // Grid mode: dispatch the next todo to a live peer (round-robin), which
+        // runs it on its own runtime. Falls back to local when no peers exist.
+        if grid {
+            let peers = state.mgmt().grid_peer_ids();
+            if !peers.is_empty() {
+                let Some(todo) = state.mgmt().task_peek_next() else {
+                    break;
+                };
+                let id = todo["id"].as_str().unwrap_or_default().to_string();
+                let peer = peers[rr % peers.len()].clone();
+                rr += 1;
+                {
+                    let mut st = state.loop_status().write().await;
+                    st.iter += 1;
+                    st.current = format!("{} @ {peer}", todo["title"].as_str().unwrap_or_default());
+                }
+                let res = state.mgmt().grid_dispatch(&id, &peer, review).await;
+                if res["ok"].as_bool() == Some(true) {
+                    fails = 0;
+                } else {
+                    fails += 1;
+                    // Every live peer failed this task — stop to avoid a hot loop.
+                    if fails > peers.len() {
+                        break;
+                    }
+                }
+                continue;
+            }
+            // No live peers → fall through to local execution.
+        }
+
         let Some(todo) = state.mgmt().task_next() else {
             break;
         };
@@ -482,6 +521,111 @@ async fn run_loop(state: AppState, review: bool) {
         state.mgmt().task_advance(&id, review);
     }
     state.loop_status().write().await.running = false;
+}
+
+// --- Grid: dispatch (orchestrator) + run (peer) ----------------------------
+
+#[derive(Deserialize)]
+pub struct GridDispatchBody {
+    pub task_id: String,
+    pub peer_id: String,
+    #[serde(default)]
+    pub review: bool,
+}
+
+/// Orchestrator-side: dispatch a board task to a grid peer (human-authed). The
+/// task is claimed (doing + owner), run on the peer's runtime, then advanced or
+/// released. Returns the dispatch status.
+pub async fn grid_dispatch(
+    State(state): State<AppState>,
+    Json(body): Json<GridDispatchBody>,
+) -> Json<Value> {
+    Json(
+        state
+            .mgmt()
+            .grid_dispatch(&body.task_id, &body.peer_id, body.review)
+            .await,
+    )
+}
+
+#[derive(Deserialize)]
+pub struct GridRunBody {
+    pub prompt: String,
+}
+
+/// Peer-side grid execution: run `prompt` as one turn on THIS node's session and
+/// return when it finishes. Authenticated by the shared grid secret
+/// (`X-Blumi-Grid` header), not the human password. Runs autonomously (yolo)
+/// since there's no human at the peer to answer approvals.
+pub async fn grid_run(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Json(body): Json<GridRunBody>,
+) -> Response {
+    let Some(secret) = state.grid_secret() else {
+        return (StatusCode::NOT_FOUND, "grid disabled").into_response();
+    };
+    let presented = headers
+        .get("x-blumi-grid")
+        .and_then(|h| h.to_str().ok())
+        .unwrap_or("");
+    if !constant_eq(secret.as_bytes(), presented.as_bytes()) {
+        return (StatusCode::UNAUTHORIZED, "grid auth required").into_response();
+    }
+    if body.prompt.trim().is_empty() {
+        return Json(json!({ "ok": false, "error": "empty prompt" })).into_response();
+    }
+
+    let session = state.current().await;
+    let mut events = session.subscribe();
+    // Run autonomously — no human here to answer approval prompts.
+    let _ = session.send(Command::SetYolo { on: true }).await;
+    if session
+        .send(Command::UserMessage {
+            text: body.prompt,
+            attachments: vec![],
+            stream_id: None,
+        })
+        .await
+        .is_err()
+    {
+        return Json(json!({ "ok": false, "error": "session unavailable" })).into_response();
+    }
+
+    // Wait for the turn to finish, bounded by a generous timeout.
+    let deadline = tokio::time::sleep(std::time::Duration::from_secs(900));
+    tokio::pin!(deadline);
+    loop {
+        tokio::select! {
+            r = events.recv() => match r {
+                Ok(env) => {
+                    if matches!(env.event, Event::TurnDone { .. }) {
+                        return Json(json!({ "ok": true, "summary": "completed" })).into_response();
+                    }
+                }
+                Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => continue,
+                Err(_) => {
+                    return Json(json!({ "ok": false, "error": "stream closed" }))
+                        .into_response();
+                }
+            },
+            _ = &mut deadline => {
+                return Json(json!({ "ok": false, "error": "timed out" })).into_response();
+            }
+        }
+    }
+}
+
+/// Constant-time byte compare (length is allowed to leak, contents are not).
+fn constant_eq(a: &[u8], b: &[u8]) -> bool {
+    if a.len() != b.len() {
+        return false;
+    }
+    let mut diff = 0u8;
+    for (x, y) in a.iter().zip(b.iter()) {
+        diff |= x ^ y;
+    }
+    diff == 0
 }
 
 /// Aggregate runtime status for the dashboard: uptime + the active config +
