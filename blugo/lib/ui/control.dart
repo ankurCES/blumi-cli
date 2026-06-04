@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import '../data/api.dart';
 import '../state/app.dart';
@@ -303,11 +304,45 @@ class _TasksTab extends StatefulWidget {
 
 class _TasksTabState extends State<_TasksTab> {
   late Future<List<TaskItem>> _tasks;
+  Map<String, dynamic> _loop = const {};
+  Timer? _timer;
+
+  ApiClient get _api => widget.app.session!.api;
 
   @override
   void initState() {
     super.initState();
-    _tasks = widget.app.session!.api.tasks();
+    _tasks = _api.tasks();
+    _refreshLoop();
+    // While the loop runs, keep the board + status fresh.
+    _timer = Timer.periodic(const Duration(seconds: 2), (_) {
+      if ((_loop['running'] as bool?) ?? false) {
+        if (mounted) setState(() => _tasks = _api.tasks());
+        _refreshLoop();
+      }
+    });
+  }
+
+  @override
+  void dispose() {
+    _timer?.cancel();
+    super.dispose();
+  }
+
+  Future<void> _refreshLoop() async {
+    try {
+      final l = await _api.loopStatus();
+      if (mounted) setState(() => _loop = l);
+    } catch (_) {}
+  }
+
+  Future<void> _toggleLoop() async {
+    final running = (_loop['running'] as bool?) ?? false;
+    try {
+      running ? await _api.loopStop() : await _api.loopStart();
+    } catch (_) {}
+    await _refreshLoop();
+    if (mounted) setState(() => _tasks = _api.tasks());
   }
 
   // Display order + glyph/colour per state.
@@ -321,9 +356,54 @@ class _TasksTabState extends State<_TasksTab> {
         _ => ('○', cs.onSurface.withValues(alpha: 0.7)),
       };
 
+  Widget _loopBar(ColorScheme cs) {
+    final running = (_loop['running'] as bool?) ?? false;
+    final iter = (_loop['iter'] as num?)?.toInt() ?? 0;
+    final current = _loop['current']?.toString() ?? '';
+    return Container(
+      padding: const EdgeInsets.fromLTRB(16, 8, 12, 8),
+      child: Row(
+        children: [
+          Expanded(
+            child: Text(
+              running
+                  ? 'loop running · iter $iter${current.isEmpty ? '' : ' · $current'}'
+                  : 'loop idle',
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(
+                  fontSize: 12,
+                  color: running ? cs.primary : cs.onSurface.withValues(alpha: 0.6)),
+            ),
+          ),
+          const SizedBox(width: 8),
+          running
+              ? FilledButton.tonalIcon(
+                  onPressed: _toggleLoop,
+                  icon: const Icon(Icons.stop, size: 18),
+                  label: const Text('Stop'))
+              : FilledButton.icon(
+                  onPressed: _toggleLoop,
+                  icon: const Icon(Icons.play_arrow, size: 18),
+                  label: const Text('Run loop')),
+        ],
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final cs = Theme.of(context).colorScheme;
+    return Column(
+      children: [
+        _loopBar(cs),
+        const Divider(height: 1),
+        Expanded(child: _board(cs)),
+      ],
+    );
+  }
+
+  Widget _board(ColorScheme cs) {
     return FutureBuilder<List<TaskItem>>(
       future: _tasks,
       builder: (context, snap) {

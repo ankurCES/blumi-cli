@@ -173,6 +173,34 @@ impl Management for WebManagement {
         serde_json::json!({ "tasks": board.tasks(), "counts": board.counts() })
     }
 
+    fn task_next(&self) -> Option<serde_json::Value> {
+        use blumi_task::{TaskBoard, TaskState};
+        let path = crate::task::board_path(&self.config);
+        let mut board = TaskBoard::load(&path);
+        let task = board.next_todo().cloned()?;
+        board.set_state_now(&task.id, TaskState::Doing);
+        board.save().ok();
+        let prompt = if task.detail.trim().is_empty() {
+            task.title.clone()
+        } else {
+            format!("{}\n\n{}", task.title, task.detail)
+        };
+        Some(serde_json::json!({ "id": task.id, "prompt": prompt, "title": task.title }))
+    }
+
+    fn task_advance(&self, id: &str, review: bool) {
+        use blumi_task::{TaskBoard, TaskState};
+        let path = crate::task::board_path(&self.config);
+        let mut board = TaskBoard::load(&path);
+        let to = if review {
+            TaskState::Review
+        } else {
+            TaskState::Done
+        };
+        board.set_state_now(id, to);
+        board.save().ok();
+    }
+
     fn memory(&self) -> (String, String) {
         let mem = std::fs::read_to_string(self.config.paths.memory_md()).unwrap_or_default();
         let usr = std::fs::read_to_string(self.config.paths.user_md()).unwrap_or_default();

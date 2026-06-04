@@ -13,7 +13,7 @@ use axum::http::{HeaderMap, StatusCode};
 use axum::response::sse::{Event as SseEvent, KeepAlive, Sse};
 use axum::response::{IntoResponse, Response};
 use axum::Json;
-use blumi_protocol::{ApprovalScope, Command, Decision, Envelope, RequestId, Role};
+use blumi_protocol::{ApprovalScope, Command, Decision, Envelope, Event, RequestId, Role};
 use futures::Stream;
 use serde::Deserialize;
 use serde_json::{json, Value};
@@ -381,6 +381,94 @@ pub async fn skills(State(state): State<AppState>) -> Json<Value> {
 
 pub async fn tasks(State(state): State<AppState>) -> Json<Value> {
     Json(state.mgmt().tasks())
+}
+
+/// Loop status: { running, iter, current }.
+pub async fn loop_status(State(state): State<AppState>) -> Json<Value> {
+    let st = state.loop_status().read().await.clone();
+    Json(json!({ "running": st.running, "iter": st.iter, "current": st.current }))
+}
+
+#[derive(Deserialize, Default)]
+pub struct LoopBody {
+    #[serde(default)]
+    pub review: bool,
+}
+
+/// Start the autonomous loop: work the task board top-down against the current
+/// session (streaming over SSE). No-op if already running. Uses the session's
+/// own yolo/approval policy — approvals still surface to clients.
+pub async fn loop_start(State(state): State<AppState>, Json(body): Json<LoopBody>) -> Json<Value> {
+    {
+        let mut st = state.loop_status().write().await;
+        if st.running {
+            return Json(json!({ "ok": false, "error": "loop already running" }));
+        }
+        st.running = true;
+        st.iter = 0;
+        st.current = String::new();
+    }
+    let runner = state.clone();
+    tokio::spawn(async move { run_loop(runner, body.review).await });
+    Json(json!({ "ok": true }))
+}
+
+pub async fn loop_stop(State(state): State<AppState>) -> Json<Value> {
+    state.loop_status().write().await.running = false;
+    Json(json!({ "ok": true }))
+}
+
+/// The loop body: pull the next todo, run it on the current session, advance it,
+/// repeat until the board is empty or someone stops it.
+async fn run_loop(state: AppState, review: bool) {
+    loop {
+        if !state.loop_status().read().await.running {
+            break;
+        }
+        let Some(todo) = state.mgmt().task_next() else {
+            break;
+        };
+        let id = todo["id"].as_str().unwrap_or_default().to_string();
+        let prompt = todo["prompt"].as_str().unwrap_or_default().to_string();
+        {
+            let mut st = state.loop_status().write().await;
+            st.iter += 1;
+            st.current = todo["title"].as_str().unwrap_or_default().to_string();
+        }
+
+        let session = state.current().await;
+        let mut events = session.subscribe();
+        if session
+            .send(Command::UserMessage {
+                text: prompt,
+                attachments: vec![],
+                stream_id: None,
+            })
+            .await
+            .is_err()
+        {
+            break;
+        }
+
+        // Wait for this turn to finish (or a stop request).
+        loop {
+            tokio::select! {
+                r = events.recv() => match r {
+                    Ok(env) => {
+                        if matches!(env.event, Event::TurnDone { .. }) { break; }
+                    }
+                    Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => continue,
+                    Err(_) => break,
+                },
+                _ = tokio::time::sleep(std::time::Duration::from_millis(500)) => {
+                    if !state.loop_status().read().await.running { break; }
+                }
+            }
+        }
+
+        state.mgmt().task_advance(&id, review);
+    }
+    state.loop_status().write().await.running = false;
 }
 
 /// Aggregate runtime status for the dashboard: uptime + the active config +

@@ -143,6 +143,11 @@ class ApiClient {
         .toList();
   }
 
+  Future<Map<String, dynamic>> loopStatus() => _getJson('/api/loop/status');
+  Future<void> loopStart({bool review = false}) =>
+      _post('/api/loop/start', {'review': review});
+  Future<void> loopStop() => _post('/api/loop/stop', const {});
+
   Future<Map<String, dynamic>> usage() async {
     final j = await _getJson('/api/usage');
     return (j['usage'] as Map?)?.cast<String, dynamic>() ?? {};
