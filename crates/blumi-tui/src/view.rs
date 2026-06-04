@@ -204,9 +204,12 @@ fn render_list<T>(
 fn render_sidebar(model: &mut Model, f: &mut Frame, area: Rect, theme: &Theme) {
     use crate::model::SidebarTab;
     let focused = model.focus == Focus::Sidebar;
-    let block = pane_block("explorer", focused, theme);
+    // `◂` hints the title row is clickable to collapse the rail (Ctrl+B).
+    let block = pane_block("explorer ◂", focused, theme);
     let inner = block.inner(area);
     f.render_widget(block, area);
+    // Title row = the top border; clicking it collapses the explorer.
+    model.explorer_title_area = Some((area.x, area.y, area.width, 1));
 
     // Tab bar (2 rows — too many tabs for one 26-col row) + active list.
     let [tabs_row, list_area] =
@@ -324,6 +327,8 @@ fn render_dashboard(model: &mut Model, f: &mut Frame, area: Rect, theme: &Theme)
                 theme.subtle()
             },
         ),
+        // `▸` hints the title row is clickable to collapse the rail (Ctrl+J).
+        Span::styled("▸", theme.dim()),
     ]);
     let mut block = Block::default()
         .borders(Borders::ALL)
@@ -339,6 +344,8 @@ fn render_dashboard(model: &mut Model, f: &mut Frame, area: Rect, theme: &Theme)
     }
     let inner = block.inner(area);
     f.render_widget(block, area);
+    // Title row = the top border; clicking it collapses the agent rail.
+    model.agent_title_area = Some((area.x, area.y, area.width, 1));
     let w = inner.width.saturating_sub(1) as usize;
 
     // A pinned app-logo band at the very top (never scrolls): a small rasterized
@@ -1425,6 +1432,8 @@ fn render_editor(model: &mut Model, f: &mut Frame, area: Rect, theme: &Theme) {
     );
     model.input.set_cursor_line_style(Style::default());
     f.render_widget(&model.input, area);
+    // Clicking the editor focuses it + returns to Insert mode.
+    model.editor_area = Some((area.x, area.y, area.width, area.height));
 }
 
 /// A 10-cell block context bar, hermes-style: `████░░░░░░`.

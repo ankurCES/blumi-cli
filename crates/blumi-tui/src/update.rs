@@ -379,15 +379,29 @@ async fn handle_term(model: &mut Model, ev: TermEvent, session: &SessionHandle) 
                         }
                         model.mark_dirty();
                     } else if model.dialog.is_none() {
-                        // Click a dashboard sub-panel → focus it + select that
-                        // panel (for keyboard scroll); else treat as a sidebar click.
-                        if model.agents_pane.hit(me.column, me.row) {
+                        let inside = |a: Option<(u16, u16, u16, u16)>| {
+                            a.is_some_and(|(x, y, w, h)| {
+                                me.column >= x && me.column < x + w && me.row >= y && me.row < y + h
+                            })
+                        };
+                        // Rail title rows collapse the rail; the editor focuses +
+                        // returns to Insert; dashboard sub-panels focus for scroll;
+                        // else fall through to a sidebar click.
+                        if inside(model.explorer_title_area) {
+                            model.toggle_explorer();
+                        } else if inside(model.agent_title_area) {
+                            model.toggle_dashboard();
+                        } else if model.agents_pane.hit(me.column, me.row) {
                             model.focus = Focus::Dashboard;
                             model.dash_panel = crate::model::DashPanel::Agents;
                             model.mark_dirty();
                         } else if model.tasks_pane.hit(me.column, me.row) {
                             model.focus = Focus::Dashboard;
                             model.dash_panel = crate::model::DashPanel::Tasks;
+                            model.mark_dirty();
+                        } else if inside(model.editor_area) {
+                            model.focus = Focus::Editor;
+                            model.set_mode(crate::model::Mode::Insert);
                             model.mark_dirty();
                         } else {
                             sidebar_click(model, me.column, me.row);
