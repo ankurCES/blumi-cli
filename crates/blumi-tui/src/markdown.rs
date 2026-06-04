@@ -7,14 +7,72 @@ use crate::theme::Theme;
 use pulldown_cmark::{CodeBlockKind, Event, HeadingLevel, Options, Parser, Tag, TagEnd};
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
+use std::cell::RefCell;
+use std::collections::hash_map::DefaultHasher;
+use std::collections::{HashMap, VecDeque};
+use std::hash::{Hash, Hasher};
+use std::rc::Rc;
 
+/// Render markdown to wrapped ratatui lines. **Memoized**: the syntect-highlighted
+/// output for a given (text, width, theme) is cached, so the ~20fps redraws
+/// driven by animation ticks don't re-highlight the whole transcript every
+/// frame — only changed messages (e.g. the streaming reply) are recomputed.
+/// Keeps pane navigation responsive on large transcripts.
 pub fn render_markdown(text: &str, width: usize, theme: &Theme) -> Vec<Line<'static>> {
+    let mut h = DefaultHasher::new();
+    text.hash(&mut h);
+    let key = (h.finish(), width, theme.name);
+    if let Some(hit) = CACHE.with(|c| c.borrow().get(&key)) {
+        return (*hit).clone();
+    }
+    let lines = Rc::new(render_uncached(text, width, theme));
+    CACHE.with(|c| c.borrow_mut().put(key, lines.clone()));
+    (*lines).clone()
+}
+
+/// Uncached render, for content that changes every frame (the in-flight
+/// streaming reply): caching its partials would churn the memo cache and evict
+/// the static transcript. Render it fresh instead.
+pub fn render_markdown_live(text: &str, width: usize, theme: &Theme) -> Vec<Line<'static>> {
+    render_uncached(text, width, theme)
+}
+
+fn render_uncached(text: &str, width: usize, theme: &Theme) -> Vec<Line<'static>> {
     let mut r = Renderer::new(width, theme);
     let opts = Options::ENABLE_STRIKETHROUGH | Options::ENABLE_TABLES;
     for event in Parser::new_ext(text, opts) {
         r.handle(event);
     }
     r.finish()
+}
+
+type CacheKey = (u64, usize, &'static str);
+
+/// A tiny FIFO-capped memo cache for rendered markdown (UI thread only).
+struct MdCache {
+    map: HashMap<CacheKey, Rc<Vec<Line<'static>>>>,
+    order: VecDeque<CacheKey>,
+}
+impl MdCache {
+    const CAP: usize = 512;
+    fn get(&self, k: &CacheKey) -> Option<Rc<Vec<Line<'static>>>> {
+        self.map.get(k).cloned()
+    }
+    fn put(&mut self, k: CacheKey, v: Rc<Vec<Line<'static>>>) {
+        if self.map.insert(k, v).is_none() {
+            self.order.push_back(k);
+            if self.order.len() > Self::CAP {
+                if let Some(old) = self.order.pop_front() {
+                    self.map.remove(&old);
+                }
+            }
+        }
+    }
+}
+
+thread_local! {
+    static CACHE: RefCell<MdCache> =
+        RefCell::new(MdCache { map: HashMap::new(), order: VecDeque::new() });
 }
 
 struct Renderer<'a> {
