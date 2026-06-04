@@ -193,6 +193,10 @@ class _SettingsTabState extends State<_SettingsTab> {
   final _sttKey = TextEditingController();
   String _ttsProvider = 'elevenlabs';
   bool _voiceEnabled = false;
+  // Runtime toggles (fire-and-forget; reflect the last value set this session).
+  bool _planMode = false;
+  String _brainMode = 'off';
+  int _autoCont = 12;
   bool _ttsKeySet = false;
 
   // ElevenLabs voice picker — populated by authenticating with the entered key.
@@ -375,6 +379,50 @@ class _SettingsTabState extends State<_SettingsTab> {
             value: app.yolo,
             onChanged: app.setYolo,
           ),
+          const SizedBox(height: 8),
+          _label('Runtime', cs),
+          Row(children: [
+            const Expanded(child: Text('Plan mode')),
+            Switch(
+              value: _planMode,
+              onChanged: (v) {
+                setState(() => _planMode = v);
+                _api.setPlanMode(v);
+              },
+            ),
+          ]),
+          const SizedBox(height: 4),
+          Text('Approval brain',
+              style: TextStyle(
+                  fontSize: 12, color: cs.onSurface.withValues(alpha: 0.6))),
+          const SizedBox(height: 4),
+          Wrap(spacing: 8, children: [
+            for (final mode in const ['off', 'advisory', 'auto'])
+              ChoiceChip(
+                label: Text(mode),
+                selected: _brainMode == mode,
+                onSelected: (_) {
+                  setState(() => _brainMode = mode);
+                  _api.setBrainMode(mode);
+                },
+              ),
+          ]),
+          const SizedBox(height: 8),
+          Text('Auto-continue steps',
+              style: TextStyle(
+                  fontSize: 12, color: cs.onSurface.withValues(alpha: 0.6))),
+          const SizedBox(height: 4),
+          Wrap(spacing: 8, children: [
+            for (final n in const [0, 4, 12, 24])
+              ChoiceChip(
+                label: Text('$n'),
+                selected: _autoCont == n,
+                onSelected: (_) {
+                  setState(() => _autoCont = n);
+                  _api.setAutoContinue(n);
+                },
+              ),
+          ]),
           const Divider(height: 28),
           _label('Voice', cs),
           SwitchListTile(

@@ -124,6 +124,10 @@ class ApiClient {
   Future<void> newSession() => _post('/api/session/new', const {});
   Future<void> resume(String id) => _post('/api/session/resume', {'id': id});
   Future<void> setYolo(bool on) => _post('/api/yolo', {'on': on});
+  Future<void> setPlanMode(bool on) => _post('/api/plan/mode', {'on': on});
+  Future<void> setBrainMode(String mode) =>
+      _post('/api/brain/mode', {'mode': mode});
+  Future<void> setAutoContinue(int n) => _post('/api/autocontinue', {'n': n});
   Future<void> compact() => _post('/api/compact', const {});
   Future<void> undo() => _post('/api/undo', const {});
 

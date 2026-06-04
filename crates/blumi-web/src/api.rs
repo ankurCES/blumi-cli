@@ -235,6 +235,63 @@ pub async fn set_yolo(State(state): State<AppState>, Json(body): Json<YoloBody>)
 }
 
 #[derive(Deserialize)]
+pub struct PlanModeBody {
+    pub on: bool,
+}
+
+/// Toggle plan mode (the agent proposes a plan for approval before acting).
+pub async fn set_plan_mode(
+    State(state): State<AppState>,
+    Json(body): Json<PlanModeBody>,
+) -> Json<Value> {
+    let ok = state
+        .current()
+        .await
+        .send(Command::SetPlanMode { on: body.on })
+        .await
+        .is_ok();
+    Json(json!({ "ok": ok }))
+}
+
+#[derive(Deserialize)]
+pub struct BrainModeBody {
+    pub mode: String,
+}
+
+/// Set the local-LLM approval brain mode (`off` / `advisory` / `auto`).
+pub async fn set_brain_mode(
+    State(state): State<AppState>,
+    Json(body): Json<BrainModeBody>,
+) -> Json<Value> {
+    let ok = state
+        .current()
+        .await
+        .send(Command::SetBrainMode { mode: body.mode })
+        .await
+        .is_ok();
+    Json(json!({ "ok": ok }))
+}
+
+#[derive(Deserialize)]
+pub struct AutoContinueBody {
+    pub n: u32,
+}
+
+/// Set the per-turn auto-continue step budget (0 disables).
+pub async fn set_autocontinue(
+    State(state): State<AppState>,
+    Json(body): Json<AutoContinueBody>,
+) -> Json<Value> {
+    let ok = state
+        .current()
+        .await
+        .send(Command::SetAutoContinue { n: body.n })
+        .await
+        .is_ok();
+    Json(json!({ "ok": ok }))
+}
+
+#[derive(Deserialize)]
 pub struct ModelBody {
     pub model: String,
 }
