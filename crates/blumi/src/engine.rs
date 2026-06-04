@@ -90,6 +90,9 @@ pub async fn build_session(
         config.paths.settings_json(),
     ))));
     registry.register(Arc::new(blumi_core::Typed(blumi_skills::ReloadTool::new())));
+    registry.register(Arc::new(blumi_core::Typed(
+        blumi_skills::RestartGatewayTool::new(),
+    )));
 
     // Cross-session recall: full-text (FTS5) search over past sessions. Skipped
     // if the history DB can't be opened — it must never block startup.

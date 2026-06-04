@@ -179,6 +179,12 @@ pub enum Event {
     /// rebuild the session so newly written skills + config edits take effect,
     /// preserving the conversation. Hosts that can't reload may ignore it.
     Reload { reason: String },
+    /// The agent asked to restart the whole gateway process (not just rebuild the
+    /// session) — e.g. a process-level setting changed, or to recover from a
+    /// wedged state. Hosts under a service manager perform an out-of-process
+    /// restart; hosts that can't (foreground/one-shot) ignore it or downgrade to
+    /// a reload.
+    Restart { reason: String },
     /// A turn-level error.
     Error {
         kind: String,
@@ -212,6 +218,7 @@ impl Event {
             Event::TurnDone { .. } => "done",
             Event::Notice { .. } => "notice",
             Event::Reload { .. } => "reload",
+            Event::Restart { .. } => "restart",
             Event::Error { .. } => "error",
         }
     }

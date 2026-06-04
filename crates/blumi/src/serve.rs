@@ -13,8 +13,7 @@ use std::net::IpAddr;
 use std::path::PathBuf;
 use std::process::Command;
 
-#[cfg(target_os = "macos")]
-const LABEL: &str = "com.blumi.serve"; // launchd job label (macOS only)
+const LABEL: &str = "com.blumi.serve"; // launchd job label (also the systemd unit base)
 const DEFAULT_PORT: u16 = 7777;
 
 pub async fn run(config: BlumiConfig, action: ServeCmd) -> anyhow::Result<()> {
@@ -294,4 +293,63 @@ fn status(config: &BlumiConfig) -> anyhow::Result<()> {
         Err(_) => println!("gateway: not running (no lock file)"),
     }
     Ok(())
+}
+
+// --- Service control (used by `restart_gateway` + the self-restart endpoint) --
+
+/// Which service manager supervises this gateway (best-effort). Variants are
+/// platform-specific, so some are unconstructed on a given target.
+#[allow(dead_code)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ServiceManager {
+    Launchd,
+    SystemdUser,
+    None,
+}
+
+/// Detect whether blumi is installed as a background service on this OS. Returns
+/// `None` when no service is installed (e.g. a foreground `serve run`), in which
+/// case a restart should degrade to an in-place reload.
+// Wired into the gateway's restart endpoint + listener in the next phase.
+#[allow(dead_code)]
+pub fn detect_manager() -> ServiceManager {
+    #[cfg(target_os = "macos")]
+    {
+        if plist_path().map(|p| p.exists()).unwrap_or(false) {
+            return ServiceManager::Launchd;
+        }
+    }
+    #[cfg(target_os = "linux")]
+    {
+        if unit_path().map(|p| p.exists()).unwrap_or(false) {
+            return ServiceManager::SystemdUser;
+        }
+    }
+    ServiceManager::None
+}
+
+/// Restart this gateway out-of-process via its service manager. Spawns a detached
+/// helper that waits briefly (so an in-flight HTTP response can flush) then kicks
+/// the service — the manager kills this instance and starts a fresh one. Returns
+/// immediately; the helper outlives this process. Errors when not service-managed.
+#[allow(dead_code)]
+pub fn restart_self(mgr: ServiceManager) -> anyhow::Result<()> {
+    let inner = match mgr {
+        ServiceManager::Launchd => {
+            format!("sleep 0.75; launchctl kickstart -k gui/$(id -u)/{LABEL}")
+        }
+        ServiceManager::SystemdUser => {
+            "sleep 0.75; systemctl --user restart blumi-serve".to_string()
+        }
+        ServiceManager::None => return Err(anyhow!("not running under a service manager")),
+    };
+    // Background + detach via the shell so the helper survives this process being
+    // killed by the restart.
+    let script = format!("({inner}) </dev/null >/dev/null 2>&1 &");
+    Command::new("sh")
+        .arg("-c")
+        .arg(script)
+        .spawn()
+        .map(|_| ())
+        .map_err(|e| anyhow!("could not spawn restart helper: {e}"))
 }

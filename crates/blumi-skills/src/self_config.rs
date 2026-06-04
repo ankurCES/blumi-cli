@@ -112,6 +112,73 @@ fn write_settings(path: &Path, root: &Value) -> std::io::Result<()> {
 
 const APPLY_HINT: &str = "Call `reload_self` to apply the change to this session.";
 
+// --- Shared cores (used by the `self_config` tool AND the gateway's self-config
+// endpoint) -----------------------------------------------------------------
+
+/// Read settings.json as pretty JSON (empty object if missing/invalid).
+pub fn get_settings(path: &Path) -> String {
+    serde_json::to_string_pretty(&read_root(path)).unwrap_or_else(|_| "{}".into())
+}
+
+/// Set one dotted `key` to `value` (parsed as JSON, else a bare string),
+/// validate the whole document as a `BlumiConfig`, and atomically write it.
+/// Returns a success message, or an error string (the file is left unchanged).
+pub fn set_key(path: &Path, key: &str, value: &str) -> Result<String, String> {
+    if key.trim().is_empty() {
+        return Err("set requires a `key`, e.g. llm.temperature".into());
+    }
+    let parsed: Value =
+        serde_json::from_str(value).unwrap_or_else(|_| Value::String(value.to_string()));
+    let mut root = read_root(path);
+    set_dotted(&mut root, key, parsed).map_err(|e| format!("cannot set '{key}': {e}"))?;
+    validate(&root).map_err(|e| format!("that change would make the config invalid: {e}"))?;
+    write_settings(path, &root).map_err(|e| format!("could not write settings: {e}"))?;
+    Ok(format!("set {key} in {}", path.display()))
+}
+
+/// Define/replace a persona, validate, and atomically write. Returns a message
+/// or an error string (the file is left unchanged).
+pub fn add_persona(
+    path: &Path,
+    name: &str,
+    description: &str,
+    instructions: &str,
+    model: &str,
+) -> Result<String, String> {
+    let name = name.trim();
+    if name.is_empty() {
+        return Err("add_persona requires a `name`".into());
+    }
+    if description.trim().is_empty() || instructions.trim().is_empty() {
+        return Err("add_persona requires `description` and `instructions`".into());
+    }
+    let mut persona = serde_json::Map::new();
+    persona.insert("description".into(), Value::String(description.to_string()));
+    persona.insert(
+        "instructions".into(),
+        Value::String(instructions.to_string()),
+    );
+    if !model.trim().is_empty() {
+        persona.insert("model".into(), Value::String(model.to_string()));
+    }
+    let mut root = read_root(path);
+    let personas = root
+        .as_object_mut()
+        .expect("read_root returns an object")
+        .entry("personas")
+        .or_insert_with(|| Value::Object(Default::default()));
+    if !personas.is_object() {
+        *personas = Value::Object(Default::default());
+    }
+    personas
+        .as_object_mut()
+        .unwrap()
+        .insert(name.to_string(), Value::Object(persona));
+    validate(&root).map_err(|e| format!("that persona would make the config invalid: {e}"))?;
+    write_settings(path, &root).map_err(|e| format!("could not write settings: {e}"))?;
+    Ok(format!("persona '{name}' added"))
+}
+
 #[async_trait]
 impl TypedTool for SelfConfig {
     type Input = SelfConfigInput;
@@ -139,99 +206,29 @@ impl TypedTool for SelfConfig {
         _ct: CancellationToken,
     ) -> Result<ToolResult, ToolError> {
         match input.action.as_str() {
-            "get" => {
-                let root = read_root(&self.path);
-                let text = serde_json::to_string_pretty(&root).unwrap_or_else(|_| "{}".into());
-                Ok(ToolResult::success(format!(
-                    "current settings.json:\n{text}"
-                )))
-            }
-            "set" => {
-                if input.key.trim().is_empty() {
-                    return Ok(ToolResult::invalid_input(
-                        "set requires a `key`",
-                        "e.g. key=\"llm.temperature\" value=\"0.3\"",
-                    ));
-                }
-                // Parse the value as JSON; fall back to a bare string.
-                let parsed: Value = serde_json::from_str(&input.value)
-                    .unwrap_or_else(|_| Value::String(input.value.clone()));
-                let mut root = read_root(&self.path);
-                if let Err(e) = set_dotted(&mut root, &input.key, parsed) {
-                    return Ok(ToolResult::invalid_input(
-                        format!("cannot set '{}': {e}", input.key),
-                        "check the key path",
-                    ));
-                }
-                if let Err(e) = validate(&root) {
-                    return Ok(ToolResult::invalid_input(
-                        format!("that change would make the config invalid: {e}"),
-                        "the file was left unchanged — fix the value type and retry",
-                    ));
-                }
-                if let Err(e) = write_settings(&self.path, &root) {
-                    return Ok(ToolResult::error(format!("could not write settings: {e}")));
-                }
-                Ok(ToolResult::success(format!(
-                    "set {} in {}. {APPLY_HINT}",
-                    input.key,
-                    self.path.display()
-                )))
-            }
-            "add_persona" => {
-                let name = input.name.trim();
-                if name.is_empty() {
-                    return Ok(ToolResult::invalid_input(
-                        "add_persona requires a `name`",
-                        "give the persona a short name",
-                    ));
-                }
-                if input.description.trim().is_empty() || input.instructions.trim().is_empty() {
-                    return Ok(ToolResult::invalid_input(
-                        "add_persona requires `description` and `instructions`",
-                        "describe the persona and give its system-prompt instructions",
-                    ));
-                }
-                let mut persona = serde_json::Map::new();
-                persona.insert(
-                    "description".into(),
-                    Value::String(input.description.clone()),
-                );
-                persona.insert(
-                    "instructions".into(),
-                    Value::String(input.instructions.clone()),
-                );
-                if !input.model.trim().is_empty() {
-                    persona.insert("model".into(), Value::String(input.model.clone()));
-                }
-
-                let mut root = read_root(&self.path);
-                let personas = root
-                    .as_object_mut()
-                    .expect("read_root returns an object")
-                    .entry("personas")
-                    .or_insert_with(|| Value::Object(Default::default()));
-                if !personas.is_object() {
-                    *personas = Value::Object(Default::default());
-                }
-                personas
-                    .as_object_mut()
-                    .unwrap()
-                    .insert(name.to_string(), Value::Object(persona));
-
-                if let Err(e) = validate(&root) {
-                    return Ok(ToolResult::invalid_input(
-                        format!("that persona would make the config invalid: {e}"),
-                        "the file was left unchanged",
-                    ));
-                }
-                if let Err(e) = write_settings(&self.path, &root) {
-                    return Ok(ToolResult::error(format!("could not write settings: {e}")));
-                }
-                Ok(ToolResult::success(format!(
-                    "persona '{name}' added. Switch to it with the persona picker / `/persona`. {APPLY_HINT}"
-                )))
-            }
+            "get" => Ok(ToolResult::success(format!(
+                "current settings.json:\n{}",
+                get_settings(&self.path)
+            ))),
+            "set" => match set_key(&self.path, &input.key, &input.value) {
+                Ok(msg) => Ok(ToolResult::success(format!("{msg}. {APPLY_HINT}"))),
+                Err(e) => Ok(ToolResult::invalid_input(
+                    e,
+                    "the file was left unchanged — fix the value and retry",
+                )),
+            },
+            "add_persona" => match add_persona(
+                &self.path,
+                &input.name,
+                &input.description,
+                &input.instructions,
+                &input.model,
+            ) {
+                Ok(msg) => Ok(ToolResult::success(format!(
+                    "{msg}. Switch to it with the persona picker / `/persona`. {APPLY_HINT}"
+                ))),
+                Err(e) => Ok(ToolResult::invalid_input(e, "the file was left unchanged")),
+            },
             other => Ok(ToolResult::invalid_input(
                 format!("unknown action '{other}'"),
                 "use get, set, or add_persona",
