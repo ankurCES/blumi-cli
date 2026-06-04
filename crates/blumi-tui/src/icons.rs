@@ -114,9 +114,15 @@ pub fn bar_empty() -> &'static str {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::Mutex;
+
+    // `MODE` is process-global, so these tests would race under cargo's parallel
+    // runner (one sets Unicode while another sets Ascii/Nerd). Serialize them.
+    static MODE_LOCK: Mutex<()> = Mutex::new(());
 
     #[test]
     fn unicode_default_matches_legacy_glyphs() {
+        let _g = MODE_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         // Default mode must be byte-identical to what blumi always shipped.
         set_mode(IconMode::Unicode);
         assert_eq!(agent(), "✿");
@@ -127,6 +133,7 @@ mod tests {
 
     #[test]
     fn ascii_and_nerd_differ() {
+        let _g = MODE_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         set_mode(IconMode::Ascii);
         assert_eq!(ok(), "+");
         assert_eq!(tl(), "+");

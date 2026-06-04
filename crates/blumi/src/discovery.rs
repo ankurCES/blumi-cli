@@ -63,8 +63,15 @@ pub fn advertise(bind_ip: IpAddr, port: u16, auth_required: bool) -> Option<Beac
     ];
 
     let daemon = ServiceDaemon::new().ok()?;
-    let info =
-        ServiceInfo::new(SERVICE_TYPE, base, &host_name, IpAddr::V4(ip), port, &props[..]).ok()?;
+    let info = ServiceInfo::new(
+        SERVICE_TYPE,
+        base,
+        &host_name,
+        IpAddr::V4(ip),
+        port,
+        &props[..],
+    )
+    .ok()?;
     let fullname = info.get_fullname().to_string();
     daemon.register(info).ok()?;
     Some(Beacon { daemon, fullname })
