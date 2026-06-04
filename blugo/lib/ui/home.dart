@@ -162,6 +162,16 @@ class _ChatPaneState extends State<ChatPane> {
 
   bool _recording = false;
 
+  /// Speak an assistant message via the gateway TTS (/api/voice/speak).
+  Future<void> _speak(String text) async {
+    final messenger = ScaffoldMessenger.of(context);
+    try {
+      await voice.play(await widget.session.api.speak(text));
+    } catch (e) {
+      messenger.showSnackBar(SnackBar(content: Text('voice: $e')));
+    }
+  }
+
   /// Mic toggle: start/stop recording, then transcribe into the composer.
   Future<void> _toggleMic() async {
     final messenger = ScaffoldMessenger.of(context);
@@ -195,7 +205,7 @@ class _ChatPaneState extends State<ChatPane> {
       animation: s,
       builder: (context, _) {
         final items = <Widget>[
-          for (final e in s.entries) EntryView(e),
+          for (final e in s.entries) EntryView(e, speak: _speak),
           // Animated flower mascot while the agent is working but hasn't begun
           // streaming the answer (shows reasoning text if any).
           if (s.busy && s.streaming == null) ThinkingMascot(detail: s.thinking),
@@ -214,6 +224,7 @@ class _ChatPaneState extends State<ChatPane> {
                           children: items,
                         ),
             ),
+            if (s.pendingPlan != null) PlanCard(s, s.pendingPlan!),
             if (s.pendingApproval != null) ApprovalCard(s, s.pendingApproval!),
             if (s.pendingClarify != null) ClarifyCard(s, s.pendingClarify!),
             _Composer(
@@ -250,7 +261,8 @@ class _EmptyState extends StatelessWidget {
 class EntryView extends StatelessWidget {
   final Entry entry;
   final bool streaming;
-  const EntryView(this.entry, {this.streaming = false, super.key});
+  final void Function(String text)? speak;
+  const EntryView(this.entry, {this.streaming = false, this.speak, super.key});
 
   @override
   Widget build(BuildContext context) {
@@ -266,6 +278,9 @@ class EntryView extends StatelessWidget {
           glyph: '✿',
           label: streaming ? 'blumi…' : 'blumi',
           color: cs.primary,
+          onSpeak: (!streaming && speak != null && text.trim().isNotEmpty)
+              ? () => speak!(text)
+              : null,
           child: BlumiMarkdown(text),
         ),
       NoticeEntry(:final text) => Padding(
@@ -284,14 +299,17 @@ class _Bubble extends StatelessWidget {
   final String glyph, label;
   final Color color;
   final Widget child;
+  final VoidCallback? onSpeak;
   const _Bubble(
       {required this.glyph,
       required this.label,
       required this.color,
-      required this.child});
+      required this.child,
+      this.onSpeak});
 
   @override
   Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
     return Container(
       margin: const EdgeInsets.symmetric(vertical: 5),
       decoration: BoxDecoration(
@@ -301,8 +319,22 @@ class _Bubble extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text('$glyph $label',
-              style: TextStyle(color: color, fontWeight: FontWeight.bold, fontSize: 12)),
+          Row(children: [
+            Text('$glyph $label',
+                style: TextStyle(
+                    color: color, fontWeight: FontWeight.bold, fontSize: 12)),
+            if (onSpeak != null) ...[
+              const Spacer(),
+              InkWell(
+                onTap: onSpeak,
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                  child: Icon(Icons.volume_up_outlined,
+                      size: 16, color: cs.onSurface.withValues(alpha: 0.4)),
+                ),
+              ),
+            ],
+          ]),
           const SizedBox(height: 2),
           child,
         ],
@@ -469,6 +501,49 @@ class ClarifyCard extends StatelessWidget {
                     child: Text(c.label)),
             ],
           ),
+        ],
+      ),
+    );
+  }
+}
+
+/// A proposed plan awaiting review (the ExitPlanMode flow): scrollable markdown
+/// plan with Approve (proceed) / Revise (reject) actions.
+class PlanCard extends StatelessWidget {
+  final BlumiSession session;
+  final PlanReview req;
+  const PlanCard(this.session, this.req, {super.key});
+  @override
+  Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+    return Container(
+      width: double.infinity,
+      margin: const EdgeInsets.all(8),
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: cs.surface,
+        border: Border.all(color: cs.primary),
+        borderRadius: BorderRadius.circular(10),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text('✿ plan review',
+              style: TextStyle(fontWeight: FontWeight.bold, color: cs.primary)),
+          const SizedBox(height: 6),
+          ConstrainedBox(
+            constraints: const BoxConstraints(maxHeight: 340),
+            child: SingleChildScrollView(child: BlumiMarkdown(req.plan)),
+          ),
+          const SizedBox(height: 10),
+          Wrap(spacing: 8, children: [
+            FilledButton(
+                onPressed: () => session.answerPlan(true),
+                child: const Text('Approve')),
+            OutlinedButton(
+                onPressed: () => session.answerPlan(false),
+                child: const Text('Revise')),
+          ]),
         ],
       ),
     );
