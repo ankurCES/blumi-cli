@@ -25,6 +25,25 @@ const MAX_CONTENT_WIDTH: u16 = 100;
 /// terminals keep every row for the conversation.
 const MIN_PANELED_CHAT_H: u16 = 12;
 
+/// Which side rails are visible at a given body `width`. Honors the explorer/
+/// agent open flags AND the width breakpoints, with the agent rail winning ties
+/// (so showing the explorer never displaces the agent rail). Returns
+/// `(show_left, show_right)`.
+///
+/// Tiers (body width): the agent rail needs `DASHBOARD_MIN_WIDTH`; the explorer
+/// needs another `SIDEBAR_WIDTH` on top of it (or `SIDEBAR_WIDTH + 60` when the
+/// agent rail is hidden, so it can show on medium terminals).
+fn rail_visibility(model: &Model, width: u16) -> (bool, bool) {
+    let show_right = model.show_dashboard && !model.is_empty() && width >= DASHBOARD_MIN_WIDTH;
+    let show_left = model.explorer_open
+        && if show_right {
+            width >= DASHBOARD_MIN_WIDTH + SIDEBAR_WIDTH
+        } else {
+            width >= SIDEBAR_WIDTH + 60
+        };
+    (show_left, show_right)
+}
+
 pub fn render(model: &mut Model, f: &mut Frame) {
     let theme = model.theme;
     let area = f.area();
@@ -43,17 +62,10 @@ pub fn render(model: &mut Model, f: &mut Frame) {
 
     render_header(model, f, header, &theme);
 
-    // Body columns: optional left sidebar (workspaces + sessions) | center chat |
-    // optional right dashboard (logo + cost + active agents). The dashboard keeps
-    // its established threshold; the sidebar only appears when there's room left
-    // over for it (so adding it never displaces the dashboard).
-    let show_right = model.show_dashboard && !model.is_empty() && chat.width >= DASHBOARD_MIN_WIDTH;
-    let show_left = model.explorer_open
-        && if show_right {
-            chat.width >= DASHBOARD_MIN_WIDTH + SIDEBAR_WIDTH
-        } else {
-            chat.width >= SIDEBAR_WIDTH + 60
-        };
+    // Body columns: optional left explorer | center chat | optional right agent
+    // rail. Visibility honors the open flags + width breakpoints (see
+    // `rail_visibility`).
+    let (show_left, show_right) = rail_visibility(model, chat.width);
 
     let mut constraints: Vec<Constraint> = Vec::new();
     if show_left {
@@ -1713,6 +1725,28 @@ mod tests {
             s.push('\n');
         }
         s
+    }
+
+    #[test]
+    fn rail_visibility_breakpoints() {
+        let mut m = Model::new("m".into(), "/tmp".into());
+        m.entries.push(Entry::User("hi".into())); // non-empty → agent rail eligible
+        m.show_dashboard = true;
+        m.explorer_open = true;
+        assert_eq!(rail_visibility(&m, 130), (true, true), "XL: both rails");
+        assert_eq!(
+            rail_visibility(&m, 100),
+            (false, true),
+            "L: agent rail only"
+        );
+        assert_eq!(rail_visibility(&m, 70), (false, false), "S: neither");
+        // Explorer closed → never shows, even when wide.
+        m.explorer_open = false;
+        assert_eq!(rail_visibility(&m, 130), (false, true));
+        // Agent rail closed → explorer can show on a medium terminal.
+        m.explorer_open = true;
+        m.show_dashboard = false;
+        assert_eq!(rail_visibility(&m, 100), (true, false));
     }
 
     #[test]
