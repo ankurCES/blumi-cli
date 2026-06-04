@@ -36,3 +36,6 @@ base64.workspace = true
 
 anyhow.workspace = true
 tracing.workspace = true
+
+# Machine name for /api/config (so blugo can label a gateway by its host).
+whoami = "1"

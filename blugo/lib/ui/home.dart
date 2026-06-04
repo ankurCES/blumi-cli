@@ -84,7 +84,7 @@ class _Header extends StatelessWidget implements PreferredSizeWidget {
                 icon: const Icon(Icons.insights_outlined)),
           ),
         IconButton(
-            tooltip: 'Disconnect',
+            tooltip: 'Switch gateway',
             onPressed: app.disconnect,
             icon: const Icon(Icons.logout)),
       ],
