@@ -42,12 +42,15 @@ impl Drop for Beacon {
 /// (loopback-only bind, IPv6, or registration failure) — never panics.
 ///
 /// When `grid_id` is `Some`, a non-sensitive `grid` TXT key is published so grid
-/// peers can find each other (the secret itself is never advertised).
+/// peers can find each other (the secret itself is never advertised). `node_name`
+/// (when non-empty) is the friendly label peers display; it falls back to the
+/// hostname.
 pub fn advertise(
     bind_ip: IpAddr,
     port: u16,
     auth_required: bool,
     grid_id: Option<&str>,
+    node_name: Option<&str>,
 ) -> Option<Beacon> {
     // Resolve a concrete LAN IPv4 to publish. A wildcard bind (0.0.0.0) is
     // turned into the primary LAN address; loopback isn't reachable by phones.
@@ -71,8 +74,13 @@ pub fn advertise(
     let host_name = format!("{base}.local.");
     let version = env!("CARGO_PKG_VERSION");
     let auth = if auth_required { "required" } else { "none" };
+    // Friendly label peers display: the configured node_name, else the hostname.
+    let display_name = node_name
+        .map(str::trim)
+        .filter(|n| !n.is_empty())
+        .unwrap_or(raw.as_str());
     let mut props: Vec<(&str, &str)> = vec![
-        ("name", raw.as_str()),
+        ("name", display_name),
         ("version", version),
         ("auth", auth),
         ("path", "/"),
