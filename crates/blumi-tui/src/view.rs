@@ -1,6 +1,7 @@
 //! Rendering.
 
 use crate::model::{fmt_dur, Entry, Focus, Model};
+use crate::primitives::{centered_rect, shorten, truncate};
 use crate::theme::{icon, Theme};
 use blumi_protocol::TodoStatus;
 use ratatui::layout::{Alignment, Constraint, Layout, Rect};
@@ -116,30 +117,9 @@ pub fn render(model: &mut Model, f: &mut Frame) {
     }
 }
 
-/// A rounded, titled pane block (posting-style): a quiet border when idle; a
-/// bright border + `▍` title accent + raised surface fill when focused.
+/// A rounded, titled pane block — see [`crate::primitives::panel`].
 fn pane_block(title: &str, focused: bool, theme: &Theme) -> Block<'static> {
-    let title = if focused {
-        Line::from(vec![
-            Span::styled("▍", theme.accent()),
-            Span::styled(format!("{title} "), theme.panel_focus()),
-        ])
-    } else {
-        Line::from(Span::styled(format!(" {title} "), theme.subtle()))
-    };
-    let mut block = Block::default()
-        .borders(Borders::ALL)
-        .border_type(BorderType::Rounded)
-        .border_style(if focused {
-            theme.panel_focus()
-        } else {
-            theme.border()
-        })
-        .title(title);
-    if focused {
-        block = block.style(theme.surface());
-    }
-    block
+    crate::primitives::panel(title, focused, theme)
 }
 
 /// Render one selectable list into `inner`, windowed around `sel`. Returns the
@@ -1605,46 +1585,6 @@ fn render_approval(model: &Model, f: &mut Frame, area: Rect, theme: &Theme) {
         theme.subtle(),
     )));
     f.render_widget(Paragraph::new(lines), inner);
-}
-
-fn centered_rect(percent_x: u16, percent_y: u16, area: Rect) -> Rect {
-    let vertical = Layout::vertical([
-        Constraint::Percentage((100 - percent_y) / 2),
-        Constraint::Percentage(percent_y),
-        Constraint::Percentage((100 - percent_y) / 2),
-    ])
-    .split(area);
-    Layout::horizontal([
-        Constraint::Percentage((100 - percent_x) / 2),
-        Constraint::Percentage(percent_x),
-        Constraint::Percentage((100 - percent_x) / 2),
-    ])
-    .split(vertical[1])[1]
-}
-
-fn shorten(s: &str, max: usize) -> String {
-    if s.chars().count() <= max {
-        s.to_string()
-    } else {
-        let tail: String = s
-            .chars()
-            .rev()
-            .take(max.saturating_sub(1))
-            .collect::<Vec<_>>()
-            .into_iter()
-            .rev()
-            .collect();
-        format!("…{tail}")
-    }
-}
-
-fn truncate(s: &str, max: usize) -> String {
-    if s.chars().count() <= max {
-        s.to_string()
-    } else {
-        let head: String = s.chars().take(max.saturating_sub(1)).collect();
-        format!("{head}…")
-    }
 }
 
 #[cfg(test)]
