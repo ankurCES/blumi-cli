@@ -26,13 +26,16 @@ pub enum Focus {
 pub enum SidebarTab {
     Workspaces,
     Sessions,
+    Skills,
 }
 
 impl SidebarTab {
+    /// Cycle to the next tab (Workspaces → Sessions → Skills → …).
     pub fn toggled(self) -> SidebarTab {
         match self {
             SidebarTab::Workspaces => SidebarTab::Sessions,
-            SidebarTab::Sessions => SidebarTab::Workspaces,
+            SidebarTab::Sessions => SidebarTab::Skills,
+            SidebarTab::Skills => SidebarTab::Workspaces,
         }
     }
 }
@@ -210,6 +213,8 @@ pub struct Model {
     pub ws_sel: usize,
     /// Selection index in the sessions list.
     pub sess_sel: usize,
+    /// Selection index in the skills list.
+    pub skill_sel: usize,
     /// Available personas (name, description) for `/persona`.
     pub personas: Vec<(String, String)>,
     /// The active persona name.
@@ -360,6 +365,7 @@ impl Model {
             workspaces: Vec::new(),
             agents: Vec::new(),
             sidebar_tab: SidebarTab::Workspaces,
+            skill_sel: 0,
             ws_sel: 0,
             sess_sel: 0,
             personas: Vec::new(),
@@ -548,13 +554,7 @@ impl Model {
         self.mark_dirty();
     }
 
-    /// Switch the explorer tab (workspaces ↔ sessions).
-    pub fn set_sidebar_tab(&mut self, tab: SidebarTab) {
-        self.sidebar_tab = tab;
-        self.mark_dirty();
-    }
-
-    /// Toggle the explorer tab.
+    /// Cycle the explorer tab (workspaces → sessions → skills → …).
     pub fn toggle_sidebar_tab(&mut self) {
         self.sidebar_tab = self.sidebar_tab.toggled();
         self.mark_dirty();
@@ -568,6 +568,9 @@ impl Model {
             }
             SidebarTab::Sessions => {
                 self.sess_sel = step_index(self.sess_sel, delta, self.recent_sessions.len())
+            }
+            SidebarTab::Skills => {
+                self.skill_sel = step_index(self.skill_sel, delta, self.skills.len())
             }
         }
         self.mark_dirty();
@@ -586,6 +589,9 @@ impl Model {
                     self.session_request = Some(SessionRequest::Resume(id.clone()));
                 }
             }
+            // Skills are browse-only in the rail; the agent loads them via the
+            // `skill` tool. Selecting one is a no-op (no session change).
+            SidebarTab::Skills => {}
         }
     }
 

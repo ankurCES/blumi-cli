@@ -169,9 +169,9 @@ fn render_sidebar(model: &mut Model, f: &mut Frame, area: Rect, theme: &Theme) {
     let inner = block.inner(area);
     f.render_widget(block, area);
 
-    // Tab bar (row 0) + active list (the rest).
+    // Tab bar (2 rows — too many tabs for one 26-col row) + active list.
     let [tabs_row, list_area] =
-        Layout::vertical([Constraint::Length(1), Constraint::Min(0)]).areas(inner);
+        Layout::vertical([Constraint::Length(2), Constraint::Min(0)]).areas(inner);
     model.sidebar_tab_area = Some((tabs_row.x, tabs_row.y, tabs_row.width, tabs_row.height));
     model.sidebar_list_area = Some((list_area.x, list_area.y, list_area.width, list_area.height));
 
@@ -187,11 +187,14 @@ fn render_sidebar(model: &mut Model, f: &mut Frame, area: Rect, theme: &Theme) {
         }
     };
     f.render_widget(
-        Paragraph::new(Line::from(vec![
-            chip("Workspaces", tab == SidebarTab::Workspaces),
-            Span::raw(" "),
-            chip("Sessions", tab == SidebarTab::Sessions),
-        ])),
+        Paragraph::new(vec![
+            Line::from(vec![
+                chip("Workspaces", tab == SidebarTab::Workspaces),
+                Span::raw(" "),
+                chip("Sessions", tab == SidebarTab::Sessions),
+            ]),
+            Line::from(vec![chip("Skills", tab == SidebarTab::Skills)]),
+        ]),
         tabs_row,
     );
 
@@ -236,6 +239,26 @@ fn render_sidebar(model: &mut Model, f: &mut Frame, area: Rect, theme: &Theme) {
                         title
                     };
                     vec![Span::styled(format!(" {}", truncate(t, title_w)), style)]
+                },
+            );
+        }
+        SidebarTab::Skills => {
+            let name_w = list_area.width.saturating_sub(2) as usize;
+            render_list(
+                f,
+                list_area,
+                &model.skills,
+                model.skill_sel,
+                focused,
+                theme,
+                "(no skills)",
+                |(name, _desc), i| {
+                    let style = if i == model.skill_sel {
+                        sel_style
+                    } else {
+                        body
+                    };
+                    vec![Span::styled(format!(" {}", truncate(name, name_w)), style)]
                 },
             );
         }
@@ -1718,6 +1741,7 @@ mod tests {
         assert!(out.contains("explorer"), "explorer pane");
         assert!(out.contains("Workspaces"), "workspaces tab");
         assert!(out.contains("Sessions"), "sessions tab");
+        assert!(out.contains("Skills"), "skills tab");
         assert!(out.contains("blumi-cli"), "workspace entry (active tab)");
         assert!(
             out.to_lowercase().contains("active agents"),
@@ -1729,6 +1753,12 @@ mod tests {
         model.sidebar_tab = crate::model::SidebarTab::Sessions;
         let out = render_to_string(&mut model, 130, 30);
         assert!(out.contains("fix parser"), "session entry (sessions tab)");
+
+        // Switch to the Skills tab → bundled/available skills show.
+        model.skills = vec![("rust-core".into(), "idiomatic rust".into())];
+        model.sidebar_tab = crate::model::SidebarTab::Skills;
+        let out = render_to_string(&mut model, 130, 30);
+        assert!(out.contains("rust-core"), "skill entry (skills tab)");
     }
 
     #[test]

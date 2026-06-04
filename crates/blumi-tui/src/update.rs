@@ -768,16 +768,12 @@ fn list_click_index(
 /// a list row selects + activates.
 fn sidebar_click(model: &mut Model, col: u16, row: u16) {
     use crate::model::SidebarTab;
-    // Tab bar: left half → Workspaces, right half → Sessions.
+    // Tab bar (2 rows): a click anywhere on it focuses the explorer and cycles to
+    // the next tab.
     if let Some((x, y, w, h)) = model.sidebar_tab_area {
         if col >= x && col < x + w && row >= y && row < y + h {
             model.focus = Focus::Sidebar;
-            let tab = if col < x + w / 2 {
-                SidebarTab::Workspaces
-            } else {
-                SidebarTab::Sessions
-            };
-            model.set_sidebar_tab(tab);
+            model.toggle_sidebar_tab();
             return;
         }
     }
@@ -785,12 +781,14 @@ fn sidebar_click(model: &mut Model, col: u16, row: u16) {
     let (sel, len) = match model.sidebar_tab {
         SidebarTab::Workspaces => (model.ws_sel, model.workspaces.len()),
         SidebarTab::Sessions => (model.sess_sel, model.recent_sessions.len()),
+        SidebarTab::Skills => (model.skill_sel, model.skills.len()),
     };
     if let Some(idx) = list_click_index(model.sidebar_list_area, sel, len, col, row) {
         model.focus = Focus::Sidebar;
         match model.sidebar_tab {
             SidebarTab::Workspaces => model.ws_sel = idx,
             SidebarTab::Sessions => model.sess_sel = idx,
+            SidebarTab::Skills => model.skill_sel = idx,
         }
         model.sidebar_activate();
         model.mark_dirty();
