@@ -495,10 +495,219 @@ class _SettingsTabState extends State<_SettingsTab> {
               child: Text('Save voice settings'),
             ),
           ),
+          const Divider(height: 28),
+          _label('Maintenance', cs),
+          Wrap(spacing: 8, runSpacing: 8, children: [
+            OutlinedButton.icon(
+              onPressed: _reload,
+              icon: const Icon(Icons.refresh, size: 18),
+              label: const Text('Reload agent'),
+            ),
+            OutlinedButton.icon(
+              onPressed: _recover,
+              icon: const Icon(Icons.healing, size: 18),
+              label: const Text('Recover'),
+            ),
+            OutlinedButton.icon(
+              onPressed: _restart,
+              icon: Icon(Icons.power_settings_new, size: 18, color: cs.error),
+              label: Text('Restart gateway', style: TextStyle(color: cs.error)),
+            ),
+            OutlinedButton.icon(
+              onPressed: _editConfig,
+              icon: const Icon(Icons.tune, size: 18),
+              label: const Text('Edit config'),
+            ),
+            OutlinedButton.icon(
+              onPressed: _newSkill,
+              icon: const Icon(Icons.auto_awesome, size: 18),
+              label: const Text('New skill'),
+            ),
+          ]),
+          const SizedBox(height: 18),
+          _label('Grid peers', cs),
+          FutureBuilder<(List<GridPeer>, Map<String, dynamic>)>(
+            future: _api.gridPeers(),
+            builder: (context, snap) {
+              if (snap.connectionState != ConnectionState.done) {
+                return const Padding(
+                    padding: EdgeInsets.all(8), child: LinearProgressIndicator());
+              }
+              if (snap.hasError) {
+                return Text('grid off / unavailable',
+                    style:
+                        TextStyle(color: cs.onSurface.withValues(alpha: 0.6)));
+              }
+              final peers = snap.data!.$1;
+              if (peers.isEmpty) {
+                return Text('no peers discovered on the network',
+                    style:
+                        TextStyle(color: cs.onSurface.withValues(alpha: 0.6)));
+              }
+              return Column(
+                children: [
+                  for (final p in peers)
+                    ListTile(
+                      dense: true,
+                      contentPadding: EdgeInsets.zero,
+                      leading: Icon(Icons.dns,
+                          color: p.online
+                              ? Colors.greenAccent
+                              : cs.onSurface.withValues(alpha: 0.4)),
+                      title: Text(p.name),
+                      subtitle: Text('${p.host}:${p.port} · v${p.version}'),
+                      trailing: Text(p.online ? 'online' : 'offline',
+                          style: TextStyle(
+                              fontSize: 11,
+                              color: p.online
+                                  ? Colors.greenAccent
+                                  : cs.onSurface.withValues(alpha: 0.5))),
+                    ),
+                ],
+              );
+            },
+          ),
           const SizedBox(height: 8),
         ],
       ),
     );
+  }
+
+  // --- Self-management actions ---
+
+  Future<void> _reload() async {
+    final m = ScaffoldMessenger.of(context);
+    try {
+      await _api.selfReload();
+      m.showSnackBar(const SnackBar(content: Text('reloading agent…')));
+    } catch (e) {
+      m.showSnackBar(SnackBar(content: Text('reload failed: $e')));
+    }
+  }
+
+  Future<void> _recover() async {
+    final m = ScaffoldMessenger.of(context);
+    try {
+      final r = await _api.selfRecover();
+      m.showSnackBar(
+          SnackBar(content: Text('recover: ${r['action'] ?? r['error'] ?? 'ok'}')));
+    } catch (e) {
+      m.showSnackBar(SnackBar(content: Text('recover failed: $e')));
+    }
+  }
+
+  Future<void> _restart() async {
+    final m = ScaffoldMessenger.of(context);
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (c) => AlertDialog(
+        title: const Text('Restart gateway?'),
+        content: const Text(
+            'Bounces the gateway service. In-flight turns are interrupted; '
+            'the app reconnects automatically.'),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(c, false),
+              child: const Text('Cancel')),
+          FilledButton(
+              onPressed: () => Navigator.pop(c, true),
+              child: const Text('Restart')),
+        ],
+      ),
+    );
+    if (ok != true) return;
+    try {
+      final r = await _api.selfRestart();
+      m.showSnackBar(SnackBar(
+          content: Text('restart: ${r['mode'] ?? (r['error'] ?? 'ok')}')));
+    } catch (e) {
+      m.showSnackBar(SnackBar(content: Text('restart failed: $e')));
+    }
+  }
+
+  Future<void> _editConfig() async {
+    final keyC = TextEditingController();
+    final valC = TextEditingController();
+    final m = ScaffoldMessenger.of(context);
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (c) => AlertDialog(
+        title: const Text('Set config key'),
+        content: Column(mainAxisSize: MainAxisSize.min, children: [
+          TextField(
+              controller: keyC,
+              decoration: const InputDecoration(
+                  labelText: 'dotted key, e.g. llm.temperature')),
+          TextField(
+              controller: valC,
+              decoration:
+                  const InputDecoration(labelText: 'value (JSON or text)')),
+        ]),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(c, false),
+              child: const Text('Cancel')),
+          FilledButton(
+              onPressed: () => Navigator.pop(c, true),
+              child: const Text('Set + reload')),
+        ],
+      ),
+    );
+    if (ok != true || keyC.text.trim().isEmpty) return;
+    try {
+      final r =
+          await _api.selfConfigSet(keyC.text.trim(), valC.text, reload: true);
+      m.showSnackBar(SnackBar(
+          content: Text(r['ok'] == true
+              ? (r['message']?.toString() ?? 'config set')
+              : 'error: ${r['error']}')));
+    } catch (e) {
+      m.showSnackBar(SnackBar(content: Text('config failed: $e')));
+    }
+  }
+
+  Future<void> _newSkill() async {
+    final nameC = TextEditingController();
+    final descC = TextEditingController();
+    final instrC = TextEditingController();
+    final m = ScaffoldMessenger.of(context);
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (c) => AlertDialog(
+        title: const Text('New / update skill'),
+        content: Column(mainAxisSize: MainAxisSize.min, children: [
+          TextField(
+              controller: nameC,
+              decoration: const InputDecoration(labelText: 'name (slug)')),
+          TextField(
+              controller: descC,
+              decoration: const InputDecoration(labelText: 'description')),
+          TextField(
+              controller: instrC,
+              maxLines: 4,
+              decoration:
+                  const InputDecoration(labelText: 'instructions (markdown)')),
+        ]),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(c, false),
+              child: const Text('Cancel')),
+          FilledButton(
+              onPressed: () => Navigator.pop(c, true),
+              child: const Text('Save + reload')),
+        ],
+      ),
+    );
+    if (ok != true || nameC.text.trim().isEmpty) return;
+    try {
+      final r = await _api.skillWrite(
+          nameC.text.trim(), descC.text.trim(), instrC.text,
+          reload: true);
+      m.showSnackBar(SnackBar(
+          content: Text(r['ok'] == true ? 'skill saved' : 'error: ${r['error']}')));
+    } catch (e) {
+      m.showSnackBar(SnackBar(content: Text('skill failed: $e')));
+    }
   }
 }
 
@@ -803,6 +1012,20 @@ class _TasksTabState extends State<_TasksTab> {
                       overflow: TextOverflow.ellipsis,
                       style: TextStyle(
                           fontSize: 12, color: cs.onSurface.withValues(alpha: 0.6))),
+                // Remote-runtime attribution: which grid peer is executing this.
+                if (t.owner != null)
+                  Padding(
+                    padding: const EdgeInsets.only(top: 2),
+                    child: Row(mainAxisSize: MainAxisSize.min, children: [
+                      Icon(Icons.dns, size: 12, color: cs.tertiary),
+                      const SizedBox(width: 3),
+                      Text('remote · ${t.owner}',
+                          style: TextStyle(
+                              fontSize: 11,
+                              color: cs.tertiary,
+                              fontWeight: FontWeight.w500)),
+                    ]),
+                  ),
               ],
             ),
           ),

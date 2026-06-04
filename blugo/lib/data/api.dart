@@ -27,20 +27,55 @@ class PersonaInfo {
 class TaskItem {
   final String id, title, detail, state;
   final int priority;
+
+  /// The grid peer executing this task (its display name), or null when it runs
+  /// locally. Set by the orchestrator when a task is handed off.
+  final String? owner;
   const TaskItem({
     required this.id,
     required this.title,
     required this.detail,
     required this.state,
     required this.priority,
+    this.owner,
   });
 
-  factory TaskItem.fromMap(Map<String, dynamic> j) => TaskItem(
+  factory TaskItem.fromMap(Map<String, dynamic> j) {
+    final owner = j['owner']?.toString();
+    return TaskItem(
+      id: j['id']?.toString() ?? '',
+      title: j['title']?.toString() ?? '',
+      detail: j['detail']?.toString() ?? '',
+      state: j['state']?.toString() ?? 'todo',
+      priority: (j['priority'] as num?)?.toInt() ?? 3,
+      owner: (owner != null && owner.isNotEmpty) ? owner : null,
+    );
+  }
+}
+
+/// A discovered grid peer (from `GET /api/grid/peers`).
+class GridPeer {
+  final String id, name, host, version, gridId;
+  final int port;
+  final bool online;
+  const GridPeer({
+    required this.id,
+    required this.name,
+    required this.host,
+    required this.port,
+    required this.version,
+    required this.gridId,
+    required this.online,
+  });
+
+  factory GridPeer.fromMap(Map<String, dynamic> j) => GridPeer(
         id: j['id']?.toString() ?? '',
-        title: j['title']?.toString() ?? '',
-        detail: j['detail']?.toString() ?? '',
-        state: j['state']?.toString() ?? 'todo',
-        priority: (j['priority'] as num?)?.toInt() ?? 3,
+        name: j['name']?.toString() ?? '',
+        host: j['host']?.toString() ?? '',
+        port: (j['port'] as num?)?.toInt() ?? 0,
+        version: j['version']?.toString() ?? '',
+        gridId: j['grid_id']?.toString() ?? '',
+        online: j['online'] as bool? ?? false,
       );
 }
 
@@ -192,6 +227,61 @@ class ApiClient {
   Future<void> setMemory(String which, String content) =>
       _post('/api/memory', {'which': which, 'content': content});
 
+  // --- Grid (distributed) ---
+
+  /// Discovered grid peers: `{ self: {...}, peers: [...] }` (or disabled).
+  Future<(List<GridPeer>, Map<String, dynamic>)> gridPeers() async {
+    final j = await _getJson('/api/grid/peers');
+    final peers = ((j['peers'] as List?) ?? [])
+        .map((p) => GridPeer.fromMap(p as Map<String, dynamic>))
+        .toList();
+    final me = (j['self'] as Map<String, dynamic>?) ?? const {};
+    return (peers, me);
+  }
+
+  /// Hand a board task off to a grid peer for remote execution.
+  Future<Map<String, dynamic>> gridDispatch(String taskId, String peerId,
+          {bool review = false}) =>
+      _postJson('/api/grid/dispatch',
+          {'task_id': taskId, 'peer_id': peerId, 'review': review});
+
+  // --- Self-management ---
+
+  /// Reload the agent in place (apply config/skill changes).
+  Future<void> selfReload() => _post('/api/self/reload', const {});
+
+  /// Restart the whole gateway service (requires confirm).
+  Future<Map<String, dynamic>> selfRestart() =>
+      _postJson('/api/self/restart', {'confirm': true});
+
+  /// Try to recover a wedged gateway (reload, escalating to restart).
+  Future<Map<String, dynamic>> selfRecover() =>
+      _postJson('/api/self/recover', const {});
+
+  /// settings.json with secrets redacted: `{ settings: {...} }`.
+  Future<Map<String, dynamic>> selfConfigGet() => _getJson('/api/self/config');
+
+  /// Set one dotted config key (validated server-side), optionally reloading.
+  Future<Map<String, dynamic>> selfConfigSet(String key, String value,
+          {bool reload = false}) =>
+      _postJson('/api/self/config',
+          {'key': key, 'value': value, 'reload': reload});
+
+  /// Create/update a skill, optionally reloading to load it.
+  Future<Map<String, dynamic>> skillWrite(
+          String name, String description, String instructions,
+          {bool reload = false}) =>
+      _postJson('/api/skills', {
+        'name': name,
+        'description': description,
+        'instructions': instructions,
+        'reload': reload,
+      });
+
+  /// Delete a skill by name.
+  Future<Map<String, dynamic>> skillDelete(String name) =>
+      _postJson('/api/skills/delete', {'name': name});
+
   /// Raw GET of a JSON endpoint (used by the cache layer).
   Future<Map<String, dynamic>> getJson(String path) => _getJson(path);
 
@@ -205,5 +295,13 @@ class ApiClient {
     final r =
         await _http.post(_u(path), headers: _headers(), body: jsonEncode(body));
     if (r.statusCode != 200) throw ApiException('POST $path → ${r.statusCode}');
+  }
+
+  /// POST returning the JSON body (for actions that report a result).
+  Future<Map<String, dynamic>> _postJson(String path, Object body) async {
+    final r =
+        await _http.post(_u(path), headers: _headers(), body: jsonEncode(body));
+    if (r.statusCode != 200) throw ApiException('POST $path → ${r.statusCode}');
+    return jsonDecode(r.body) as Map<String, dynamic>;
   }
 }
