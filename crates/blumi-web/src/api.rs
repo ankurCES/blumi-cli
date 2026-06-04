@@ -383,6 +383,19 @@ pub async fn tasks(State(state): State<AppState>) -> Json<Value> {
     Json(state.mgmt().tasks())
 }
 
+/// Aggregate runtime status for the dashboard: uptime + the active config +
+/// usage snapshot (cost/tokens). Live context/tokens also stream over SSE.
+pub async fn status(State(state): State<AppState>) -> Json<Value> {
+    Json(json!({
+        "uptime_secs": state.uptime_secs(),
+        "model": state.config.model,
+        "version": state.config.version,
+        "working_dir": state.config.working_dir,
+        "context_size": state.config.context_size,
+        "usage": state.mgmt().usage().await,
+    }))
+}
+
 pub async fn memory_get(State(state): State<AppState>) -> Json<Value> {
     let (memory, user) = state.mgmt().memory();
     Json(json!({ "memory": memory, "user": user }))

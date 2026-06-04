@@ -30,7 +30,7 @@ class _ControlCenter extends StatelessWidget {
   Widget build(BuildContext context) {
     final cs = Theme.of(context).colorScheme;
     return DefaultTabController(
-      length: 5,
+      length: 6,
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
@@ -49,6 +49,7 @@ class _ControlCenter extends StatelessWidget {
             indicatorColor: cs.primary,
             tabs: const [
               Tab(text: 'Settings'),
+              Tab(text: 'Status'),
               Tab(text: 'Tasks'),
               Tab(text: 'Usage'),
               Tab(text: 'Skills'),
@@ -58,6 +59,7 @@ class _ControlCenter extends StatelessWidget {
           Expanded(
             child: TabBarView(children: [
               _SettingsTab(app, scroll),
+              _StatusTab(app, scroll),
               _TasksTab(app, scroll),
               _UsageTab(app, scroll),
               _SkillsTab(app, scroll),
@@ -193,6 +195,100 @@ class _SettingsTabState extends State<_SettingsTab> {
       ),
     );
   }
+}
+
+// --- Status (uptime + live run metrics) ------------------------------------
+
+class _StatusTab extends StatefulWidget {
+  final AppController app;
+  final ScrollController scroll;
+  const _StatusTab(this.app, this.scroll);
+  @override
+  State<_StatusTab> createState() => _StatusTabState();
+}
+
+class _StatusTabState extends State<_StatusTab> {
+  late Future<Map<String, dynamic>> _status;
+
+  @override
+  void initState() {
+    super.initState();
+    _status = widget.app.session!.api.status();
+  }
+
+  String _fmtUptime(num secs) {
+    final s = secs.toInt();
+    final h = s ~/ 3600, m = (s % 3600) ~/ 60, sec = s % 60;
+    if (h > 0) return '${h}h ${m}m';
+    if (m > 0) return '${m}m ${sec}s';
+    return '${sec}s';
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+    return FutureBuilder<Map<String, dynamic>>(
+      future: _status,
+      builder: (context, snap) {
+        if (!snap.hasData) {
+          return const Center(child: CircularProgressIndicator());
+        }
+        final st = snap.data!;
+        final s = widget.app.session!;
+        return AnimatedBuilder(
+          animation: s,
+          builder: (context, _) => RefreshIndicator(
+            onRefresh: () async {
+              final f = widget.app.session!.api.status();
+              setState(() => _status = f);
+              await f;
+            },
+            child: ListView(
+              controller: widget.scroll,
+              padding: const EdgeInsets.all(16),
+              children: [
+                _row('uptime', _fmtUptime((st['uptime_secs'] as num?) ?? 0), cs),
+                _row('model', st['model']?.toString() ?? s.modelName, cs),
+                _row('version', st['version']?.toString() ?? '—', cs),
+                const SizedBox(height: 14),
+                _label('context', cs),
+                ClipRRect(
+                  borderRadius: BorderRadius.circular(4),
+                  child: LinearProgressIndicator(value: s.contextFrac, minHeight: 8),
+                ),
+                const SizedBox(height: 2),
+                Text('${(s.contextFrac * 100).round()}%',
+                    style: const TextStyle(fontSize: 12)),
+                const SizedBox(height: 14),
+                _row('tokens', '↑${s.inputTokens}  ↓${s.outputTokens}', cs),
+                if (s.costUsd > 0)
+                  _row('cost', '\$${s.costUsd.toStringAsFixed(4)}', cs),
+                const SizedBox(height: 14),
+                _label('working dir', cs),
+                Text(st['working_dir']?.toString() ?? '—',
+                    style: const TextStyle(fontFamily: 'monospace', fontSize: 12)),
+              ],
+            ),
+          ),
+        );
+      },
+    );
+  }
+
+  Widget _row(String k, String v, ColorScheme cs) => Padding(
+        padding: const EdgeInsets.symmetric(vertical: 4),
+        child: Row(
+          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+          children: [
+            Text(k, style: TextStyle(color: cs.onSurface.withValues(alpha: 0.7))),
+            Flexible(
+              child: Text(v,
+                  textAlign: TextAlign.right,
+                  style: const TextStyle(fontFamily: 'monospace', fontSize: 13)),
+            ),
+          ],
+        ),
+      );
 }
 
 // --- Tasks (the persistent board) ------------------------------------------

@@ -148,6 +148,8 @@ class ApiClient {
     return (j['usage'] as Map?)?.cast<String, dynamic>() ?? {};
   }
 
+  Future<Map<String, dynamic>> status() => _getJson('/api/status');
+
   /// (projectMemory, userMemory).
   Future<(String, String)> memory() async {
     final j = await _getJson('/api/memory');

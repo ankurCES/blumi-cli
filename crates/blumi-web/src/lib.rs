@@ -218,6 +218,7 @@ pub struct AppState {
     mgmt: Arc<dyn Management>,
     pub config: Arc<WebConfig>,
     auth: Option<Arc<Auth>>,
+    started: std::time::Instant,
 }
 
 impl AppState {
@@ -254,6 +255,10 @@ impl AppState {
     pub(crate) fn auth(&self) -> Option<&Arc<Auth>> {
         self.auth.as_ref()
     }
+
+    pub(crate) fn uptime_secs(&self) -> u64 {
+        self.started.elapsed().as_secs()
+    }
 }
 
 /// Build the axum router for a given state.
@@ -287,6 +292,7 @@ pub fn router(state: AppState) -> Router {
         .route("/api/tasks", get(api::tasks))
         .route("/api/memory", get(api::memory_get).post(api::memory_set))
         .route("/api/usage", get(api::usage))
+        .route("/api/status", get(api::status))
         .route(
             "/api/settings",
             get(api::settings_get).post(api::settings_set),
@@ -317,6 +323,7 @@ pub async fn serve(
         mgmt,
         config: Arc::new(config),
         auth: auth.map(Arc::new),
+        started: std::time::Instant::now(),
     };
     let app = router(state.clone());
     let listener = tokio::net::TcpListener::bind(addr).await?;
