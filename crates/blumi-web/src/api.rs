@@ -34,6 +34,9 @@ pub async fn config(State(state): State<AppState>) -> Json<Value> {
         "context_size": state.config.context_size,
         "auth_required": state.auth().is_some(),
         "voice_enabled": state.mgmt().voice_config().is_some(),
+        // The machine name, so a remote client (e.g. blugo) can label this
+        // gateway with the host it's running on.
+        "hostname": whoami::fallible::hostname().unwrap_or_else(|_| "blumi".to_string()),
     }))
 }
 
