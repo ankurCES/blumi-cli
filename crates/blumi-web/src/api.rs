@@ -692,6 +692,95 @@ pub async fn grid_run(
     }
 }
 
+/// This node's live metrics: uptime, model, token usage, task counts (with a
+/// local-vs-remote-owner split), and loop state. Shared by `/api/grid/node`
+/// (peer-facing) and `/api/grid/metrics` (the orchestrator's "self").
+async fn node_metrics(state: &AppState) -> Value {
+    let snap = state.current().await.snapshot().await;
+    let tasks = state.mgmt().tasks();
+    let arr = tasks
+        .get("tasks")
+        .and_then(|t| t.as_array())
+        .cloned()
+        .unwrap_or_default();
+    let total = arr.len();
+    let remote = arr
+        .iter()
+        .filter(|t| {
+            t.get("owner")
+                .and_then(|o| o.as_str())
+                .map(|s| !s.is_empty())
+                .unwrap_or(false)
+        })
+        .count();
+    let loop_state =
+        serde_json::to_value(&*state.loop_status().read().await).unwrap_or_else(|_| json!({}));
+    json!({
+        "uptime_secs": state.uptime_secs(),
+        "model": snap.model,
+        "turns": snap.turn_count,
+        "tokens": { "input": snap.total_input_tokens, "output": snap.total_output_tokens },
+        "counts": tasks.get("counts").cloned().unwrap_or_else(|| json!({})),
+        "tasks_total": total,
+        "tasks_remote": remote,        // handed OUT to peers
+        "tasks_local": total - remote,
+        "loop": loop_state,
+    })
+}
+
+/// Peer-facing: this node's metrics, authenticated with the shared grid secret.
+pub async fn grid_node(State(state): State<AppState>, headers: HeaderMap) -> Response {
+    let Some(secret) = state.grid_secret() else {
+        return (StatusCode::NOT_FOUND, "grid disabled").into_response();
+    };
+    let presented = headers
+        .get("x-blumi-grid")
+        .and_then(|h| h.to_str().ok())
+        .unwrap_or("");
+    if !constant_eq(secret.as_bytes(), presented.as_bytes()) {
+        return (StatusCode::UNAUTHORIZED, "grid auth required").into_response();
+    }
+    Json(node_metrics(&state).await).into_response()
+}
+
+/// Orchestrator-facing (human-authed): this node's metrics + every live peer's
+/// metrics + grid-wide totals.
+pub async fn grid_metrics(State(state): State<AppState>) -> Json<Value> {
+    Json(grid_metrics_value(&state).await)
+}
+
+/// Build the full grid metrics value (`{ self, peers, totals }`). Shared by the
+/// `/api/grid/metrics` handler and the agent's `grid_status` tool.
+pub async fn grid_metrics_value(state: &AppState) -> Value {
+    let me = node_metrics(state).await;
+    let peers = state.mgmt().grid_peer_metrics().await;
+    // Grid-wide totals across self + online peers.
+    let mut in_tok = me["tokens"]["input"].as_u64().unwrap_or(0);
+    let mut out_tok = me["tokens"]["output"].as_u64().unwrap_or(0);
+    let mut tasks_total = me["tasks_total"].as_u64().unwrap_or(0);
+    let mut online = 1u64; // self
+    if let Some(ps) = peers.as_array() {
+        for p in ps {
+            if p["online"].as_bool() == Some(true) {
+                online += 1;
+                let m = &p["metrics"];
+                in_tok += m["tokens"]["input"].as_u64().unwrap_or(0);
+                out_tok += m["tokens"]["output"].as_u64().unwrap_or(0);
+                tasks_total += m["tasks_total"].as_u64().unwrap_or(0);
+            }
+        }
+    }
+    json!({
+        "self": me,
+        "peers": peers,
+        "totals": {
+            "nodes_online": online,
+            "tokens": { "input": in_tok, "output": out_tok },
+            "tasks_total": tasks_total,
+        },
+    })
+}
+
 /// Constant-time byte compare (length is allowed to leak, contents are not).
 fn constant_eq(a: &[u8], b: &[u8]) -> bool {
     if a.len() != b.len() {

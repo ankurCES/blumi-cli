@@ -93,6 +93,10 @@ pub async fn build_session(
     registry.register(Arc::new(blumi_core::Typed(
         blumi_skills::RestartGatewayTool::new(),
     )));
+    // Grid introspection: answer questions about peers/metrics in chat.
+    registry.register(Arc::new(blumi_core::Typed(
+        blumi_skills::GridStatusTool::new(),
+    )));
 
     // Cross-session recall: full-text (FTS5) search over past sessions. Skipped
     // if the history DB can't be opened — it must never block startup.

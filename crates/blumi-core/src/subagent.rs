@@ -55,6 +55,30 @@ fn grid_overflow() -> Option<Arc<dyn GridOverflow>> {
     GRID_OVERFLOW.read().ok().and_then(|g| g.clone())
 }
 
+/// A read-only view of the grid (peers, task metrics, token usage), set by the
+/// gateway so the `grid_status` tool can answer questions about the fleet in
+/// chat. The implementation lives in the binary (it owns the registry + state).
+#[async_trait]
+pub trait GridInfo: Send + Sync {
+    /// A JSON metrics snapshot: `{ self, peers, totals }`.
+    async fn snapshot(&self) -> String;
+}
+
+static GRID_INFO: StdRwLock<Option<Arc<dyn GridInfo>>> = StdRwLock::new(None);
+
+/// Register the process-global grid-info provider (the gateway sets this at
+/// startup when the grid is enabled).
+pub fn set_grid_info(provider: Arc<dyn GridInfo>) {
+    if let Ok(mut g) = GRID_INFO.write() {
+        *g = Some(provider);
+    }
+}
+
+/// The current grid-info provider, if one is registered.
+pub fn grid_info() -> Option<Arc<dyn GridInfo>> {
+    GRID_INFO.read().ok().and_then(|g| g.clone())
+}
+
 /// A sub-agent template.
 #[derive(Debug, Clone)]
 pub struct AgentDef {

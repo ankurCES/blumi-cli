@@ -246,6 +246,30 @@ impl Management for WebManagement {
         }
     }
 
+    async fn grid_peer_metrics(&self) -> serde_json::Value {
+        let Some(grid) = &self.grid else {
+            return serde_json::json!([]);
+        };
+        let secret = self.config.grid.secret.clone();
+        let mut out = Vec::new();
+        for p in grid.registry.live() {
+            let client = crate::grid::client::Client::for_peer(&p, &secret);
+            let metrics = client
+                .node_metrics(std::time::Duration::from_secs(8))
+                .await
+                .ok();
+            out.push(serde_json::json!({
+                "id": p.id,
+                "name": p.name,
+                "host": p.host.to_string(),
+                "port": p.port,
+                "online": metrics.is_some(),
+                "metrics": metrics,
+            }));
+        }
+        serde_json::Value::Array(out)
+    }
+
     fn task_peek_next(&self) -> Option<serde_json::Value> {
         let board = blumi_task::TaskBoard::load(crate::task::board_path(&self.config));
         let task = board.next_todo()?;

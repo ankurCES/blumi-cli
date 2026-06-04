@@ -138,9 +138,10 @@ pub async fn require_auth(
         || path == "/api/login"
         || path == "/api/health"
         || path == "/api/config"
-        // Peer→peer grid execution authenticates with the shared grid secret
+        // Peer→peer grid endpoints authenticate with the shared grid secret
         // (checked inside the handler), not the human password/token.
-        || path == "/api/grid/run";
+        || path == "/api/grid/run"
+        || path == "/api/grid/node";
     if exempt {
         return next.run(req).await;
     }

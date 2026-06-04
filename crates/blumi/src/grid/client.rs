@@ -63,4 +63,19 @@ impl Client {
             .to_string();
         Ok(out)
     }
+
+    /// Fetch this peer's live metrics (`GET /api/grid/node`).
+    pub async fn node_metrics(&self, timeout: Duration) -> anyhow::Result<serde_json::Value> {
+        let resp = self
+            .http
+            .get(format!("{}/api/grid/node", self.base))
+            .header("x-blumi-grid", &self.secret)
+            .timeout(timeout)
+            .send()
+            .await?;
+        if !resp.status().is_success() {
+            anyhow::bail!("peer returned HTTP {}", resp.status());
+        }
+        Ok(resp.json().await?)
+    }
 }
