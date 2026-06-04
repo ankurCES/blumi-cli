@@ -12,6 +12,7 @@ mod prompt;
 mod providers;
 mod remote;
 mod run;
+mod serve;
 mod session;
 mod task;
 mod tui;
@@ -95,6 +96,11 @@ enum Commands {
     Gateway {
         #[command(subcommand)]
         action: GatewayCmd,
+    },
+    /// Run blumi as an always-on gateway for the blugo mobile app.
+    Serve {
+        #[command(subcommand)]
+        action: ServeCmd,
     },
     /// Manage the task board (the work queue for `blumi loop`).
     Task {
@@ -216,6 +222,44 @@ enum GatewayCmd {
         #[arg(long)]
         port: Option<u16>,
     },
+}
+
+/// The always-on gateway for the blugo mobile app (reuses the web server).
+#[derive(Subcommand)]
+enum ServeCmd {
+    /// Run the gateway in the foreground (used by the service + for debugging).
+    Run {
+        /// Bind address — default the primary LAN IP (use 127.0.0.1 for local only).
+        #[arg(long)]
+        host: Option<String>,
+        /// Port (default 7777).
+        #[arg(long)]
+        port: Option<u16>,
+        /// Set/replace the login password (hashed + saved; required off-loopback).
+        #[arg(long)]
+        password: Option<String>,
+    },
+    /// Pair a device: set the password, print the LAN URL + token + QR for blugo.
+    Pair {
+        /// Set/replace the login password (prompted if omitted).
+        #[arg(long)]
+        password: Option<String>,
+    },
+    /// Install the gateway as a background service (launchd/systemd) + auto-start.
+    Install {
+        #[arg(long)]
+        host: Option<String>,
+        #[arg(long)]
+        port: Option<u16>,
+    },
+    /// Remove the background service.
+    Uninstall,
+    /// Start the installed background service.
+    Start,
+    /// Stop the installed background service.
+    Stop,
+    /// Show whether the gateway is running + its URL/pid.
+    Status,
 }
 
 #[derive(Subcommand)]
@@ -381,7 +425,8 @@ async fn main() -> anyhow::Result<()> {
             };
             tui::run(config).await
         }
-        Some(Commands::Web { host, password }) => web::run(config, host, password).await,
+        Some(Commands::Web { host, password }) => web::run(config, host, password, None).await,
+        Some(Commands::Serve { action }) => serve::run(config, action).await,
         Some(Commands::Session { action }) => match action {
             SessionCmd::List => session::list(config).await,
             SessionCmd::Search { query } => session::search(config, query.join(" ")).await,

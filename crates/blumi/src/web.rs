@@ -395,12 +395,16 @@ pub async fn run(
     config: BlumiConfig,
     host: Option<String>,
     password: Option<String>,
+    port: Option<u16>,
 ) -> anyhow::Result<()> {
     config.paths.ensure_dirs().ok();
 
-    let port: u16 = std::env::var("BLUMI_WEB_PORT")
-        .ok()
-        .and_then(|s| s.parse().ok())
+    let port: u16 = port
+        .or_else(|| {
+            std::env::var("BLUMI_WEB_PORT")
+                .ok()
+                .and_then(|s| s.parse().ok())
+        })
         .unwrap_or(7777);
 
     // Resolve the bind address (default loopback).
@@ -504,7 +508,7 @@ pub(crate) fn to_voice_config(config: &BlumiConfig) -> blumi_voice::VoiceConfig 
 }
 
 /// Load the 32-byte cookie-signing key, creating it (0600) on first use.
-fn load_or_create_key(path: &std::path::Path) -> anyhow::Result<Vec<u8>> {
+pub(crate) fn load_or_create_key(path: &std::path::Path) -> anyhow::Result<Vec<u8>> {
     if let Ok(bytes) = std::fs::read(path) {
         if bytes.len() >= 32 {
             return Ok(bytes);
@@ -526,7 +530,7 @@ fn load_or_create_key(path: &std::path::Path) -> anyhow::Result<Vec<u8>> {
 }
 
 /// Merge `web.password_hash` into settings.json (atomic, 0600).
-fn persist_password_hash(path: &std::path::Path, hash: &str) -> anyhow::Result<()> {
+pub(crate) fn persist_password_hash(path: &std::path::Path, hash: &str) -> anyhow::Result<()> {
     let mut root: serde_json::Value = std::fs::read_to_string(path)
         .ok()
         .and_then(|s| serde_json::from_str(&s).ok())

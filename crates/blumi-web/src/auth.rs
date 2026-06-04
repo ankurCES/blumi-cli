@@ -52,8 +52,9 @@ impl Auth {
             .is_ok()
     }
 
-    /// Issue a signed token valid for [`TTL_SECS`].
-    fn issue(&self) -> String {
+    /// Issue a signed token valid for [`TTL_SECS`]. Public so the gateway can mint
+    /// a pairing token for the blugo app.
+    pub fn issue(&self) -> String {
         let exp = now() + TTL_SECS;
         format!("{exp}.{}", self.sign(&exp.to_string()))
     }
@@ -102,11 +103,16 @@ pub async fn login(State(state): State<AppState>, Json(body): Json<LoginBody>) -
         return Json(json!({ "ok": true, "auth": false })).into_response();
     };
     if auth.verify_password(&body.password) {
-        let cookie = format!(
-            "{COOKIE_NAME}={}; HttpOnly; SameSite=Strict; Path=/; Max-Age={TTL_SECS}",
-            auth.issue()
-        );
-        ([(header::SET_COOKIE, cookie)], Json(json!({ "ok": true }))).into_response()
+        // Same token in the cookie (browser) and the body (native apps like blugo,
+        // which send it back as `Authorization: Bearer <token>`).
+        let token = auth.issue();
+        let cookie =
+            format!("{COOKIE_NAME}={token}; HttpOnly; SameSite=Strict; Path=/; Max-Age={TTL_SECS}");
+        (
+            [(header::SET_COOKIE, cookie)],
+            Json(json!({ "ok": true, "token": token })),
+        )
+            .into_response()
     } else {
         (StatusCode::UNAUTHORIZED, Json(json!({ "ok": false }))).into_response()
     }
@@ -135,13 +141,22 @@ pub async fn require_auth(
     if exempt {
         return next.run(req).await;
     }
-    let authed = req
+    // Accept the token from the cookie (browser), an `Authorization: Bearer`
+    // header (native apps), or a `?token=` query param (for the SSE GET, where
+    // some clients can't set headers).
+    let token = req
         .headers()
         .get(header::COOKIE)
         .and_then(|h| h.to_str().ok())
         .and_then(cookie_value)
-        .map(|t| auth.verify_token(&t))
-        .unwrap_or(false);
+        .or_else(|| {
+            req.headers()
+                .get(header::AUTHORIZATION)
+                .and_then(|h| h.to_str().ok())
+                .and_then(bearer_value)
+        })
+        .or_else(|| req.uri().query().and_then(query_token));
+    let authed = token.map(|t| auth.verify_token(&t)).unwrap_or(false);
     if authed {
         next.run(req).await
     } else {
@@ -154,6 +169,23 @@ fn cookie_value(header: &str) -> Option<String> {
     header.split(';').find_map(|kv| {
         let (k, v) = kv.trim().split_once('=')?;
         (k == COOKIE_NAME).then(|| v.to_string())
+    })
+}
+
+/// Extract the token from an `Authorization: Bearer <token>` header.
+fn bearer_value(header: &str) -> Option<String> {
+    header
+        .strip_prefix("Bearer ")
+        .or_else(|| header.strip_prefix("bearer "))
+        .map(|t| t.trim().to_string())
+        .filter(|t| !t.is_empty())
+}
+
+/// Extract `token=<value>` from a URL query string.
+fn query_token(query: &str) -> Option<String> {
+    query.split('&').find_map(|kv| {
+        let (k, v) = kv.split_once('=')?;
+        (k == "token").then(|| v.to_string())
     })
 }
 
@@ -204,5 +236,27 @@ mod tests {
             Some("abc.def")
         );
         assert_eq!(cookie_value("other=1").as_deref(), None);
+    }
+
+    #[test]
+    fn parses_bearer_and_query_token() {
+        assert_eq!(bearer_value("Bearer abc.def").as_deref(), Some("abc.def"));
+        assert_eq!(bearer_value("bearer xyz").as_deref(), Some("xyz"));
+        assert_eq!(bearer_value("Basic abc").as_deref(), None);
+        assert_eq!(bearer_value("Bearer ").as_deref(), None);
+        assert_eq!(
+            query_token("a=1&token=tok.sig&b=2").as_deref(),
+            Some("tok.sig")
+        );
+        assert_eq!(query_token("a=1&b=2").as_deref(), None);
+    }
+
+    #[test]
+    fn bearer_token_verifies_like_a_cookie() {
+        let a = auth();
+        let token = a.issue();
+        // What require_auth extracts from a Bearer header must verify.
+        let extracted = bearer_value(&format!("Bearer {token}")).unwrap();
+        assert!(a.verify_token(&extracted));
     }
 }
