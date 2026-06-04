@@ -23,6 +23,7 @@ class BlumiSession extends ChangeNotifier {
   final ApiClient api;
   final EventStream _stream;
   StreamSubscription<BlumiEvent>? _sub;
+  Timer? _refreshTimer;
 
   final List<Entry> entries = [];
   String? streaming; // in-flight assistant text
@@ -87,6 +88,72 @@ class BlumiSession extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// Re-pull the canonical transcript from the gateway and reconcile it into the
+  /// view: adopt the server's authoritative user/assistant text while keeping
+  /// the rich tool cards (diff/preview/status) captured live over SSE and any
+  /// in-place notices. Runs after each turn settles and on pull-to-refresh; a
+  /// no-op mid-stream.
+  Future<void> refreshTranscript() async {
+    if (busy || streaming != null || switching) return;
+    List<StoredMessage> msgs;
+    try {
+      msgs = await api.messages();
+    } catch (_) {
+      return; // keep what we have on a transient failure
+    }
+    // A new turn may have started while we were fetching — don't clobber it.
+    if (busy || streaming != null || switching) return;
+
+    // Guard against brief server lag right after a turn: if the gateway hasn't
+    // committed the just-finished reply yet (fewer messages than we already
+    // show), keep the live transcript rather than dropping a message.
+    final liveCount = entries.where((e) => e is! NoticeEntry).length;
+    if (msgs.length < liveCount) return;
+
+    // Walk the live transcript in order, refreshing each message entry from the
+    // server while leaving notices and rich tool cards in place; append any
+    // extra server messages (e.g. from another connected client) at the end.
+    final rebuilt = <Entry>[];
+    var si = 0;
+    for (final e in entries) {
+      if (e is NoticeEntry) {
+        rebuilt.add(e);
+        continue;
+      }
+      if (si >= msgs.length) break;
+      rebuilt.add(_entryFor(msgs[si++], reuse: e));
+    }
+    for (; si < msgs.length; si++) {
+      rebuilt.add(_entryFor(msgs[si]));
+    }
+
+    entries
+      ..clear()
+      ..addAll(rebuilt);
+    notifyListeners();
+  }
+
+  /// Map a stored message to a transcript entry, reusing the live tool card
+  /// (with its diff/preview/status) when the slot lines up — `/api/messages`
+  /// omits that detail.
+  Entry _entryFor(StoredMessage m, {Entry? reuse}) => switch (m.role) {
+        'user' => UserEntry(m.text),
+        'tool' => reuse is ToolEntry
+            ? reuse
+            : ToolEntry(
+                id: '', name: m.toolName ?? 'tool', summary: m.text, ok: true),
+        _ => AssistantEntry(m.text),
+      };
+
+  /// Debounced post-turn refresh so the transcript settles to the gateway's
+  /// authoritative state shortly after a reply lands.
+  void _scheduleRefresh() {
+    _refreshTimer?.cancel();
+    _refreshTimer = Timer(const Duration(milliseconds: 500), () {
+      if (!busy && streaming == null) unawaited(refreshTranscript());
+    });
+  }
+
   void _onEvent(BlumiEvent ev) {
     switch (ev) {
       case TurnStarted():
@@ -137,6 +204,7 @@ class BlumiSession extends ChangeNotifier {
         busy = false;
         streaming = null;
         thinking = null;
+        _scheduleRefresh();
       case NoticeEvent(:final message):
         entries.add(NoticeEntry(message));
       case ErrorEvent(:final message):
@@ -221,6 +289,7 @@ class BlumiSession extends ChangeNotifier {
 
   @override
   void dispose() {
+    _refreshTimer?.cancel();
     _sub?.cancel();
     _stream.close();
     super.dispose();

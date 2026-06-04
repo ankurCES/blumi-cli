@@ -218,10 +218,14 @@ class _ChatPaneState extends State<ChatPane> {
                   ? const Center(child: CircularProgressIndicator())
                   : items.isEmpty
                       ? const _EmptyState()
-                      : ListView(
-                          controller: _scroll,
-                          padding: const EdgeInsets.all(12),
-                          children: items,
+                      : RefreshIndicator(
+                          onRefresh: s.refreshTranscript,
+                          child: ListView(
+                            controller: _scroll,
+                            physics: const AlwaysScrollableScrollPhysics(),
+                            padding: const EdgeInsets.all(12),
+                            children: items,
+                          ),
                         ),
             ),
             if (s.pendingPlan != null) PlanCard(s, s.pendingPlan!),
