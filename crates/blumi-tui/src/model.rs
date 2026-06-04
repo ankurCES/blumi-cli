@@ -317,6 +317,9 @@ pub struct Model {
     pub explorer_title_area: Option<(u16, u16, u16, u16)>,
     pub agent_title_area: Option<(u16, u16, u16, u16)>,
     pub editor_area: Option<(u16, u16, u16, u16)>,
+    /// Per-chip rects of the header tab strip (x, y, w, tab_index), recorded at
+    /// render time so a click selects that specific tab.
+    pub header_tab_areas: Vec<(u16, u16, u16, usize)>,
     /// Independently-scrollable dashboard sub-panels (active agents, tasks).
     pub agents_pane: ScrollPane,
     pub tasks_pane: ScrollPane,
@@ -440,6 +443,7 @@ impl Model {
             explorer_title_area: None,
             agent_title_area: None,
             editor_area: None,
+            header_tab_areas: Vec::new(),
             agents_pane: ScrollPane::default(),
             tasks_pane: ScrollPane::default(),
             dash_panel: DashPanel::Agents,
