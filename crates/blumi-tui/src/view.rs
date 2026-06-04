@@ -1334,7 +1334,7 @@ fn build_lines(model: &Model, width: usize, theme: &Theme) -> Vec<Line<'static>>
         }
     }
     if let Some(s) = &model.streaming {
-        let content = crate::markdown::render_markdown(s, inner, theme);
+        let content = crate::markdown::render_markdown_live(s, inner, theme);
         push_card(
             &mut lines,
             icons::agent(),
