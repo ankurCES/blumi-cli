@@ -379,6 +379,10 @@ pub async fn skills(State(state): State<AppState>) -> Json<Value> {
     Json(json!({ "skills": state.mgmt().skills() }))
 }
 
+pub async fn tasks(State(state): State<AppState>) -> Json<Value> {
+    Json(state.mgmt().tasks())
+}
+
 pub async fn memory_get(State(state): State<AppState>) -> Json<Value> {
     let (memory, user) = state.mgmt().memory();
     Json(json!({ "memory": memory, "user": user }))

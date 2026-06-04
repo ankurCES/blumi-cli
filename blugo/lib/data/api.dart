@@ -23,6 +23,27 @@ class PersonaInfo {
   const PersonaInfo(this.name, this.description);
 }
 
+/// One item on the persistent task board (`blumi-task`).
+class TaskItem {
+  final String id, title, detail, state;
+  final int priority;
+  const TaskItem({
+    required this.id,
+    required this.title,
+    required this.detail,
+    required this.state,
+    required this.priority,
+  });
+
+  factory TaskItem.fromMap(Map<String, dynamic> j) => TaskItem(
+        id: j['id']?.toString() ?? '',
+        title: j['title']?.toString() ?? '',
+        detail: j['detail']?.toString() ?? '',
+        state: j['state']?.toString() ?? 'todo',
+        priority: (j['priority'] as num?)?.toInt() ?? 3,
+      );
+}
+
 /// REST client for the blumi gateway. Mirrors the endpoints the web UI uses.
 class ApiClient {
   final ServerConn conn;
@@ -112,6 +133,13 @@ class ApiClient {
     final j = await _getJson('/api/skills');
     return ((j['skills'] as List?) ?? [])
         .map((s) => s is Map ? (s['name'] ?? '$s').toString() : '$s')
+        .toList();
+  }
+
+  Future<List<TaskItem>> tasks() async {
+    final j = await _getJson('/api/tasks');
+    return ((j['tasks'] as List?) ?? [])
+        .map((t) => TaskItem.fromMap(t as Map<String, dynamic>))
         .toList();
   }
 

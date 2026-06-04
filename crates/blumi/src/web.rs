@@ -168,6 +168,11 @@ impl Management for WebManagement {
             .collect()
     }
 
+    fn tasks(&self) -> serde_json::Value {
+        let board = blumi_task::TaskBoard::load(crate::task::board_path(&self.config));
+        serde_json::json!({ "tasks": board.tasks(), "counts": board.counts() })
+    }
+
     fn memory(&self) -> (String, String) {
         let mem = std::fs::read_to_string(self.config.paths.memory_md()).unwrap_or_default();
         let usr = std::fs::read_to_string(self.config.paths.user_md()).unwrap_or_default();

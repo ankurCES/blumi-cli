@@ -206,6 +206,8 @@ pub trait Management: Send + Sync {
     /// Persist the active provider (+ a default model) to settings.json, plus an
     /// optional API key for that provider. The caller reloads to apply it.
     fn set_provider(&self, provider: &str, api_key: Option<&str>) -> anyhow::Result<()>;
+    /// The persistent task board as JSON (`{ tasks: [...], counts: {...} }`).
+    fn tasks(&self) -> serde_json::Value;
 }
 
 /// Shared server state.
@@ -282,6 +284,7 @@ pub fn router(state: AppState) -> Router {
         .route("/api/cron", get(api::cron_list).post(api::cron_add))
         .route("/api/cron/remove", post(api::cron_remove))
         .route("/api/skills", get(api::skills))
+        .route("/api/tasks", get(api::tasks))
         .route("/api/memory", get(api::memory_get).post(api::memory_set))
         .route("/api/usage", get(api::usage))
         .route(
