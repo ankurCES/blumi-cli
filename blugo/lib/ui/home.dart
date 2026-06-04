@@ -201,13 +201,15 @@ class _ChatPaneState extends State<ChatPane> {
         return Column(
           children: [
             Expanded(
-              child: items.isEmpty
-                  ? const _EmptyState()
-                  : ListView(
-                      controller: _scroll,
-                      padding: const EdgeInsets.all(12),
-                      children: items,
-                    ),
+              child: s.switching
+                  ? const Center(child: CircularProgressIndicator())
+                  : items.isEmpty
+                      ? const _EmptyState()
+                      : ListView(
+                          controller: _scroll,
+                          padding: const EdgeInsets.all(12),
+                          children: items,
+                        ),
             ),
             if (s.pendingApproval != null) ApprovalCard(s, s.pendingApproval!),
             if (s.pendingClarify != null) ClarifyCard(s, s.pendingClarify!),
@@ -674,7 +676,11 @@ class SessionsPane extends StatelessWidget {
                           ),
                           subtitle: Text('${sess.messageCount} msgs',
                               style: const TextStyle(fontSize: 11)),
-                          onTap: () => app.resumeSession(sess.id),
+                          onTap: () {
+                            final sc = Scaffold.maybeOf(context);
+                            if (sc?.isDrawerOpen ?? false) sc!.closeDrawer();
+                            app.resumeSession(sess.id);
+                          },
                         ),
                     ],
                   ),

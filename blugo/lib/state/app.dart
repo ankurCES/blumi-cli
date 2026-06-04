@@ -282,6 +282,7 @@ class AppController extends ChangeNotifier {
   Future<void> newSession() async {
     final s = session;
     if (s == null) return;
+    s.beginSwitch(); // clear + show loading immediately
     await s.api.newSession();
     await s.restore();
     await refreshSessions();
@@ -290,6 +291,7 @@ class AppController extends ChangeNotifier {
   Future<void> resumeSession(String id) async {
     final s = session;
     if (s == null) return;
+    s.beginSwitch(); // clear + show loading immediately
     await s.api.resume(id);
     await s.restore();
   }
