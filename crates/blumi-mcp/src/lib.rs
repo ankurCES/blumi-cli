@@ -11,7 +11,9 @@ use blumi_protocol::ToolResult;
 use rmcp::model::CallToolRequestParams;
 use rmcp::service::{RoleClient, RunningService, ServiceExt};
 use rmcp::transport::TokioChildProcess;
+use std::process::Stdio;
 use std::sync::Arc;
+use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio_util::sync::CancellationToken;
 
 /// A running MCP client (owns the server child process).
@@ -31,7 +33,26 @@ pub async fn connect_server(
         cmd.env(k, v);
     }
 
-    let transport = TokioChildProcess::new(cmd)?;
+    // Capture the server's stderr instead of letting it inherit our terminal —
+    // MCP servers log human-readable notices there (e.g. "client does not support
+    // MCP roots…", "not a valid git repo") which would otherwise corrupt the TUI's
+    // alternate screen. We drain it into `tracing` (a log file under the TUI), so
+    // it's available for debugging but never painted over the UI.
+    let (transport, stderr) = TokioChildProcess::builder(cmd)
+        .stderr(Stdio::piped())
+        .spawn()?;
+    if let Some(stderr) = stderr {
+        let server = name.to_string();
+        tokio::spawn(async move {
+            let mut lines = BufReader::new(stderr).lines();
+            while let Ok(Some(line)) = lines.next_line().await {
+                let line = line.trim();
+                if !line.is_empty() {
+                    tracing::debug!(target: "mcp::server", server = %server, "{line}");
+                }
+            }
+        });
+    }
     let client: Arc<McpClient> = Arc::new(().serve(transport).await?);
 
     let listed = client.list_tools(Default::default()).await?;
