@@ -130,6 +130,28 @@ pub fn render(model: &mut Model, f: &mut Frame) {
         render_slash_popup(model, f, editor, &theme);
     }
 
+    // Motion cues (scoped): a coalesce when an overlay opens (over its popup
+    // rect) and a short settle when the transcript grows (over the chat column).
+    let (ovl_id, ovl_rect) = if model.pending.is_some() {
+        (1u8, centered_rect(70, 50, area))
+    } else if model.plan_review.is_some() {
+        (2, centered_rect(80, 80, area))
+    } else if model.dialog.is_some() {
+        (3, centered_rect(60, 50, area))
+    } else if model.memory_view.is_some() {
+        (4, centered_rect(70, 60, area))
+    } else if model.usage_view.is_some() {
+        (5, centered_rect(58, 60, area))
+    } else if model.board_view.is_some() {
+        (6, centered_rect(64, 60, area))
+    } else if model.dash_modal {
+        (7, centered_rect(72, 84, area))
+    } else {
+        (0, area)
+    };
+    model.motion.cue_overlay(ovl_id, ovl_rect);
+    model.motion.cue_message(model.entries.len(), chat);
+
     // Cinematic motion (tachyonfx) — applied last, over the fully-drawn frame.
     model.motion.process(f.buffer_mut(), area);
 }

@@ -11,11 +11,17 @@
 use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
 use std::time::{Duration, Instant};
-use tachyonfx::{fx, EffectManager};
+use tachyonfx::{fx, Effect, EffectManager};
 
 /// How long the "scene-in" effect runs, in milliseconds.
 const SCENE_MS: u32 = 320;
 const SCENE_MS_REDUCED: u32 = 120;
+/// A modal/overlay coalescing into view (scoped to the popup rect).
+const OVERLAY_MS: u32 = 240;
+const OVERLAY_MS_REDUCED: u32 = 100;
+/// A new chat message settling in (kept short so it never feels busy).
+const MSG_MS: u32 = 170;
+const MSG_MS_REDUCED: u32 = 80;
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum MotionLevel {
@@ -30,6 +36,10 @@ pub struct Motion {
     last: Option<Instant>,
     /// While `Some(t)` and `now < t`, an effect is animating.
     active_until: Option<Instant>,
+    /// Last-seen overlay discriminant, so `cue_overlay` fires once per opening.
+    last_overlay: u8,
+    /// Last-seen transcript length, so `cue_message` fires once per new entry.
+    last_msgs: usize,
 }
 
 impl Default for Motion {
@@ -39,6 +49,8 @@ impl Default for Motion {
             mgr: EffectManager::default(),
             last: None,
             active_until: None,
+            last_overlay: 0,
+            last_msgs: 0,
         }
     }
 }
@@ -88,6 +100,47 @@ impl Motion {
         self.active_until = Some(Instant::now() + Duration::from_millis(ms as u64 + 80));
     }
 
+    /// Register a scoped effect + keep the UI animating for its duration.
+    fn schedule(&mut self, effect: Effect, ms: u32) {
+        self.mgr.add_effect(effect);
+        let until = Instant::now() + Duration::from_millis(ms as u64 + 80);
+        self.active_until = Some(self.active_until.map_or(until, |t| t.max(until)));
+    }
+
+    /// Fire a coalesce scoped to a freshly-opened overlay's `area`. `id` is a
+    /// per-overlay discriminant (0 = no overlay); the effect runs once per
+    /// opening (re-renders with the same id don't re-fire). Tracking happens
+    /// even when motion is off so toggling on mid-overlay doesn't re-trigger.
+    pub fn cue_overlay(&mut self, id: u8, area: Rect) {
+        if id == self.last_overlay {
+            return;
+        }
+        self.last_overlay = id;
+        let ms = match self.level {
+            MotionLevel::Off => return,
+            MotionLevel::Reduced => OVERLAY_MS_REDUCED,
+            MotionLevel::Full => OVERLAY_MS,
+        };
+        if id != 0 {
+            self.schedule(fx::coalesce(ms).with_area(area), ms);
+        }
+    }
+
+    /// Fire a short coalesce over the chat `area` when the transcript grows (a
+    /// new message/tool/notice settled in). Fires once per new entry.
+    pub fn cue_message(&mut self, count: usize, area: Rect) {
+        let grew = count > self.last_msgs;
+        self.last_msgs = count;
+        let ms = match self.level {
+            MotionLevel::Off => return,
+            MotionLevel::Reduced => MSG_MS_REDUCED,
+            MotionLevel::Full => MSG_MS,
+        };
+        if grew {
+            self.schedule(fx::coalesce(ms).with_area(area), ms);
+        }
+    }
+
     /// Advance + apply active effects onto `area`. Call last in `view::render`.
     /// A no-op when off or idle (and it resets the clock so the next effect
     /// starts from a fresh delta).
@@ -128,5 +181,31 @@ mod tests {
         m.set_level(MotionLevel::Off);
         m.scene_in();
         assert!(!m.is_active(), "motion off → no effects scheduled");
+    }
+
+    #[test]
+    fn cue_overlay_fires_once_per_opening() {
+        let area = Rect::new(0, 0, 40, 20);
+        let mut m = Motion::default();
+        m.cue_overlay(3, area); // palette opens
+        assert!(m.is_active(), "overlay open animates");
+        m.active_until = None; // simulate settle
+        m.cue_overlay(3, area); // same overlay, re-render → no re-fire
+        assert!(!m.is_active(), "same overlay id does not re-trigger");
+        m.cue_overlay(0, area); // closed → no effect
+        assert!(!m.is_active());
+    }
+
+    #[test]
+    fn cue_message_fires_when_transcript_grows() {
+        let area = Rect::new(0, 0, 40, 20);
+        let mut m = Motion::default();
+        m.cue_message(3, area); // 0 → 3 (e.g. resume): grew
+        assert!(m.is_active());
+        m.active_until = None;
+        m.cue_message(3, area); // unchanged → no fire
+        assert!(!m.is_active());
+        m.cue_message(4, area); // new entry → fire
+        assert!(m.is_active());
     }
 }
