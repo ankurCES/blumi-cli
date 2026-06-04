@@ -293,16 +293,19 @@ pub async fn build_session(
     ));
 
     // Sub-agent delegation: the spawner shares the same provider/registry/executor.
-    let spawner = Arc::new(AgentSpawner::new(
-        llm.clone(),
-        registry.clone(),
-        perms.clone(),
-        executor.clone(),
-        options.clone(),
-        config.llm.context_size,
-        work_dir.clone(),
-        builtin_agents(),
-    ));
+    let spawner = Arc::new(
+        AgentSpawner::new(
+            llm.clone(),
+            registry.clone(),
+            perms.clone(),
+            executor.clone(),
+            options.clone(),
+            config.llm.context_size,
+            work_dir.clone(),
+            builtin_agents(),
+        )
+        .with_max_local_agents(config.llm.max_local_agents),
+    );
 
     let runner = Arc::new(
         AgentTurnRunner::new(

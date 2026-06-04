@@ -212,6 +212,31 @@ fn host_stem(fullname: &str) -> String {
     fullname.split('.').next().unwrap_or(fullname).to_string()
 }
 
+/// Grid-overflow hook for blumi-core's `AgentSpawner`: when an instance hits its
+/// local sub-agent cap, excess delegations run on an available grid peer instead
+/// of waiting. Registered process-globally by the gateway when the grid is on.
+pub struct GridOverflowHook {
+    pub registry: Arc<PeerRegistry>,
+    pub secret: String,
+}
+
+#[async_trait::async_trait]
+impl blumi_core::GridOverflow for GridOverflowHook {
+    async fn try_remote(&self, _agent_type: &str, prompt: &str) -> Option<String> {
+        // Pick the first live peer (registry.live() is sorted/stable). v1 keeps
+        // selection simple; least-busy routing is a later refinement.
+        let peer = self.registry.live().into_iter().next()?;
+        let client = client::Client::for_peer(&peer, &self.secret);
+        match client
+            .run_task(prompt.to_string(), Duration::from_secs(900))
+            .await
+        {
+            Ok(out) if !out.trim().is_empty() => Some(out),
+            _ => None,
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

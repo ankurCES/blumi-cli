@@ -20,9 +20,40 @@ use blumi_protocol::{Event, Message, Role, SessionId};
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::Arc;
-use tokio::sync::Mutex;
+use std::sync::{Arc, RwLock as StdRwLock};
+use tokio::sync::{Mutex, Semaphore};
 use tokio_util::sync::CancellationToken;
+
+/// Default cap on concurrent local sub-agents (overridable via
+/// `llm.max_local_agents`).
+pub const DEFAULT_MAX_LOCAL_AGENTS: usize = 4;
+
+/// A hook the gateway sets so that, when the local sub-agent cap is reached,
+/// excess delegations run on an available grid peer instead of waiting. The
+/// implementation lives in the binary (it owns the peer registry + grid secret);
+/// blumi-core only calls it.
+#[async_trait]
+pub trait GridOverflow: Send + Sync {
+    /// Try to run `prompt` (a delegation of `agent_type`) on a remote grid peer.
+    /// `Some(output)` if a peer accepted and produced output; `None` if no peer
+    /// is available (the caller then waits for a local slot).
+    async fn try_remote(&self, agent_type: &str, prompt: &str) -> Option<String>;
+}
+
+static GRID_OVERFLOW: StdRwLock<Option<Arc<dyn GridOverflow>>> = StdRwLock::new(None);
+
+/// Register the process-global grid-overflow hook (called by the gateway at
+/// startup when the grid is enabled). Replaces any previous hook.
+pub fn set_grid_overflow(hook: Arc<dyn GridOverflow>) {
+    if let Ok(mut g) = GRID_OVERFLOW.write() {
+        *g = Some(hook);
+    }
+}
+
+/// The current grid-overflow hook, if one is registered.
+fn grid_overflow() -> Option<Arc<dyn GridOverflow>> {
+    GRID_OVERFLOW.read().ok().and_then(|g| g.clone())
+}
 
 /// A sub-agent template.
 #[derive(Debug, Clone)]
@@ -123,6 +154,8 @@ pub struct AgentSpawner {
     agents: HashMap<String, AgentDef>,
     /// Monotonic id source for the "active agents" UI pane.
     next_agent_id: AtomicU64,
+    /// Caps concurrent local sub-agents; excess overflow to the grid or wait.
+    sem: Arc<Semaphore>,
 }
 
 impl AgentSpawner {
@@ -148,7 +181,65 @@ impl AgentSpawner {
             working_dir,
             agents,
             next_agent_id: AtomicU64::new(0),
+            sem: Arc::new(Semaphore::new(DEFAULT_MAX_LOCAL_AGENTS)),
         }
+    }
+
+    /// Set the max concurrent local sub-agents (from `llm.max_local_agents`).
+    /// Clamped to at least 1.
+    pub fn with_max_local_agents(mut self, n: u32) -> Self {
+        self.sem = Arc::new(Semaphore::new((n as usize).max(1)));
+        self
+    }
+
+    /// Build the restricted child runner + run one delegation to completion,
+    /// returning its final assistant output. Emits no lifecycle events — the
+    /// caller ([`SubAgentSpawner::spawn`]) owns AgentStart/AgentDone.
+    async fn run_local(
+        &self,
+        def: &AgentDef,
+        prompt: &str,
+        interactor: Interactor,
+        ct: CancellationToken,
+    ) -> String {
+        // Restricted toolset; never include `delegate` (no nested sub-agents).
+        let child_registry = Arc::new(self.registry.subset(&def.allowed_tools, &["delegate"]));
+        let child = AgentTurnRunner::new(
+            self.llm.clone(),
+            child_registry,
+            self.perms.clone(),
+            self.executor.clone(),
+            self.options.clone(),
+            def.max_turns,
+            self.context_size,
+            def.system_prompt.clone(),
+            self.working_dir.clone(),
+        );
+        let state = Arc::new(Mutex::new(SessionState::new(
+            SessionId::new(),
+            self.options.model.clone(),
+        )));
+        state
+            .lock()
+            .await
+            .messages
+            .push(Message::user(prompt.to_string()));
+        // The child's own events are swallowed (kept out of the parent
+        // transcript); approvals still reach the user via the parent interactor.
+        let (qtx, _qrx) = tokio::sync::mpsc::unbounded_channel();
+        let child_ctx = TurnContext {
+            session_id: state.lock().await.id.clone(),
+            events: EventEmitter::new(qtx),
+            interactor,
+        };
+        child.run_turn(state.clone(), child_ctx, ct).await;
+        let st = state.lock().await;
+        st.messages
+            .iter()
+            .rev()
+            .find(|m| m.role == Role::Assistant && !m.text().trim().is_empty())
+            .map(|m| m.text())
+            .unwrap_or_else(|| "(sub-agent produced no output)".to_string())
     }
 }
 
@@ -175,71 +266,86 @@ impl SubAgentSpawner for AgentSpawner {
             ))
         })?;
 
-        // Announce the team member to any UI (the "active agents" pane). The
-        // child's *internal* events stay swallowed; only this lifecycle surfaces.
         let agent_id = format!(
             "a{}",
             self.next_agent_id.fetch_add(1, Ordering::Relaxed) + 1
         );
-        events.emit(Event::AgentStart {
-            id: agent_id.clone(),
-            agent_type: agent_type.to_string(),
-            task: summarize_task(prompt),
-        });
 
-        // Restricted toolset; never include `delegate` (no nested sub-agents).
-        let child_registry = Arc::new(self.registry.subset(&def.allowed_tools, &["delegate"]));
-
-        // Child runner has no spawner → delegation stops at one level.
-        let child = AgentTurnRunner::new(
-            self.llm.clone(),
-            child_registry,
-            self.perms.clone(),
-            self.executor.clone(),
-            self.options.clone(),
-            def.max_turns,
-            self.context_size,
-            def.system_prompt.clone(),
-            self.working_dir.clone(),
-        );
-
-        let state = Arc::new(Mutex::new(SessionState::new(
-            SessionId::new(),
-            self.options.model.clone(),
-        )));
-        state
-            .lock()
-            .await
-            .messages
-            .push(Message::user(prompt.to_string()));
-
-        // The child's own events are swallowed (kept out of the parent
-        // transcript); approvals still reach the user via the parent interactor.
-        let (qtx, _qrx) = tokio::sync::mpsc::unbounded_channel();
-        let child_ctx = TurnContext {
-            session_id: state.lock().await.id.clone(),
-            events: EventEmitter::new(qtx),
-            interactor,
-        };
-
-        child.run_turn(state.clone(), child_ctx, ct).await;
-
-        let output = {
-            let st = state.lock().await;
-            st.messages
-                .iter()
-                .rev()
-                .find(|m| m.role == Role::Assistant && !m.text().trim().is_empty())
-                .map(|m| m.text())
-                .unwrap_or_else(|| "(sub-agent produced no output)".to_string())
-        };
-        events.emit(Event::AgentDone {
-            id: agent_id,
-            agent_type: agent_type.to_string(),
-            ok: true,
-            summary: summarize_task(&output),
-        });
-        Ok(output)
+        // Take a local slot without blocking. If the cap is reached, prefer
+        // running on a grid peer (when an overflow hook is set + a peer is free);
+        // otherwise wait for a local slot (backpressure). One instance therefore
+        // never runs more than `max_local_agents` sub-agents at once.
+        match self.sem.clone().try_acquire_owned() {
+            Ok(_permit) => {
+                events.emit(Event::AgentStart {
+                    id: agent_id.clone(),
+                    agent_type: agent_type.to_string(),
+                    task: summarize_task(prompt),
+                });
+                let output = self.run_local(def, prompt, interactor, ct).await;
+                events.emit(Event::AgentDone {
+                    id: agent_id,
+                    agent_type: agent_type.to_string(),
+                    ok: true,
+                    summary: summarize_task(&output),
+                });
+                Ok(output)
+            }
+            Err(_) => {
+                if let Some(hook) = grid_overflow() {
+                    events.emit(Event::AgentStart {
+                        id: agent_id.clone(),
+                        agent_type: agent_type.to_string(),
+                        task: summarize_task(prompt),
+                    });
+                    if let Some(output) = hook.try_remote(agent_type, prompt).await {
+                        events.emit(Event::AgentDone {
+                            id: agent_id,
+                            agent_type: agent_type.to_string(),
+                            ok: true,
+                            summary: format!("⟶ remote · {}", summarize_task(&output)),
+                        });
+                        return Ok(output);
+                    }
+                    // No peer took it — fall back to a local slot (may block).
+                    let _permit = self
+                        .sem
+                        .clone()
+                        .acquire_owned()
+                        .await
+                        .expect("spawner semaphore is never closed");
+                    let output = self.run_local(def, prompt, interactor, ct).await;
+                    events.emit(Event::AgentDone {
+                        id: agent_id,
+                        agent_type: agent_type.to_string(),
+                        ok: true,
+                        summary: summarize_task(&output),
+                    });
+                    Ok(output)
+                } else {
+                    // No overflow hook: wait for a local slot, then run.
+                    let _permit = self
+                        .sem
+                        .clone()
+                        .acquire_owned()
+                        .await
+                        .expect("spawner semaphore is never closed");
+                    events.emit(Event::AgentStart {
+                        id: agent_id.clone(),
+                        agent_type: agent_type.to_string(),
+                        task: summarize_task(prompt),
+                    });
+                    let output = self.run_local(def, prompt, interactor, ct).await;
+                    events.emit(Event::AgentDone {
+                        id: agent_id,
+                        agent_type: agent_type.to_string(),
+                        ok: true,
+                        summary: summarize_task(&output),
+                    });
+                    Ok(output)
+                }
+            }
+        }
     }
 }
 
@@ -288,6 +394,31 @@ mod tests {
             .allowed_tools
             .iter()
             .any(|t| t == "FileWrite" || t == "Bash"));
+    }
+
+    #[test]
+    fn local_agent_cap_sets_semaphore_capacity() {
+        // Default cap.
+        assert_eq!(
+            test_spawner().sem.available_permits(),
+            DEFAULT_MAX_LOCAL_AGENTS
+        );
+        // Configured cap.
+        assert_eq!(
+            test_spawner()
+                .with_max_local_agents(2)
+                .sem
+                .available_permits(),
+            2
+        );
+        // Zero is clamped to at least 1 so delegations can still run.
+        assert_eq!(
+            test_spawner()
+                .with_max_local_agents(0)
+                .sem
+                .available_permits(),
+            1
+        );
     }
 
     /// A provider that returns one assistant line and stops (no tool calls).

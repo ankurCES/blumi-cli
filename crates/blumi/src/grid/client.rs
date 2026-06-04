@@ -52,10 +52,15 @@ impl Client {
                 .unwrap_or("peer reported failure");
             anyhow::bail!("{err}");
         }
-        Ok(body
-            .get("summary")
+        // Prefer the peer's full assistant output (used by grid overflow);
+        // fall back to the short summary.
+        let out = body
+            .get("output")
             .and_then(|v| v.as_str())
+            .filter(|s| !s.trim().is_empty())
+            .or_else(|| body.get("summary").and_then(|v| v.as_str()))
             .unwrap_or("")
-            .to_string())
+            .to_string();
+        Ok(out)
     }
 }

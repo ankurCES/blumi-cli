@@ -48,6 +48,10 @@ pub struct LlmConfig {
     /// of this or `max_auto_continue` is hit first stops the auto-continue — so
     /// runaway *spend* is bounded, not just the step count. 0 = no token cap.
     pub max_auto_continue_tokens: u32,
+    /// Max concurrent **local** sub-agents (delegations) this instance runs at
+    /// once. Excess delegations either run on an available grid peer (when the
+    /// grid is enabled) or wait for a local slot. Bounds local resource use.
+    pub max_local_agents: u32,
 }
 
 impl Default for LlmConfig {
@@ -63,6 +67,7 @@ impl Default for LlmConfig {
             max_iterations: 25,
             max_auto_continue: 12,
             max_auto_continue_tokens: 400_000,
+            max_local_agents: 4,
         }
     }
 }

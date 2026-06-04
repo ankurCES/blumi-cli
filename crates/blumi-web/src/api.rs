@@ -605,7 +605,21 @@ pub async fn grid_run(
             r = events.recv() => match r {
                 Ok(env) => {
                     if matches!(env.event, Event::TurnDone { .. }) {
-                        return Json(json!({ "ok": true, "summary": "completed" })).into_response();
+                        // Return the peer's final assistant output so the caller
+                        // (e.g. grid overflow of a sub-agent) gets the result.
+                        let snap = state.current().await.snapshot().await;
+                        let output = snap
+                            .messages
+                            .iter()
+                            .rev()
+                            .find(|m| {
+                                matches!(m.role, blumi_protocol::Role::Assistant)
+                                    && !m.text().trim().is_empty()
+                            })
+                            .map(|m| m.text())
+                            .unwrap_or_default();
+                        return Json(json!({ "ok": true, "summary": "completed", "output": output }))
+                            .into_response();
                     }
                 }
                 Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => continue,
