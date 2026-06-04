@@ -6,6 +6,7 @@ import '../state/app.dart';
 import '../state/session.dart';
 import 'control.dart';
 import 'palette.dart';
+import 'thinking.dart';
 
 /// Fold-responsive shell. Wide (fold-open) shows explorer | chat | agent rail;
 /// narrow (portrait) shows chat with the explorer + agent rail as drawers —
@@ -194,8 +195,9 @@ class _ChatPaneState extends State<ChatPane> {
       builder: (context, _) {
         final items = <Widget>[
           for (final e in s.entries) EntryView(e),
-          if (s.thinking != null && s.thinking!.trim().isNotEmpty)
-            _ThinkingView(s.thinking!),
+          // Animated flower mascot while the agent is working but hasn't begun
+          // streaming the answer (shows reasoning text if any).
+          if (s.busy && s.streaming == null) ThinkingMascot(detail: s.thinking),
           if (s.streaming != null) EntryView(AssistantEntry(s.streaming!), streaming: true),
         ];
         return Column(
@@ -383,22 +385,6 @@ class _DiffView extends StatelessWidget {
                 )),
         ],
       ),
-    );
-  }
-}
-
-class _ThinkingView extends StatelessWidget {
-  final String text;
-  const _ThinkingView(this.text);
-  @override
-  Widget build(BuildContext context) {
-    final cs = Theme.of(context).colorScheme;
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 6),
-      child: Text('✿ thinking… $text',
-          style: TextStyle(
-              fontStyle: FontStyle.italic,
-              color: cs.onSurface.withValues(alpha: 0.5))),
     );
   }
 }
