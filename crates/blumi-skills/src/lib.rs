@@ -7,8 +7,8 @@ mod memory;
 mod memory_tool;
 mod reload;
 mod restart_gateway;
-mod self_config;
-mod skill_manager;
+pub mod self_config;
+pub mod skill_manager;
 mod skill_tool;
 
 #[cfg(test)]

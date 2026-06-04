@@ -20,8 +20,13 @@ use serde_json::{json, Value};
 use std::convert::Infallible;
 use tokio::sync::broadcast::error::RecvError;
 
-pub async fn health() -> Json<Value> {
-    Json(json!({ "status": "ok" }))
+pub async fn health(State(state): State<AppState>) -> Json<Value> {
+    Json(json!({
+        "status": "ok",
+        "uptime_secs": state.uptime_secs(),
+        // Whether a service manager will auto-restart us on crash (self-recovery).
+        "service_managed": state.mgmt().restart_capability() == "service",
+    }))
 }
 
 pub async fn config(State(state): State<AppState>) -> Json<Value> {
@@ -626,6 +631,135 @@ fn constant_eq(a: &[u8], b: &[u8]) -> bool {
         diff |= x ^ y;
     }
     diff == 0
+}
+
+// --- Self-management endpoints ----------------------------------------------
+
+/// GET /api/self/config → `{ settings: { …secrets redacted… } }`.
+pub async fn self_config_get(State(state): State<AppState>) -> Json<Value> {
+    Json(json!({ "settings": state.mgmt().self_config_get() }))
+}
+
+#[derive(Deserialize)]
+pub struct SelfConfigSetBody {
+    pub key: String,
+    pub value: String,
+    #[serde(default)]
+    pub reload: bool,
+}
+
+/// POST /api/self/config `{ key, value, reload? }`.
+pub async fn self_config_set(
+    State(state): State<AppState>,
+    Json(body): Json<SelfConfigSetBody>,
+) -> Json<Value> {
+    match state.mgmt().self_config_set(&body.key, &body.value) {
+        Ok(msg) => {
+            let reloaded = body.reload && state.reload_current().await.is_ok();
+            Json(json!({ "ok": true, "message": msg, "reloaded": reloaded }))
+        }
+        Err(e) => Json(json!({ "ok": false, "error": e.to_string() })),
+    }
+}
+
+#[derive(Deserialize)]
+pub struct SkillWriteBody {
+    pub name: String,
+    #[serde(default)]
+    pub description: String,
+    #[serde(default)]
+    pub instructions: String,
+    #[serde(default)]
+    pub reload: bool,
+}
+
+/// POST /api/skills `{ name, description, instructions, reload? }` (create/update).
+pub async fn skills_write(
+    State(state): State<AppState>,
+    Json(body): Json<SkillWriteBody>,
+) -> Json<Value> {
+    match state
+        .mgmt()
+        .skill_write(&body.name, &body.description, &body.instructions)
+    {
+        Ok(()) => {
+            let reloaded = body.reload && state.reload_current().await.is_ok();
+            Json(json!({ "ok": true, "reloaded": reloaded }))
+        }
+        Err(e) => Json(json!({ "ok": false, "error": e.to_string() })),
+    }
+}
+
+#[derive(Deserialize)]
+pub struct SkillDeleteBody {
+    pub name: String,
+    #[serde(default)]
+    pub reload: bool,
+}
+
+/// POST /api/skills/delete `{ name, reload? }`.
+pub async fn skills_delete(
+    State(state): State<AppState>,
+    Json(body): Json<SkillDeleteBody>,
+) -> Json<Value> {
+    match state.mgmt().skill_delete(&body.name) {
+        Ok(()) => {
+            let reloaded = body.reload && state.reload_current().await.is_ok();
+            Json(json!({ "ok": true, "reloaded": reloaded }))
+        }
+        Err(e) => Json(json!({ "ok": false, "error": e.to_string() })),
+    }
+}
+
+#[derive(Deserialize, Default)]
+pub struct RestartBody {
+    #[serde(default)]
+    pub confirm: bool,
+}
+
+/// POST /api/self/restart `{ confirm }` — restart the gateway service (requires
+/// `confirm:true`). Degrades to an in-place reload when not service-managed.
+pub async fn self_restart(
+    State(state): State<AppState>,
+    Json(body): Json<RestartBody>,
+) -> Json<Value> {
+    if !body.confirm {
+        return Json(json!({ "ok": false, "error": "restart requires confirm:true" }));
+    }
+    match state.mgmt().restart_capability() {
+        "service" => Json(state.mgmt().restart()),
+        "foreground" => {
+            let _ = state.reload_current().await;
+            Json(json!({
+                "ok": true, "mode": "reload",
+                "detail": "not under a service manager — reloaded in place instead of restarting"
+            }))
+        }
+        _ => Json(json!({
+            "ok": false, "mode": "unsupported", "error": "restart not supported on this host"
+        })),
+    }
+}
+
+/// POST /api/self/recover — try a reload; escalate to a restart if it fails or
+/// hangs (a wedged session).
+pub async fn self_recover(State(state): State<AppState>) -> Json<Value> {
+    let reload =
+        tokio::time::timeout(std::time::Duration::from_secs(10), state.reload_current()).await;
+    match reload {
+        Ok(Ok(())) => Json(json!({ "ok": true, "action": "reload" })),
+        _ => {
+            if state.mgmt().restart_capability() == "service" {
+                let out = state.mgmt().restart();
+                Json(json!({ "ok": true, "action": "restart", "detail": out }))
+            } else {
+                Json(json!({
+                    "ok": false, "action": "reload_failed",
+                    "error": "reload failed and no service manager to restart"
+                }))
+            }
+        }
+    }
 }
 
 /// Aggregate runtime status for the dashboard: uptime + the active config +

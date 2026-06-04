@@ -310,8 +310,6 @@ pub enum ServiceManager {
 /// Detect whether blumi is installed as a background service on this OS. Returns
 /// `None` when no service is installed (e.g. a foreground `serve run`), in which
 /// case a restart should degrade to an in-place reload.
-// Wired into the gateway's restart endpoint + listener in the next phase.
-#[allow(dead_code)]
 pub fn detect_manager() -> ServiceManager {
     #[cfg(target_os = "macos")]
     {
@@ -332,7 +330,6 @@ pub fn detect_manager() -> ServiceManager {
 /// helper that waits briefly (so an in-flight HTTP response can flush) then kicks
 /// the service — the manager kills this instance and starts a fresh one. Returns
 /// immediately; the helper outlives this process. Errors when not service-managed.
-#[allow(dead_code)]
 pub fn restart_self(mgr: ServiceManager) -> anyhow::Result<()> {
     let inner = match mgr {
         ServiceManager::Launchd => {
