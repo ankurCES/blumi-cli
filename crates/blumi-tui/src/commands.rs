@@ -640,7 +640,11 @@ fn help_text() -> String {
     for c in COMMANDS {
         s.push_str(&format!("\n  {} — {}", c.name, c.desc));
     }
-    s.push_str("\n(ctrl+p palette · tab focus · esc cancel/close · pgup/pgdn scroll)");
+    s.push_str(
+        "\nkeys: ctrl+p palette · tab focus · ctrl+b explorer · ctrl+j agent rail · \
+         esc → nav mode (j/k scroll · gg/G top/bottom · i back to insert) · \
+         shift/alt+enter newline · pgup/pgdn scroll",
+    );
     s
 }
 
