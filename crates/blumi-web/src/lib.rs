@@ -223,6 +223,11 @@ pub trait Management: Send + Sync {
     fn grid_peer_ids(&self) -> Vec<String> {
         Vec::new()
     }
+    /// Per-peer metrics: query each live peer's `/api/grid/node` and return a
+    /// JSON array of `{ id, name, host, port, online, metrics }`. Default: empty.
+    async fn grid_peer_metrics(&self) -> serde_json::Value {
+        serde_json::json!([])
+    }
     /// The next todo as `{ id, prompt, title }` WITHOUT marking it doing
     /// (read-only peek), or `None`. Used by grid dispatch to claim with an owner.
     fn task_peek_next(&self) -> Option<serde_json::Value> {
@@ -386,6 +391,8 @@ pub fn router(state: AppState) -> Router {
         .route("/api/grid/peers", get(api::grid_peers))
         .route("/api/grid/dispatch", post(api::grid_dispatch))
         .route("/api/grid/run", post(api::grid_run))
+        .route("/api/grid/node", get(api::grid_node))
+        .route("/api/grid/metrics", get(api::grid_metrics))
         .route(
             "/api/self/config",
             get(api::self_config_get).post(api::self_config_set),
@@ -415,6 +422,20 @@ pub fn router(state: AppState) -> Router {
 
 /// Serve the web UI + API on `addr`, sourcing sessions from `provider`. When
 /// `auth` is `Some`, every data route requires a session cookie.
+/// Grid-info provider for the agent's `grid_status` tool: serializes the live
+/// grid metrics ({ self, peers, totals }) from `AppState`.
+struct GridInfoState {
+    state: AppState,
+}
+
+#[async_trait::async_trait]
+impl blumi_core::GridInfo for GridInfoState {
+    async fn snapshot(&self) -> String {
+        let v = api::grid_metrics_value(&self.state).await;
+        serde_json::to_string_pretty(&v).unwrap_or_else(|_| "{}".to_string())
+    }
+}
+
 pub async fn serve(
     provider: Arc<dyn SessionProvider>,
     mgmt: Arc<dyn Management>,
@@ -467,6 +488,11 @@ pub async fn serve(
             }
         });
     }
+
+    // Expose live grid metrics to the agent's `grid_status` tool (chat answers).
+    blumi_core::set_grid_info(Arc::new(GridInfoState {
+        state: state.clone(),
+    }));
 
     let app = router(state.clone());
     let listener = tokio::net::TcpListener::bind(addr).await?;
