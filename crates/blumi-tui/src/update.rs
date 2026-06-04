@@ -117,6 +117,11 @@ async fn handle_term(model: &mut Model, ev: TermEvent, session: &SessionHandle) 
                 model.mark_dirty();
                 return;
             }
+            if model.grid_view.is_some() {
+                model.grid_view = None;
+                model.mark_dirty();
+                return;
+            }
 
             // The /dashboard modal: a scrollable overlay; esc/q closes.
             if model.dash_modal {
