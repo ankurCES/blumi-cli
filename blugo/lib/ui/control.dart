@@ -87,6 +87,14 @@ class _SettingsTabState extends State<_SettingsTab> {
   late Future<List<String>> _models;
   late Future<(List<PersonaInfo>, String)> _personas;
 
+  // Voice config (loaded from /api/settings; key fields are write-only).
+  final _ttsKey = TextEditingController();
+  final _ttsVoice = TextEditingController();
+  final _sttKey = TextEditingController();
+  String _ttsProvider = 'elevenlabs';
+  bool _voiceEnabled = false;
+  bool _ttsKeySet = false;
+
   ApiClient get _api => widget.app.session!.api;
 
   @override
@@ -94,6 +102,55 @@ class _SettingsTabState extends State<_SettingsTab> {
     super.initState();
     _models = _api.models();
     _personas = _api.personas();
+    _loadVoice();
+  }
+
+  @override
+  void dispose() {
+    _ttsKey.dispose();
+    _ttsVoice.dispose();
+    _sttKey.dispose();
+    super.dispose();
+  }
+
+  Future<void> _loadVoice() async {
+    try {
+      final v = (await _api.settings())['voice'] as Map? ?? {};
+      if (!mounted) return;
+      setState(() {
+        _voiceEnabled = v['enabled'] as bool? ?? false;
+        final p = v['tts_provider']?.toString() ?? '';
+        if (p.isNotEmpty) _ttsProvider = p;
+        _ttsVoice.text = v['tts_voice']?.toString() ?? '';
+        _ttsKeySet = v['tts_api_key_set'] as bool? ?? false;
+      });
+    } catch (_) {}
+  }
+
+  Future<void> _saveVoice() async {
+    final messenger = ScaffoldMessenger.of(context);
+    final patch = <String, dynamic>{
+      'voice_enabled': _voiceEnabled,
+      'tts_provider': _ttsProvider,
+      if (_ttsVoice.text.trim().isNotEmpty) 'tts_voice': _ttsVoice.text.trim(),
+      if (_ttsKey.text.isNotEmpty) 'tts_api_key': _ttsKey.text,
+      if (_ttsProvider == 'elevenlabs') 'tts_model': 'eleven_multilingual_v2',
+    };
+    // A mic-STT key also needs an OpenAI-compatible Whisper endpoint.
+    if (_sttKey.text.isNotEmpty) {
+      patch['voice_api_key'] = _sttKey.text;
+      patch['stt_base_url'] = 'https://api.openai.com/v1';
+      patch['stt_model'] = 'whisper-1';
+    }
+    try {
+      await _api.setSettings(patch);
+      _ttsKey.clear();
+      _sttKey.clear();
+      await _loadVoice();
+      messenger.showSnackBar(const SnackBar(content: Text('voice settings saved')));
+    } catch (e) {
+      messenger.showSnackBar(SnackBar(content: Text('save failed: $e')));
+    }
   }
 
   @override
@@ -192,6 +249,62 @@ class _SettingsTabState extends State<_SettingsTab> {
             value: app.yolo,
             onChanged: app.setYolo,
           ),
+          const Divider(height: 28),
+          _label('Voice', cs),
+          SwitchListTile(
+            contentPadding: EdgeInsets.zero,
+            title: const Text('Enable voice'),
+            value: _voiceEnabled,
+            onChanged: (v) => setState(() => _voiceEnabled = v),
+          ),
+          Wrap(spacing: 8, children: [
+            for (final p in const ['elevenlabs', 'openai'])
+              ChoiceChip(
+                label: Text(p),
+                selected: _ttsProvider == p,
+                onSelected: (_) => setState(() => _ttsProvider = p),
+              ),
+          ]),
+          const SizedBox(height: 12),
+          TextField(
+            controller: _ttsKey,
+            obscureText: true,
+            decoration: InputDecoration(
+              labelText: _ttsProvider == 'elevenlabs'
+                  ? 'ElevenLabs API key'
+                  : 'TTS API key',
+              hintText: _ttsKeySet ? 'saved ✓ — blank keeps current' : null,
+              border: const OutlineInputBorder(),
+            ),
+          ),
+          const SizedBox(height: 12),
+          TextField(
+            controller: _ttsVoice,
+            decoration: InputDecoration(
+              labelText:
+                  _ttsProvider == 'elevenlabs' ? 'Voice ID' : 'Voice (e.g. alloy)',
+              border: const OutlineInputBorder(),
+            ),
+          ),
+          const SizedBox(height: 12),
+          TextField(
+            controller: _sttKey,
+            obscureText: true,
+            decoration: const InputDecoration(
+              labelText: 'Mic key (OpenAI Whisper, optional)',
+              hintText: 'for speech-to-text input',
+              border: OutlineInputBorder(),
+            ),
+          ),
+          const SizedBox(height: 14),
+          FilledButton(
+            onPressed: _saveVoice,
+            child: const Padding(
+              padding: EdgeInsets.symmetric(vertical: 6),
+              child: Text('Save voice settings'),
+            ),
+          ),
+          const SizedBox(height: 8),
         ],
       ),
     );

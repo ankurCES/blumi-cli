@@ -179,6 +179,10 @@ class ApiClient {
 
   Future<Map<String, dynamic>> status() => _getJson('/api/status');
 
+  Future<Map<String, dynamic>> settings() => _getJson('/api/settings');
+  Future<void> setSettings(Map<String, dynamic> patch) =>
+      _post('/api/settings', patch);
+
   /// (projectMemory, userMemory).
   Future<(String, String)> memory() async {
     final j = await _getJson('/api/memory');
