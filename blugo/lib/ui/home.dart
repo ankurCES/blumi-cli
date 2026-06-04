@@ -4,6 +4,7 @@ import '../data/models.dart';
 import '../state/app.dart';
 import '../state/session.dart';
 import 'control.dart';
+import 'palette.dart';
 
 /// Fold-responsive shell. Wide (fold-open) shows explorer | chat | agent rail;
 /// narrow (portrait) shows chat with the explorer + agent rail as drawers —
@@ -14,6 +15,9 @@ class HomeShell extends StatelessWidget {
   const HomeShell(this.app, {super.key});
 
   static const double _wide = 840;
+
+  VoidCallback _cmd(BuildContext context) =>
+      () => showCommandPalette(context, app);
 
   @override
   Widget build(BuildContext context) {
@@ -32,12 +36,12 @@ class HomeShell extends StatelessWidget {
                     children: [
                       SizedBox(width: 260, child: SessionsPane(app)),
                       const VerticalDivider(width: 1),
-                      Expanded(child: ChatPane(session)),
+                      Expanded(child: ChatPane(session, onCommand: _cmd(context))),
                       const VerticalDivider(width: 1),
                       SizedBox(width: 320, child: AgentRail(session)),
                     ],
                   )
-                : ChatPane(session),
+                : ChatPane(session, onCommand: _cmd(context)),
           ),
         );
       },
@@ -113,7 +117,8 @@ class _Header extends StatelessWidget implements PreferredSizeWidget {
 /// The chat column: transcript + thinking/streaming + approval + composer.
 class ChatPane extends StatefulWidget {
   final BlumiSession session;
-  const ChatPane(this.session, {super.key});
+  final VoidCallback? onCommand;
+  const ChatPane(this.session, {this.onCommand, super.key});
   @override
   State<ChatPane> createState() => _ChatPaneState();
 }
@@ -177,7 +182,12 @@ class _ChatPaneState extends State<ChatPane> {
             ),
             if (s.pendingApproval != null) ApprovalCard(s, s.pendingApproval!),
             if (s.pendingClarify != null) ClarifyCard(s, s.pendingClarify!),
-            _Composer(input: _input, busy: s.busy, onSend: _send, onStop: s.cancel),
+            _Composer(
+                input: _input,
+                busy: s.busy,
+                onSend: _send,
+                onStop: s.cancel,
+                onCommand: widget.onCommand),
           ],
         );
       },
@@ -450,11 +460,13 @@ class _Composer extends StatelessWidget {
   final bool busy;
   final VoidCallback onSend;
   final VoidCallback onStop;
+  final VoidCallback? onCommand;
   const _Composer(
       {required this.input,
       required this.busy,
       required this.onSend,
-      required this.onStop});
+      required this.onStop,
+      this.onCommand});
 
   @override
   Widget build(BuildContext context) {
@@ -470,6 +482,13 @@ class _Composer extends StatelessWidget {
               maxLines: 6,
               textInputAction: TextInputAction.send,
               onSubmitted: (_) => onSend(),
+              onChanged: (v) {
+                // Typing `/` on an empty composer opens the command palette.
+                if (v == '/' && onCommand != null) {
+                  input.clear();
+                  onCommand!();
+                }
+              },
               decoration: const InputDecoration(
                 hintText: 'Ask blumi…  (/ for commands)',
                 border: OutlineInputBorder(),
