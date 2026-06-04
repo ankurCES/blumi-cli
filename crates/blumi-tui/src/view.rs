@@ -10,6 +10,7 @@ use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, BorderType, Borders, Clear, Paragraph};
 use ratatui::Frame;
+use unicode_width::UnicodeWidthStr;
 
 /// Min terminal width to show the run dashboard sidebar.
 const DASHBOARD_MIN_WIDTH: u16 = 92;
@@ -1004,7 +1005,7 @@ fn render_dialog(model: &mut Model, f: &mut Frame, area: Rect, theme: &Theme) {
     f.render_widget(Paragraph::new(rows), list_area);
 }
 
-fn render_header(model: &Model, f: &mut Frame, area: Rect, theme: &Theme) {
+fn render_header(model: &mut Model, f: &mut Frame, area: Rect, theme: &Theme) {
     let [left_area, right_area] =
         Layout::horizontal([Constraint::Min(0), Constraint::Length(40)]).areas(area);
 
@@ -1071,25 +1072,45 @@ fn render_header(model: &Model, f: &mut Frame, area: Rect, theme: &Theme) {
         ));
     }
 
-    // When more than the local tab is open, the header shows a tab strip
-    // (ralph-style) in place of the working-dir crumb.
+    // When more than the local tab is open, the header shows a tab strip in
+    // place of the working-dir crumb. The strip gets its OWN layout rect (the
+    // prefix width is measured with unicode-width, matching ratatui's own cell
+    // accounting), so each chip has an exact, clickable rect.
     if model.tabs.len() > 1 {
-        spans.push(Span::styled("   ", theme.dim()));
+        let prefix_w: u16 = spans
+            .iter()
+            .map(|s| UnicodeWidthStr::width(s.content.as_ref()) as u16)
+            .sum::<u16>()
+            .min(left_area.width);
+        let [prefix_area, tabs_area] =
+            Layout::horizontal([Constraint::Length(prefix_w), Constraint::Min(0)]).areas(left_area);
+        f.render_widget(Paragraph::new(Line::from(spans)), prefix_area);
+
+        let mut chip_spans: Vec<Span> = Vec::new();
+        let mut areas: Vec<(u16, u16, u16, usize)> = Vec::new();
+        let mut cum: u16 = 0;
         for (i, (name, remote)) in model.tabs.iter().enumerate() {
-            let active = i == model.active_tab;
             let glyph = if *remote {
                 icons::remote()
             } else {
                 icons::local()
             };
             let chip = format!(" {glyph} {name} ");
-            let style = if active {
-                theme.bold_primary()
+            let w = UnicodeWidthStr::width(chip.as_str()) as u16;
+            if cum + w > tabs_area.width {
+                break; // shed tabs that don't fit
+            }
+            let style = if i == model.active_tab {
+                theme.bold_primary().add_modifier(Modifier::REVERSED)
             } else {
                 theme.subtle()
             };
-            spans.push(Span::styled(chip, style));
+            areas.push((tabs_area.x + cum, tabs_area.y, w, i));
+            chip_spans.push(Span::styled(chip, style));
+            cum += w;
         }
+        f.render_widget(Paragraph::new(Line::from(chip_spans)), tabs_area);
+        model.header_tab_areas = areas;
     } else {
         spans.push(div());
         spans.push(Span::styled(
@@ -1100,8 +1121,9 @@ fn render_header(model: &Model, f: &mut Frame, area: Rect, theme: &Theme) {
             spans.push(div());
             spans.push(Span::styled(model.persona.clone(), theme.subtle()));
         }
+        f.render_widget(Paragraph::new(Line::from(spans)), left_area);
+        model.header_tab_areas.clear();
     }
-    f.render_widget(Paragraph::new(Line::from(spans)), left_area);
 
     // Right: context %, uptime, token meter.
     let frac = model.context_frac();
@@ -1802,6 +1824,12 @@ mod tests {
         assert!(out.contains("local"), "local tab shown");
         assert!(out.contains("prod-box"), "remote tab shown");
         assert!(out.contains('☁'), "remote glyph shown");
+        // Each tab got its own clickable rect (for header-tab click-to-switch).
+        assert_eq!(model.header_tab_areas.len(), 2, "per-chip rects recorded");
+        let (x0, _, w0, i0) = model.header_tab_areas[0];
+        let (x1, _, _, i1) = model.header_tab_areas[1];
+        assert_eq!((i0, i1), (0, 1), "rects map to tab indices in order");
+        assert!(x1 >= x0 + w0, "second chip starts after the first");
     }
 
     #[test]

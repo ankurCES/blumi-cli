@@ -358,6 +358,17 @@ async fn handle_term(model: &mut Model, ev: TermEvent, session: &SessionHandle) 
                 }
                 // Click a picker row to select + activate it (menu-style).
                 MouseEventKind::Down(crossterm::event::MouseButton::Left) => {
+                    // Header tab strip: click a chip to switch to that tab.
+                    let tab_hit = model
+                        .header_tab_areas
+                        .iter()
+                        .find(|&&(x, y, w, _)| me.column >= x && me.column < x + w && me.row == y)
+                        .map(|&(_, _, _, idx)| idx);
+                    if let Some(idx) = tab_hit {
+                        model.request_tab(idx);
+                        model.mark_dirty();
+                        return;
+                    }
                     let row = model.dialog_list_area.and_then(|(x, y, w, h)| {
                         let hit = model.dialog.is_some()
                             && me.column >= x
