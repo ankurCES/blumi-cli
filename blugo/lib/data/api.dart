@@ -192,6 +192,9 @@ class ApiClient {
   Future<void> setMemory(String which, String content) =>
       _post('/api/memory', {'which': which, 'content': content});
 
+  /// Raw GET of a JSON endpoint (used by the cache layer).
+  Future<Map<String, dynamic>> getJson(String path) => _getJson(path);
+
   Future<Map<String, dynamic>> _getJson(String path) async {
     final r = await _http.get(_u(path), headers: _headers(json: false));
     if (r.statusCode != 200) throw ApiException('GET $path → ${r.statusCode}');
