@@ -17,6 +17,12 @@ class ApiException implements Exception {
   String toString() => message;
 }
 
+/// A selectable agent persona (architect, pair, reviewer, …).
+class PersonaInfo {
+  final String name, description;
+  const PersonaInfo(this.name, this.description);
+}
+
 /// REST client for the blumi gateway. Mirrors the endpoints the web UI uses.
 class ApiClient {
   final ServerConn conn;
@@ -75,6 +81,53 @@ class ApiClient {
 
   Future<void> clarify(String requestId, String value) =>
       _post('/api/clarify/respond', {'request_id': requestId, 'value': value});
+
+  // --- control center --------------------------------------------------------
+
+  Future<List<String>> models() async {
+    final j = await _getJson('/api/models');
+    return ((j['options'] as List?) ?? [])
+        .map((o) => o is Map ? (o['id'] ?? o['name'] ?? '$o').toString() : '$o')
+        .where((s) => s.isNotEmpty)
+        .toList();
+  }
+
+  Future<void> setModel(String model) => _post('/api/model/set', {'model': model});
+
+  /// (personas, activeName).
+  Future<(List<PersonaInfo>, String)> personas() async {
+    final j = await _getJson('/api/personas');
+    final list = ((j['personas'] as List?) ?? [])
+        .map((p) => PersonaInfo(
+              (p as Map)['name']?.toString() ?? '',
+              p['description']?.toString() ?? '',
+            ))
+        .toList();
+    return (list, j['active']?.toString() ?? '');
+  }
+
+  Future<void> setPersona(String name) => _post('/api/persona/set', {'name': name});
+
+  Future<List<String>> skills() async {
+    final j = await _getJson('/api/skills');
+    return ((j['skills'] as List?) ?? [])
+        .map((s) => s is Map ? (s['name'] ?? '$s').toString() : '$s')
+        .toList();
+  }
+
+  Future<Map<String, dynamic>> usage() async {
+    final j = await _getJson('/api/usage');
+    return (j['usage'] as Map?)?.cast<String, dynamic>() ?? {};
+  }
+
+  /// (projectMemory, userMemory).
+  Future<(String, String)> memory() async {
+    final j = await _getJson('/api/memory');
+    return (j['memory']?.toString() ?? '', j['user']?.toString() ?? '');
+  }
+
+  Future<void> setMemory(String which, String content) =>
+      _post('/api/memory', {'which': which, 'content': content});
 
   Future<Map<String, dynamic>> _getJson(String path) async {
     final r = await _http.get(_u(path), headers: _headers(json: false));

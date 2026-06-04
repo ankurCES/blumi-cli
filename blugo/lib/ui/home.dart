@@ -3,6 +3,7 @@ import '../data/events.dart';
 import '../data/models.dart';
 import '../state/app.dart';
 import '../state/session.dart';
+import 'control.dart';
 
 /// Fold-responsive shell. Wide (fold-open) shows explorer | chat | agent rail;
 /// narrow (portrait) shows chat with the explorer + agent rail as drawers —
@@ -65,6 +66,19 @@ class _Header extends StatelessWidget implements PreferredSizeWidget {
                 overflow: TextOverflow.ellipsis,
                 style: TextStyle(fontSize: 13, color: cs.secondary)),
           ),
+        if (app.yolo) ...[
+          const SizedBox(width: 8),
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+            decoration: BoxDecoration(
+              color: cs.error.withValues(alpha: 0.2),
+              borderRadius: BorderRadius.circular(6),
+            ),
+            child: Text('⚡ YOLO',
+                style: TextStyle(
+                    fontSize: 10, color: cs.error, fontWeight: FontWeight.bold)),
+          ),
+        ],
         if (s.busy) ...[
           const SizedBox(width: 10),
           const SizedBox(
@@ -72,6 +86,10 @@ class _Header extends StatelessWidget implements PreferredSizeWidget {
         ],
       ]),
       actions: [
+        IconButton(
+            tooltip: 'Control center',
+            onPressed: () => showControlCenter(context, app),
+            icon: const Icon(Icons.tune)),
         IconButton(
             tooltip: 'New session',
             onPressed: app.newSession,
