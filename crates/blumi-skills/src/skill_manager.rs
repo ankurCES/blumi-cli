@@ -11,7 +11,7 @@ use blumi_core::{ToolContext, ToolError, TypedTool};
 use blumi_protocol::ToolResult;
 use schemars::JsonSchema;
 use serde::Deserialize;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use tokio_util::sync::CancellationToken;
 
 #[derive(Debug, Deserialize, JsonSchema)]
@@ -61,6 +61,49 @@ fn render_skill_md(name: &str, description: &str, instructions: &str) -> String 
     )
 }
 
+// --- Shared cores (used by the `manage_skill` tool AND the gateway's skills
+// endpoints) ----------------------------------------------------------------
+
+/// Create/update a skill: validate the slug, render `SKILL.md`, atomic write.
+/// Returns the written path, or an error string. `dir` is the user skills dir.
+pub fn write_skill(
+    dir: &Path,
+    name: &str,
+    description: &str,
+    instructions: &str,
+) -> Result<PathBuf, String> {
+    if !valid_slug(name) {
+        return Err(format!(
+            "invalid skill name '{name}' — use a slug of letters, digits, '-' or '_' (max 64)"
+        ));
+    }
+    if description.trim().is_empty() {
+        return Err("a one-line `description` is required".into());
+    }
+    if instructions.trim().is_empty() {
+        return Err("the skill `instructions` (markdown body) are required".into());
+    }
+    let skill_dir = dir.join(name);
+    let skill_md = skill_dir.join("SKILL.md");
+    std::fs::create_dir_all(&skill_dir).map_err(|e| format!("could not create skill dir: {e}"))?;
+    let body = render_skill_md(name, description.trim(), instructions);
+    atomic_write(&skill_md, &body).map_err(|e| format!("could not write skill: {e}"))?;
+    Ok(skill_md)
+}
+
+/// Delete a skill directory (`SKILL.md` + any linked files). Returns Ok, or an
+/// error string (including not-found).
+pub fn delete_skill(dir: &Path, name: &str) -> Result<(), String> {
+    if !valid_slug(name) {
+        return Err(format!("invalid skill name '{name}'"));
+    }
+    let skill_dir = dir.join(name);
+    if !skill_dir.join("SKILL.md").is_file() {
+        return Err(format!("no skill named '{name}'"));
+    }
+    std::fs::remove_dir_all(&skill_dir).map_err(|e| format!("could not delete skill: {e}"))
+}
+
 #[async_trait]
 impl TypedTool for SkillManager {
     type Input = SkillManagerInput;
@@ -86,61 +129,33 @@ impl TypedTool for SkillManager {
         _ctx: &ToolContext,
         _ct: CancellationToken,
     ) -> Result<ToolResult, ToolError> {
-        if !valid_slug(&input.name) {
-            return Ok(ToolResult::invalid_input(
-                format!("invalid skill name '{}'", input.name),
-                "use a slug of letters, digits, '-' or '_' (max 64 chars), e.g. \"pdf-wrangler\"",
-            ));
-        }
-        let skill_dir = self.dir.join(&input.name);
-        let skill_md = skill_dir.join("SKILL.md");
-
         match input.action.as_str() {
-            "create" | "update" => {
-                let desc = input.description.trim();
-                if desc.is_empty() {
-                    return Ok(ToolResult::invalid_input(
-                        "create/update requires a `description`",
-                        "give a one-line summary of what the skill is for",
-                    ));
-                }
-                if input.instructions.trim().is_empty() {
-                    return Ok(ToolResult::invalid_input(
-                        "create/update requires `instructions`",
-                        "give the full markdown body the skill should provide",
-                    ));
-                }
-                if let Err(e) = std::fs::create_dir_all(&skill_dir) {
-                    return Ok(ToolResult::error(format!(
-                        "could not create skill dir: {e}"
-                    )));
-                }
-                let body = render_skill_md(&input.name, desc, &input.instructions);
-                if let Err(e) = atomic_write(&skill_md, &body) {
-                    return Ok(ToolResult::error(format!("could not write skill: {e}")));
-                }
-                Ok(ToolResult::success(format!(
+            "create" | "update" => match write_skill(
+                &self.dir,
+                &input.name,
+                &input.description,
+                &input.instructions,
+            ) {
+                Ok(path) => Ok(ToolResult::success(format!(
                     "skill '{}' written to {}. Call `reload_self` to load it into this session.",
                     input.name,
-                    skill_md.display()
-                )))
-            }
-            "delete" => {
-                if !skill_md.is_file() {
-                    return Ok(ToolResult::invalid_input(
-                        format!("no skill named '{}'", input.name),
-                        "list available skills first, or check the name",
-                    ));
-                }
-                // Remove the whole skill directory (SKILL.md + any linked files).
-                if let Err(e) = std::fs::remove_dir_all(&skill_dir) {
-                    return Ok(ToolResult::error(format!("could not delete skill: {e}")));
-                }
-                Ok(ToolResult::success(format!(
+                    path.display()
+                ))),
+                Err(e) => Ok(ToolResult::invalid_input(
+                    e,
+                    "check the name (slug), description, and instructions",
+                )),
+            },
+            "delete" => match delete_skill(&self.dir, &input.name) {
+                Ok(()) => Ok(ToolResult::success(format!(
                     "skill '{}' deleted. Call `reload_self` to drop it from this session.",
                     input.name
-                )))
-            }
+                ))),
+                Err(e) => Ok(ToolResult::invalid_input(
+                    e,
+                    "list available skills first, or check the name",
+                )),
+            },
             other => Ok(ToolResult::invalid_input(
                 format!("unknown action '{other}'"),
                 "use create, update, or delete",
