@@ -1,7 +1,7 @@
 //! TUI state.
 
 use crate::dialog::Picker;
-use crate::theme::Theme;
+use crate::theme::{Theme, ThemeRegistry};
 use blumi_protocol::{Envelope, RequestId, Todo, ToolCallId};
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -334,6 +334,8 @@ pub struct Model {
 
     pub theme: Theme,
     pub theme_idx: usize,
+    /// All selectable themes (built-ins + user themes from ~/.blumi/themes).
+    pub themes: ThemeRegistry,
 
     pub input_tokens: u32,
     pub output_tokens: u32,
@@ -424,6 +426,7 @@ impl Model {
             provider_key_prompt: None,
             theme: Theme::default(),
             theme_idx: 0,
+            themes: ThemeRegistry::default(),
             input_tokens: 0,
             output_tokens: 0,
             cost_usd: 0.0,
@@ -474,18 +477,18 @@ impl Model {
     }
 
     pub fn cycle_theme(&mut self) {
-        self.theme_idx = (self.theme_idx + 1) % crate::theme::THEMES.len();
-        self.theme = Theme::by_index(self.theme_idx);
+        self.theme_idx = self.themes.next_index(self.theme_idx);
+        self.theme = self.themes.get(self.theme_idx);
         self.entries
             .push(Entry::Notice(format!("theme: {}", self.theme.name)));
     }
 
-    /// Set the theme by name; returns false if unknown.
+    /// Set the theme by name (case-insensitive); returns false if unknown.
     pub fn set_theme(&mut self, name: &str) -> bool {
-        match (0..crate::theme::THEMES.len()).find(|&i| Theme::by_index(i).name == name) {
+        match self.themes.index_of(name) {
             Some(i) => {
                 self.theme_idx = i;
-                self.theme = Theme::by_index(i);
+                self.theme = self.themes.get(i);
                 true
             }
             None => false,

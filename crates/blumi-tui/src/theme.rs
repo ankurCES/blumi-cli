@@ -145,10 +145,6 @@ impl Theme {
         }
     }
 
-    pub fn by_index(i: usize) -> Self {
-        THEMES[i % THEMES.len()]()
-    }
-
     pub fn accent(&self) -> Style {
         Style::default().fg(self.accent)
     }
@@ -193,6 +189,53 @@ impl Theme {
     /// A footer key-chip: the label half (subtle on surface).
     pub fn chip_label(&self) -> Style {
         self.surface().fg(self.fg_subtle)
+    }
+}
+
+/// A registry of selectable themes — the built-ins plus any user themes loaded
+/// from `~/.blumi/themes/*.toml`. Theme selection (cycle / by-name / by-index)
+/// routes through here so user themes participate alongside the built-ins. Held
+/// in the `Model`; built once at startup.
+#[derive(Clone)]
+pub struct ThemeRegistry {
+    themes: Vec<Theme>,
+}
+
+impl Default for ThemeRegistry {
+    fn default() -> Self {
+        Self::builtin()
+    }
+}
+
+impl ThemeRegistry {
+    /// Just the built-in palettes, in cycle order (`rose` first).
+    pub fn builtin() -> Self {
+        Self {
+            themes: THEMES.iter().map(|f| f()).collect(),
+        }
+    }
+
+    /// The theme at `idx` (wrapping); falls back to the default if empty.
+    pub fn get(&self, idx: usize) -> Theme {
+        if self.themes.is_empty() {
+            Theme::default()
+        } else {
+            self.themes[idx % self.themes.len()]
+        }
+    }
+    /// Index of a theme by name (case-insensitive).
+    pub fn index_of(&self, name: &str) -> Option<usize> {
+        self.themes
+            .iter()
+            .position(|t| t.name.eq_ignore_ascii_case(name))
+    }
+    /// The next index after `cur`, wrapping (for `/theme` cycling).
+    pub fn next_index(&self, cur: usize) -> usize {
+        if self.themes.is_empty() {
+            0
+        } else {
+            (cur + 1) % self.themes.len()
+        }
     }
 }
 
