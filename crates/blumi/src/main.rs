@@ -2,6 +2,7 @@
 
 mod branding;
 mod cron;
+mod discovery;
 mod engine;
 mod gateway;
 mod loop_run;

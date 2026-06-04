@@ -17,15 +17,33 @@ class _ConnectScreenState extends State<ConnectScreen> {
   final _host = TextEditingController();
   final _port = TextEditingController(text: '7777');
   final _pass = TextEditingController();
+  final _passFocus = FocusNode();
   bool _adding = false;
 
   @override
+  void initState() {
+    super.initState();
+    widget.app.startDiscovery();
+  }
+
+  @override
   void dispose() {
+    widget.app.stopDiscovery();
     _name.dispose();
     _host.dispose();
     _port.dispose();
     _pass.dispose();
+    _passFocus.dispose();
     super.dispose();
+  }
+
+  /// Tapping a discovered gateway prefills the add form and focuses the password.
+  void _pickDiscovered(SavedServer s) {
+    _name.text = s.name;
+    _host.text = s.host;
+    _port.text = s.port.toString();
+    setState(() => _adding = true);
+    _passFocus.requestFocus();
   }
 
   void _add() {
@@ -83,6 +101,7 @@ class _ConnectScreenState extends State<ConnectScreen> {
                     ..._reauthBody(app, reauth, cs)
                   else ...[
                     if (app.servers.isNotEmpty) ..._serverList(app, cs),
+                    if (app.discovered.isNotEmpty) ..._discoveredList(app, cs),
                     if (showForm)
                       ..._addForm(app, cs)
                     else
@@ -173,6 +192,37 @@ class _ConnectScreenState extends State<ConnectScreen> {
     if (ok == true) app.removeServer(s.id);
   }
 
+  // --- discovered on the LAN -------------------------------------------------
+
+  List<Widget> _discoveredList(AppController app, ColorScheme cs) => [
+        Row(children: [
+          Icon(Icons.wifi_tethering, size: 16, color: cs.secondary),
+          const SizedBox(width: 6),
+          Text('on your network',
+              style: TextStyle(
+                  fontWeight: FontWeight.bold,
+                  color: cs.onSurface.withValues(alpha: 0.7),
+                  fontSize: 13)),
+        ]),
+        const SizedBox(height: 6),
+        for (final s in app.discovered)
+          Card(
+            margin: const EdgeInsets.symmetric(vertical: 4),
+            color: cs.secondaryContainer.withValues(alpha: 0.25),
+            child: ListTile(
+              leading: Icon(Icons.wifi_tethering, color: cs.secondary),
+              title: Text(s.name,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(fontWeight: FontWeight.w600)),
+              subtitle: Text(s.endpoint, style: const TextStyle(fontSize: 12)),
+              trailing: const Icon(Icons.add),
+              onTap: app.connecting ? null : () => _pickDiscovered(s),
+            ),
+          ),
+        const SizedBox(height: 8),
+      ];
+
   // --- add a gateway ---------------------------------------------------------
 
   List<Widget> _addForm(AppController app, ColorScheme cs) => [
@@ -214,6 +264,7 @@ class _ConnectScreenState extends State<ConnectScreen> {
         const SizedBox(height: 12),
         TextField(
           controller: _pass,
+          focusNode: _passFocus,
           obscureText: true,
           decoration: const InputDecoration(
               labelText: 'Password', border: OutlineInputBorder()),

@@ -487,6 +487,11 @@ pub async fn run(
         open_browser(&url);
     }
 
+    // Advertise on the LAN over mDNS so blugo auto-discovers this gateway. Held
+    // for the server's lifetime; unregisters on drop. Best-effort (no-op on
+    // loopback / failure).
+    let _beacon = crate::discovery::advertise(ip, addr.port(), auth.is_some());
+
     let result = blumi_web::serve(provider, mgmt, web, addr, auth).await;
     let _ = std::fs::remove_file(&lock);
     result

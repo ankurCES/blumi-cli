@@ -2,6 +2,7 @@ import 'dart:convert';
 import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../data/api.dart';
+import '../data/discovery.dart';
 import '../data/models.dart';
 import '../data/saved_server.dart';
 import 'session.dart';
@@ -25,6 +26,16 @@ class AppController extends ChangeNotifier {
   /// When set, the connect screen shows a password prompt for this server
   /// (its saved token was missing or rejected).
   SavedServer? reauthFor;
+
+  /// All gateways found on the LAN via mDNS (raw). [discovered] filters out the
+  /// ones already saved, recomputed live so forgetting a server re-surfaces it.
+  List<SavedServer> _discoveredRaw = [];
+  LanDiscovery? _lan;
+
+  List<SavedServer> get discovered {
+    final saved = servers.map((s) => s.id).toSet();
+    return _discoveredRaw.where((s) => !saved.contains(s.id)).toList();
+  }
 
   bool get connected => session != null;
 
@@ -179,6 +190,29 @@ class AppController extends ChangeNotifier {
     if (reauthFor?.id == id) reauthFor = null;
     await _saveServers();
     notifyListeners();
+  }
+
+  // --- LAN discovery (mDNS) --------------------------------------------------
+
+  /// Browse the LAN for `_blumi._tcp` beacons; updates [discovered] live.
+  /// Hides any gateway already saved. Safe to call repeatedly.
+  Future<void> startDiscovery() async {
+    if (_lan != null) return;
+    _lan = LanDiscovery((found) {
+      _discoveredRaw = found;
+      notifyListeners();
+    });
+    await _lan!.start();
+  }
+
+  Future<void> stopDiscovery() async {
+    final l = _lan;
+    _lan = null;
+    if (_discoveredRaw.isNotEmpty) {
+      _discoveredRaw = [];
+      notifyListeners();
+    }
+    await l?.stop();
   }
 
   Future<void> _open() async {

@@ -44,6 +44,10 @@ rand.workspace = true
 reqwest.workspace = true
 eventsource-stream.workspace = true
 futures.workspace = true
+# LAN auto-discovery: advertise `_blumi._tcp` so blugo finds gateways. whoami
+# pinned to 1.x to match blumi-web (one copy in the tree).
+mdns-sd = "0.20"
+whoami = "1"
 
 [dev-dependencies]
 tempfile = "3"
