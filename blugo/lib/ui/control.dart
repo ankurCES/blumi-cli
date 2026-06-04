@@ -573,9 +573,18 @@ class _SettingsTabState extends State<_SettingsTab> {
             ),
           ]),
           const SizedBox(height: 18),
-          _label('Grid peers', cs),
-          FutureBuilder<(List<GridPeer>, Map<String, dynamic>)>(
-            future: _api.gridPeers(),
+          Row(children: [
+            _label('Grid', cs),
+            const Spacer(),
+            IconButton(
+              tooltip: 'Refresh',
+              visualDensity: VisualDensity.compact,
+              icon: const Icon(Icons.refresh, size: 18),
+              onPressed: () => setState(() {}),
+            ),
+          ]),
+          FutureBuilder<Map<String, dynamic>>(
+            future: _api.gridMetrics(),
             builder: (context, snap) {
               if (snap.connectionState != ConnectionState.done) {
                 return const Padding(
@@ -586,31 +595,68 @@ class _SettingsTabState extends State<_SettingsTab> {
                     style:
                         TextStyle(color: cs.onSurface.withValues(alpha: 0.6)));
               }
-              final peers = snap.data!.$1;
-              if (peers.isEmpty) {
-                return Text('no peers discovered on the network',
-                    style:
-                        TextStyle(color: cs.onSurface.withValues(alpha: 0.6)));
-              }
-              return Column(
-                children: [
-                  for (final p in peers)
-                    ListTile(
-                      dense: true,
-                      contentPadding: EdgeInsets.zero,
-                      leading: Icon(Icons.dns,
-                          color: p.online
-                              ? Colors.greenAccent
-                              : cs.onSurface.withValues(alpha: 0.4)),
-                      title: Text(p.name),
-                      subtitle: Text('${p.host}:${p.port} · v${p.version}'),
-                      trailing: Text(p.online ? 'online' : 'offline',
-                          style: TextStyle(
-                              fontSize: 11,
-                              color: p.online
-                                  ? Colors.greenAccent
-                                  : cs.onSurface.withValues(alpha: 0.5))),
+              final d = snap.data!;
+              final me = (d['self'] as Map?) ?? const {};
+              final peers = (d['peers'] as List?) ?? const [];
+              final totals = (d['totals'] as Map?) ?? const {};
+              int n(dynamic v) => (v as num?)?.toInt() ?? 0;
+              Map asMap(dynamic v) => (v as Map?) ?? const {};
+              final tt = asMap(totals['tokens']);
+              Widget node(String name, bool online, Map m) {
+                final t = asMap(m['tokens']);
+                return Padding(
+                  padding: const EdgeInsets.symmetric(vertical: 4),
+                  child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                    Icon(online ? Icons.dns : Icons.cloud_off,
+                        size: 16,
+                        color: online
+                            ? Colors.greenAccent
+                            : cs.onSurface.withValues(alpha: 0.4)),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(name,
+                                style:
+                                    const TextStyle(fontWeight: FontWeight.w600)),
+                            if (online)
+                              Text(
+                                  'tasks ${n(m['tasks_local'])} local · ${n(m['tasks_remote'])} remote   ·   ↑${n(t['input'])} ↓${n(t['output'])} tok',
+                                  style: TextStyle(
+                                      fontSize: 11,
+                                      color:
+                                          cs.onSurface.withValues(alpha: 0.6)))
+                            else
+                              Text('offline',
+                                  style: TextStyle(
+                                      fontSize: 11,
+                                      color:
+                                          cs.onSurface.withValues(alpha: 0.5))),
+                          ]),
                     ),
+                  ]),
+                );
+              }
+
+              return Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                      '${n(totals['nodes_online'])} node(s) online · ${n(totals['tasks_total'])} tasks · ↑${n(tt['input'])} ↓${n(tt['output'])} tok grid-wide',
+                      style: TextStyle(
+                          fontSize: 12,
+                          color: cs.primary,
+                          fontWeight: FontWeight.w600)),
+                  const SizedBox(height: 4),
+                  node('this gateway', true, me),
+                  for (final p in peers)
+                    node((p as Map)['name']?.toString() ?? 'peer',
+                        p['online'] == true, asMap(p['metrics'])),
+                  if (peers.isEmpty)
+                    Text('no peers discovered on the network',
+                        style:
+                            TextStyle(color: cs.onSurface.withValues(alpha: 0.6))),
                 ],
               );
             },

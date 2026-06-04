@@ -243,6 +243,9 @@ class ApiClient {
     return (peers, me);
   }
 
+  /// Aggregated grid metrics: `{ self, peers:[{name,online,metrics}], totals }`.
+  Future<Map<String, dynamic>> gridMetrics() => _getJson('/api/grid/metrics');
+
   /// Hand a board task off to a grid peer for remote execution.
   Future<Map<String, dynamic>> gridDispatch(String taskId, String peerId,
           {bool review = false}) =>
