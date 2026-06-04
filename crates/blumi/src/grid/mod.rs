@@ -19,13 +19,13 @@ use sha2::{Digest, Sha256};
 use std::collections::HashMap;
 use std::net::Ipv4Addr;
 use std::sync::{Arc, Mutex};
-use std::time::{Duration, Instant};
+use std::time::Duration;
 use tokio_util::sync::CancellationToken;
 
-/// How long a peer stays "live" after its last Resolved event before a sweep
-/// downgrades it to offline (covers peers that vanished without a graceful
-/// unregister). mdns-sd re-resolves periodically, refreshing this.
-pub const PEER_TTL: Duration = Duration::from_secs(90);
+// Peers are kept until mDNS reports them gone (ServiceRemoved); the live grid
+// metrics endpoint confirms each peer's real-time reachability when queried. A
+// short last-seen TTL was removed — mDNS re-resolution backs off, so it wrongly
+// aged out peers that were still advertising.
 
 /// Public, non-sensitive grid identity used for mDNS advertising + browse
 /// filtering. An explicit `grid_id` wins; otherwise it is a short, non-reversible
@@ -59,9 +59,6 @@ pub struct Peer {
     /// From the `grid` TXT — the peer's grid_id.
     pub grid_id: String,
     pub online: bool,
-    /// Last time a Resolved event was seen (not serialized).
-    #[serde(skip)]
-    pub last_seen: Instant,
 }
 
 impl Peer {
@@ -82,7 +79,7 @@ impl PeerRegistry {
         Arc::new(Self::default())
     }
 
-    /// Insert or refresh a peer (sets `online = true`, stamps `last_seen`).
+    /// Insert or refresh a peer (sets `online = true`).
     pub fn upsert(&self, p: Peer) {
         if let Ok(mut m) = self.inner.lock() {
             m.insert(p.id.clone(), p);
@@ -98,19 +95,11 @@ impl PeerRegistry {
         }
     }
 
-    /// Online peers seen within [`PEER_TTL`], sorted by id. Sweeps stale ones
-    /// to offline as a side effect.
+    /// Currently-online peers (per mDNS Resolved/Removed), sorted by id.
     pub fn live(&self) -> Vec<Peer> {
         let mut out = Vec::new();
-        if let Ok(mut m) = self.inner.lock() {
-            for p in m.values_mut() {
-                if p.last_seen.elapsed() > PEER_TTL {
-                    p.online = false;
-                }
-                if p.online {
-                    out.push(p.clone());
-                }
-            }
+        if let Ok(m) = self.inner.lock() {
+            out.extend(m.values().filter(|p| p.online).cloned());
         }
         out.sort_by(|a, b| a.id.cmp(&b.id));
         out
@@ -193,7 +182,6 @@ pub fn browse_into(
                     auth_required: rs.get_property_val_str("auth") == Some("required"),
                     grid_id: grid.to_string(),
                     online: true,
-                    last_seen: Instant::now(),
                 });
             }
             Ok(ServiceEvent::ServiceRemoved(_ty, fullname)) => registry.mark_offline(&fullname),
@@ -289,7 +277,6 @@ mod tests {
             auth_required: true,
             grid_id: "g".into(),
             online: true,
-            last_seen: Instant::now(),
         });
         assert_eq!(reg.live().len(), 1);
         let p = reg.get("a._blumi._tcp.local.").expect("peer present");
