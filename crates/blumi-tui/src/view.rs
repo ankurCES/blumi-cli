@@ -116,6 +116,9 @@ pub fn render(model: &mut Model, f: &mut Frame) {
     if model.slash_active() {
         render_slash_popup(model, f, editor, &theme);
     }
+
+    // Cinematic motion (tachyonfx) — applied last, over the fully-drawn frame.
+    model.motion.process(f.buffer_mut(), area);
 }
 
 /// A rounded, titled pane block — see [`crate::primitives::panel`].
@@ -1685,6 +1688,8 @@ mod tests {
     use ratatui::Terminal;
 
     fn render_to_string(model: &mut Model, w: u16, h: u16) -> String {
+        // Motion mutates the buffer over time — keep snapshots deterministic.
+        model.motion.set_level(crate::motion::MotionLevel::Off);
         let mut terminal = Terminal::new(TestBackend::new(w, h)).unwrap();
         terminal.draw(|f| render(model, f)).unwrap();
         let buf = terminal.backend().buffer().clone();

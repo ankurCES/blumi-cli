@@ -12,6 +12,10 @@ pub async fn update(model: &mut Model, msg: Msg, session: &SessionHandle) {
         Msg::Tick => {
             model.spinner_frame = model.spinner_frame.wrapping_add(1);
             model.clear_stale_chord();
+            // Keep redrawing while a motion effect is animating (idle otherwise).
+            if model.motion.is_active() {
+                model.mark_dirty();
+            }
             tick_tool_charms(model);
             if model.busy {
                 // Accumulate active-with-bot time (tick is ~50ms).

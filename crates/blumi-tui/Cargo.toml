@@ -28,6 +28,7 @@ futures.workspace = true
 async-trait.workspace = true
 anyhow.workspace = true
 tracing.workspace = true
+tachyonfx = "0.14"
 
 [dev-dependencies]
 tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }

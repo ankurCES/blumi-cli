@@ -145,6 +145,10 @@ pub const COMMANDS: &[CommandDef] = &[
         desc: "switch theme: /theme [name]",
     },
     CommandDef {
+        name: "/motion",
+        desc: "motion effects: /motion [full|reduced|off]",
+    },
+    CommandDef {
         name: "/status",
         desc: "session status",
     },
@@ -582,6 +586,37 @@ pub async fn run(model: &mut Model, session: &SessionHandle, line: &str) {
                 model
                     .entries
                     .push(Entry::Notice(format!("unknown theme '{arg}'")));
+            }
+        }
+        "/motion" => {
+            use crate::motion::MotionLevel;
+            let level = match arg.as_str() {
+                "off" => Some(MotionLevel::Off),
+                "reduced" | "low" => Some(MotionLevel::Reduced),
+                "full" | "on" => Some(MotionLevel::Full),
+                "" => Some(if model.motion.level() == MotionLevel::Off {
+                    MotionLevel::Full
+                } else {
+                    MotionLevel::Off
+                }),
+                _ => None,
+            };
+            match level {
+                Some(l) => {
+                    model.motion.set_level(l);
+                    if l != MotionLevel::Off {
+                        model.motion.scene_in();
+                    }
+                    let name = match l {
+                        MotionLevel::Full => "full",
+                        MotionLevel::Reduced => "reduced",
+                        MotionLevel::Off => "off",
+                    };
+                    model.entries.push(Entry::Notice(format!("motion: {name}")));
+                }
+                None => model
+                    .entries
+                    .push(Entry::Notice("usage: /motion [full|reduced|off]".into())),
             }
         }
         "/status" => model.entries.push(Entry::Notice(status_text(model))),

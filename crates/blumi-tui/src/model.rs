@@ -1,6 +1,7 @@
 //! TUI state.
 
 use crate::dialog::Picker;
+use crate::motion::Motion;
 use crate::theme::{Theme, ThemeRegistry};
 use blumi_protocol::{Envelope, RequestId, Todo, ToolCallId};
 use std::collections::HashMap;
@@ -358,6 +359,8 @@ pub struct Model {
     pub theme_idx: usize,
     /// All selectable themes (built-ins + user themes from ~/.blumi/themes).
     pub themes: ThemeRegistry,
+    /// Cinematic motion effects (tachyonfx). Applied last in `view::render`.
+    pub motion: Motion,
 
     pub input_tokens: u32,
     pub output_tokens: u32,
@@ -453,6 +456,7 @@ impl Model {
             theme: Theme::default(),
             theme_idx: 0,
             themes: ThemeRegistry::default(),
+            motion: Motion::default(),
             input_tokens: 0,
             output_tokens: 0,
             cost_usd: 0.0,
@@ -505,6 +509,7 @@ impl Model {
     pub fn cycle_theme(&mut self) {
         self.theme_idx = self.themes.next_index(self.theme_idx);
         self.theme = self.themes.get(self.theme_idx);
+        self.motion.scene_in();
         self.entries
             .push(Entry::Notice(format!("theme: {}", self.theme.name)));
     }

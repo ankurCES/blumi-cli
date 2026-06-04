@@ -198,6 +198,11 @@ async fn run_loop(
     model.themes = crate::theme::ThemeRegistry::builtin().with_user(cfg.themes);
     model.theme = model.themes.get(model.theme_idx);
 
+    // Cinematic motion: honor env switches, then play a launch "scene-in".
+    model.motion = crate::motion::Motion::from_env();
+    model.motion.scene_in();
+    model.mark_dirty();
+
     let mut session = factory.create().await?;
     let mut events = session.subscribe();
     model.model_options = factory.model_options();
