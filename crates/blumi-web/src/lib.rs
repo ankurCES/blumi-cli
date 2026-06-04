@@ -239,6 +239,43 @@ pub trait Management: Send + Sync {
     ) -> serde_json::Value {
         serde_json::json!({ "ok": false, "error": "grid disabled" })
     }
+
+    // --- Self-management ---
+
+    /// The whole settings.json as JSON, with every secret redacted (for the
+    /// self-config editor). Default: empty.
+    fn self_config_get(&self) -> serde_json::Value {
+        serde_json::json!({})
+    }
+    /// Set one dotted config `key` to `value` (validated as a BlumiConfig +
+    /// atomically written). `Ok(message)` or an error. Default: unsupported.
+    fn self_config_set(&self, _key: &str, _value: &str) -> anyhow::Result<String> {
+        anyhow::bail!("self-config not supported")
+    }
+    /// Create/update a skill from name/description/instructions. Default: unsupported.
+    fn skill_write(
+        &self,
+        _name: &str,
+        _description: &str,
+        _instructions: &str,
+    ) -> anyhow::Result<()> {
+        anyhow::bail!("skills not writable")
+    }
+    /// Delete a skill by name. Default: unsupported.
+    fn skill_delete(&self, _name: &str) -> anyhow::Result<()> {
+        anyhow::bail!("skills not writable")
+    }
+    /// What a restart would do here: "service" (out-of-process relaunch),
+    /// "foreground" (no manager — caller should degrade to a reload), or
+    /// "unsupported". Default: unsupported.
+    fn restart_capability(&self) -> &'static str {
+        "unsupported"
+    }
+    /// Schedule an out-of-process restart of the gateway service. Non-blocking;
+    /// returns a JSON outcome. Default: unsupported.
+    fn restart(&self) -> serde_json::Value {
+        serde_json::json!({ "ok": false, "mode": "unsupported" })
+    }
 }
 
 /// Autonomous-loop state, surfaced over `/api/loop/status`.
@@ -340,11 +377,19 @@ pub fn router(state: AppState) -> Router {
         .route("/api/logout", post(auth::logout))
         .route("/api/cron", get(api::cron_list).post(api::cron_add))
         .route("/api/cron/remove", post(api::cron_remove))
-        .route("/api/skills", get(api::skills))
+        .route("/api/skills", get(api::skills).post(api::skills_write))
+        .route("/api/skills/delete", post(api::skills_delete))
         .route("/api/tasks", get(api::tasks))
         .route("/api/grid/peers", get(api::grid_peers))
         .route("/api/grid/dispatch", post(api::grid_dispatch))
         .route("/api/grid/run", post(api::grid_run))
+        .route(
+            "/api/self/config",
+            get(api::self_config_get).post(api::self_config_set),
+        )
+        .route("/api/self/reload", post(api::session_reload))
+        .route("/api/self/restart", post(api::self_restart))
+        .route("/api/self/recover", post(api::self_recover))
         .route("/api/memory", get(api::memory_get).post(api::memory_set))
         .route("/api/usage", get(api::usage))
         .route("/api/status", get(api::status))
@@ -386,6 +431,40 @@ pub async fn serve(
         loop_status: Arc::new(RwLock::new(LoopStatus::default())),
         grid_secret: grid_secret.map(Arc::new),
     };
+    // Self-management: react to the agent's Reload/Restart events server-side, so
+    // `reload_self` / `restart_gateway` work for every client (incl. the phone)
+    // without client changes. (The TUI handles these in its own loop.)
+    {
+        let st = state.clone();
+        tokio::spawn(async move {
+            loop {
+                let mut rx = st.current().await.subscribe();
+                loop {
+                    match rx.recv().await {
+                        Ok(env) => match env.event {
+                            blumi_protocol::Event::Reload { .. } => {
+                                let _ = st.reload_current().await;
+                                break; // re-subscribe to the swapped-in session
+                            }
+                            blumi_protocol::Event::Restart { .. } => {
+                                if st.mgmt().restart_capability() == "service" {
+                                    let _ = st.mgmt().restart(); // manager relaunches us
+                                } else {
+                                    let _ = st.reload_current().await;
+                                    break;
+                                }
+                            }
+                            _ => {}
+                        },
+                        Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => continue,
+                        Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
+                    }
+                }
+                tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+            }
+        });
+    }
+
     let app = router(state.clone());
     let listener = tokio::net::TcpListener::bind(addr).await?;
     let local = listener.local_addr()?;

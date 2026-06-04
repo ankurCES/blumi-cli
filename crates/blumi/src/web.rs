@@ -122,6 +122,35 @@ impl WebManagement {
     }
 }
 
+/// Recursively replace any secret-looking string field with `<redacted>` so the
+/// self-config editor can show settings.json without leaking keys/tokens.
+fn redact_secrets(v: &mut serde_json::Value) {
+    use serde_json::Value;
+    const SECRET_KEYS: &[&str] = &[
+        "password_hash",
+        "api_key",
+        "tts_api_key",
+        "token",
+        "bot_token",
+        "app_token",
+        "verify_token",
+        "secret",
+    ];
+    match v {
+        Value::Object(m) => {
+            for (k, val) in m.iter_mut() {
+                if SECRET_KEYS.contains(&k.as_str()) && val.is_string() {
+                    *val = Value::String("<redacted>".into());
+                } else {
+                    redact_secrets(val);
+                }
+            }
+        }
+        Value::Array(a) => a.iter_mut().for_each(redact_secrets),
+        _ => {}
+    }
+}
+
 #[async_trait]
 impl Management for WebManagement {
     async fn cron_list(&self) -> Vec<CronJobInfo> {
@@ -283,6 +312,59 @@ impl Management for WebManagement {
                     "ok": false, "peer": peer.name, "error": e.to_string(), "released": true
                 })
             }
+        }
+    }
+
+    // --- Self-management ---
+
+    fn self_config_get(&self) -> serde_json::Value {
+        let raw = blumi_skills::self_config::get_settings(&self.config.paths.settings_json());
+        let mut v: serde_json::Value =
+            serde_json::from_str(&raw).unwrap_or_else(|_| serde_json::json!({}));
+        redact_secrets(&mut v);
+        v
+    }
+
+    fn self_config_set(&self, key: &str, value: &str) -> anyhow::Result<String> {
+        blumi_skills::self_config::set_key(&self.config.paths.settings_json(), key, value)
+            .map_err(|e| anyhow::anyhow!(e))
+    }
+
+    fn skill_write(&self, name: &str, description: &str, instructions: &str) -> anyhow::Result<()> {
+        blumi_skills::skill_manager::write_skill(
+            &self.config.paths.skills,
+            name,
+            description,
+            instructions,
+        )
+        .map(|_| ())
+        .map_err(|e| anyhow::anyhow!(e))
+    }
+
+    fn skill_delete(&self, name: &str) -> anyhow::Result<()> {
+        blumi_skills::skill_manager::delete_skill(&self.config.paths.skills, name)
+            .map_err(|e| anyhow::anyhow!(e))
+    }
+
+    fn restart_capability(&self) -> &'static str {
+        match crate::serve::detect_manager() {
+            crate::serve::ServiceManager::Launchd | crate::serve::ServiceManager::SystemdUser => {
+                "service"
+            }
+            crate::serve::ServiceManager::None => "foreground",
+        }
+    }
+
+    fn restart(&self) -> serde_json::Value {
+        let mgr = crate::serve::detect_manager();
+        if mgr == crate::serve::ServiceManager::None {
+            return serde_json::json!({ "ok": false, "mode": "foreground" });
+        }
+        match crate::serve::restart_self(mgr) {
+            Ok(()) => serde_json::json!({
+                "ok": true, "mode": "service", "detail": "restarting the gateway…"
+            }),
+            Err(e) => serde_json::json!({ "ok": false, "mode": "service", "error": e.to_string() }),
         }
     }
 
