@@ -334,6 +334,8 @@ pub struct Model {
     pub usage_view: Option<String>,
     /// Rendered task board when the `/board` overlay is open.
     pub board_view: Option<String>,
+    /// Rendered grid view (task distribution by runtime) when `/grid` is open.
+    pub grid_view: Option<String>,
     /// Path to the persistent task board (`<project>/.blumi/tasks.json`).
     pub tasks_path: PathBuf,
     /// Autonomous loop is running (drives the task board turn by turn).
@@ -452,6 +454,7 @@ impl Model {
             memory_view: None,
             usage_view: None,
             board_view: None,
+            grid_view: None,
             remotes: Vec::new(),
             tabs: vec![("local".to_string(), false)],
             active_tab: 0,
@@ -741,6 +744,7 @@ impl Model {
         self.memory_view = None;
         self.usage_view = None;
         self.board_view = None;
+        self.grid_view = None;
         self.agents.clear();
         self.loop_active = false;
         self.loop_current = None;
@@ -880,6 +884,68 @@ impl Model {
             }
         }
         self.board_view = Some(s);
+    }
+
+    /// Build the `/grid` overlay: task distribution across runtimes, derived from
+    /// the board's `owner` field (which peer each task ran on). For live peer
+    /// online/offline health + token usage, see the mobile app's Grid section or
+    /// ask in chat (the gateway holds the live registry).
+    pub fn open_grid(&mut self) {
+        use blumi_task::TaskState;
+        use std::collections::BTreeMap;
+        let board = blumi_task::TaskBoard::load(&self.tasks_path);
+        // owner ("local" = unowned) -> the states of its tasks
+        let mut groups: BTreeMap<String, Vec<TaskState>> = BTreeMap::new();
+        for t in board.tasks() {
+            let key = match &t.owner {
+                Some(o) if !o.is_empty() => o.clone(),
+                _ => "local".to_string(),
+            };
+            groups.entry(key).or_default().push(t.state);
+        }
+        let mut s = String::from("grid — task distribution by runtime");
+        if groups.is_empty() {
+            s.push_str(
+                "\n\nno tasks yet. enable the grid (settings.json), add tasks, \
+                 then run the loop in grid mode.",
+            );
+        }
+        let (mut local_n, mut remote_n) = (0usize, 0usize);
+        for (owner, states) in &groups {
+            let doing = states
+                .iter()
+                .filter(|x| matches!(x, TaskState::Doing))
+                .count();
+            let done = states
+                .iter()
+                .filter(|x| matches!(x, TaskState::Done))
+                .count();
+            let is_local = owner == "local";
+            let icon = if is_local {
+                crate::icons::local()
+            } else {
+                crate::icons::remote()
+            };
+            s.push_str(&format!(
+                "\n{} {}  —  {} tasks (running {}, done {})",
+                icon,
+                owner,
+                states.len(),
+                doing,
+                done
+            ));
+            if is_local {
+                local_n += states.len();
+            } else {
+                remote_n += states.len();
+            }
+        }
+        let peers = groups.keys().filter(|k| *k != "local").count();
+        s.push_str(&format!(
+            "\n\ntotals: {local_n} local · {remote_n} remote · {peers} peer(s) with work"
+        ));
+        s.push_str("\n\nlive peer health + token usage: the app's Grid section, or ask in chat.");
+        self.grid_view = Some(s);
     }
 
     /// Build the `/usage` analytics overlay.

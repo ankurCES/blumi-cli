@@ -123,6 +123,9 @@ pub fn render(model: &mut Model, f: &mut Frame) {
     if model.board_view.is_some() {
         render_board(model, f, area, &theme);
     }
+    if model.grid_view.is_some() {
+        render_grid(model, f, area, &theme);
+    }
     if model.dash_modal {
         render_dashboard_modal(model, f, area, &theme);
     }
@@ -145,6 +148,8 @@ pub fn render(model: &mut Model, f: &mut Frame) {
         (5, centered_rect(58, 60, area))
     } else if model.board_view.is_some() {
         (6, centered_rect(64, 60, area))
+    } else if model.grid_view.is_some() {
+        (8, centered_rect(64, 60, area))
     } else if model.dash_modal {
         (7, centered_rect(72, 84, area))
     } else {
@@ -857,6 +862,37 @@ fn render_board(model: &Model, f: &mut Frame, area: Rect, theme: &Theme) {
     for (i, raw) in text.lines().enumerate() {
         let style = if i == 0 {
             theme.bold_primary() // the running/queued/done summary line
+        } else {
+            theme.body()
+        };
+        lines.push(Line::from(Span::styled(truncate(raw, width), style)));
+    }
+    f.render_widget(Paragraph::new(lines), inner);
+}
+
+/// The `/grid` overlay: task distribution across local + remote runtimes.
+fn render_grid(model: &Model, f: &mut Frame, area: Rect, theme: &Theme) {
+    let Some(text) = &model.grid_view else {
+        return;
+    };
+    let popup = centered_rect(64, 60, area);
+    f.render_widget(Clear, popup);
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .border_type(BorderType::Rounded)
+        .border_style(Style::default().fg(theme.primary))
+        .title(Span::styled(
+            " grid — any key to close ",
+            theme.bold_primary(),
+        ));
+    let inner = block.inner(popup);
+    f.render_widget(block, popup);
+
+    let width = inner.width.saturating_sub(1) as usize;
+    let mut lines: Vec<Line> = Vec::new();
+    for (i, raw) in text.lines().enumerate() {
+        let style = if i == 0 {
+            theme.bold_primary()
         } else {
             theme.body()
         };

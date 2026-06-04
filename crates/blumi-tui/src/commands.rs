@@ -57,6 +57,10 @@ pub const COMMANDS: &[CommandDef] = &[
         desc: "show the task board (blumi loop work queue)",
     },
     CommandDef {
+        name: "/grid",
+        desc: "show the grid: task distribution across local + remote peers",
+    },
+    CommandDef {
         name: "/loop",
         desc: "start/pause the autonomous task loop (/loop review to toggle gate)",
     },
@@ -245,6 +249,7 @@ pub async fn run(model: &mut Model, session: &SessionHandle, line: &str) {
         "/dashboard" => model.toggle_dash_modal(),
         "/usage" => model.open_usage(),
         "/board" => model.open_board(),
+        "/grid" => model.open_grid(),
         "/loop" => {
             if arg.eq_ignore_ascii_case("review") {
                 model.loop_review = !model.loop_review;
