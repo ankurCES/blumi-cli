@@ -312,6 +312,11 @@ pub struct Model {
     /// recorded at render time for click-to-select / click-to-switch-tab.
     pub sidebar_list_area: Option<(u16, u16, u16, u16)>,
     pub sidebar_tab_area: Option<(u16, u16, u16, u16)>,
+    /// Title-row rects of the rails (click to collapse) + the editor box (click
+    /// to focus + return to Insert mode), recorded at render time.
+    pub explorer_title_area: Option<(u16, u16, u16, u16)>,
+    pub agent_title_area: Option<(u16, u16, u16, u16)>,
+    pub editor_area: Option<(u16, u16, u16, u16)>,
     /// Independently-scrollable dashboard sub-panels (active agents, tasks).
     pub agents_pane: ScrollPane,
     pub tasks_pane: ScrollPane,
@@ -432,6 +437,9 @@ impl Model {
             dialog_list_area: None,
             sidebar_list_area: None,
             sidebar_tab_area: None,
+            explorer_title_area: None,
+            agent_title_area: None,
+            editor_area: None,
             agents_pane: ScrollPane::default(),
             tasks_pane: ScrollPane::default(),
             dash_panel: DashPanel::Agents,

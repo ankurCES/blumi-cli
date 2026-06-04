@@ -130,6 +130,28 @@ pub fn render(model: &mut Model, f: &mut Frame) {
         render_slash_popup(model, f, editor, &theme);
     }
 
+    // Motion cues (scoped): a coalesce when an overlay opens (over its popup
+    // rect) and a short settle when the transcript grows (over the chat column).
+    let (ovl_id, ovl_rect) = if model.pending.is_some() {
+        (1u8, centered_rect(70, 50, area))
+    } else if model.plan_review.is_some() {
+        (2, centered_rect(80, 80, area))
+    } else if model.dialog.is_some() {
+        (3, centered_rect(60, 50, area))
+    } else if model.memory_view.is_some() {
+        (4, centered_rect(70, 60, area))
+    } else if model.usage_view.is_some() {
+        (5, centered_rect(58, 60, area))
+    } else if model.board_view.is_some() {
+        (6, centered_rect(64, 60, area))
+    } else if model.dash_modal {
+        (7, centered_rect(72, 84, area))
+    } else {
+        (0, area)
+    };
+    model.motion.cue_overlay(ovl_id, ovl_rect);
+    model.motion.cue_message(model.entries.len(), chat);
+
     // Cinematic motion (tachyonfx) — applied last, over the fully-drawn frame.
     model.motion.process(f.buffer_mut(), area);
 }
@@ -182,9 +204,12 @@ fn render_list<T>(
 fn render_sidebar(model: &mut Model, f: &mut Frame, area: Rect, theme: &Theme) {
     use crate::model::SidebarTab;
     let focused = model.focus == Focus::Sidebar;
-    let block = pane_block("explorer", focused, theme);
+    // `◂` hints the title row is clickable to collapse the rail (Ctrl+B).
+    let block = pane_block("explorer ◂", focused, theme);
     let inner = block.inner(area);
     f.render_widget(block, area);
+    // Title row = the top border; clicking it collapses the explorer.
+    model.explorer_title_area = Some((area.x, area.y, area.width, 1));
 
     // Tab bar (2 rows — too many tabs for one 26-col row) + active list.
     let [tabs_row, list_area] =
@@ -302,6 +327,8 @@ fn render_dashboard(model: &mut Model, f: &mut Frame, area: Rect, theme: &Theme)
                 theme.subtle()
             },
         ),
+        // `▸` hints the title row is clickable to collapse the rail (Ctrl+J).
+        Span::styled("▸", theme.dim()),
     ]);
     let mut block = Block::default()
         .borders(Borders::ALL)
@@ -317,6 +344,8 @@ fn render_dashboard(model: &mut Model, f: &mut Frame, area: Rect, theme: &Theme)
     }
     let inner = block.inner(area);
     f.render_widget(block, area);
+    // Title row = the top border; clicking it collapses the agent rail.
+    model.agent_title_area = Some((area.x, area.y, area.width, 1));
     let w = inner.width.saturating_sub(1) as usize;
 
     // A pinned app-logo band at the very top (never scrolls): a small rasterized
@@ -1403,6 +1432,8 @@ fn render_editor(model: &mut Model, f: &mut Frame, area: Rect, theme: &Theme) {
     );
     model.input.set_cursor_line_style(Style::default());
     f.render_widget(&model.input, area);
+    // Clicking the editor focuses it + returns to Insert mode.
+    model.editor_area = Some((area.x, area.y, area.width, area.height));
 }
 
 /// A 10-cell block context bar, hermes-style: `████░░░░░░`.
@@ -2083,5 +2114,51 @@ mod tests {
         assert!(out.contains("agent"), "dashboard agent panel");
         assert!(out.contains("Context"), "context section");
         assert!(out.contains("tasks"), "tasks sub-panel");
+    }
+
+    // ── Golden full-frame snapshots (insta) ─────────────────────────────────
+    // Deterministic: render_to_string forces motion off, spinner_frame defaults
+    // to 0, the default theme is rose, and icons default to unicode. These guard
+    // whole-frame layout/spacing that the substring tests can't capture. Run
+    // `cargo insta review` (or INSTA_UPDATE=always) after an intentional change.
+
+    #[test]
+    fn snapshot_landing() {
+        let mut model = Model::new("claude-sonnet".into(), "/tmp/proj".into());
+        insta::assert_snapshot!("landing", render_to_string(&mut model, 100, 30));
+    }
+
+    #[test]
+    fn snapshot_conversation() {
+        let mut model = Model::new("claude-sonnet".into(), "/tmp/proj".into());
+        model
+            .entries
+            .push(Entry::User("refactor the parser".into()));
+        model.entries.push(Entry::Assistant(
+            "Here's the plan:\n\n1. tokenize\n2. parse".into(),
+        ));
+        model.entries.push(Entry::Tool {
+            id: ToolCallId::from("c1"),
+            name: "FileEdit".into(),
+            summary: "src/parser.rs".into(),
+            ok: Some(true),
+            preview: Some("Edited src/parser.rs".into()),
+            diff_stat: Some("+8 -2".into()),
+            diff: None,
+        });
+        insta::assert_snapshot!("conversation", render_to_string(&mut model, 100, 30));
+    }
+
+    #[test]
+    fn snapshot_dashboard_full() {
+        let mut model = Model::new("claude-sonnet".into(), "/tmp/proj".into());
+        model.entries.push(Entry::User("hi".into()));
+        model.todos.push(blumi_protocol::Todo {
+            id: "1".into(),
+            content: "extract tokenize".into(),
+            status: TodoStatus::Completed,
+        });
+        // Wide enough that both rails render (XL tier).
+        insta::assert_snapshot!("dashboard_full", render_to_string(&mut model, 130, 30));
     }
 }
