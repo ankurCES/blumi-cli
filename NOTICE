@@ -3,18 +3,31 @@ blumi — third-party notices
 
 blumi bundles a curated snapshot of agent **skills** (SKILL.md files) from the
 following third-party projects, embedded into the binary and written to
-~/.blumi/skills on first run. Each is used under the MIT License; full license
-texts are in crates/blumi-skills/bundled/licenses/.
+~/.blumi/skills on first run. Each is used under its respective permissive
+license (MIT or BSD-3-Clause); full license texts are in
+crates/blumi-skills/bundled/licenses/.
 
-- obra/superpowers            (prefix: sp-)     — MIT, Copyright (c) 2025 Jesse Vincent
+- obra/superpowers            (prefix: sp-)       — MIT, Copyright (c) 2025 Jesse Vincent
   https://github.com/obra/superpowers
-- leonxlnx/taste-skill        (prefix: taste-)  — MIT, Copyright (c) 2026 Leonxlnx
+- leonxlnx/taste-skill        (prefix: taste-)    — MIT, Copyright (c) 2026 Leonxlnx
   https://github.com/leonxlnx/taste-skill
-- jeffallan/claude-skills     (prefix: cs-)     — MIT, Copyright (c) 2025 Jeff Allan
+- jeffallan/claude-skills     (prefix: cs-)       — MIT, Copyright (c) 2025 Jeff Allan
   https://github.com/jeffallan/claude-skills
+- udapy/rust-agentic-skills   (prefix: ras-)      — MIT, Copyright (c) 2025 Rust Agentic Skills Contributors
+  https://github.com/udapy/rust-agentic-skills
+- flutter/skills              (prefix: flutter-)  — BSD-3-Clause, Copyright 2026 The Flutter Authors
+  https://github.com/flutter/skills
+- dart-lang/skills            (prefix: dart-)     — BSD-3-Clause, Copyright the Dart project authors
+  https://github.com/dart-lang/skills
+- workos/auth.md              (skill: workos-auth) — MIT, Copyright (c) 2026 WorkOS
+  https://github.com/workos/auth.md
+  (AUTH.md is vendored as the `workos-auth` SKILL.md; its agent-services /
+  agent-providers implementation guides are kept under references/.)
 
-Skill folders are namespaced by the prefixes above to avoid collisions. To
-refresh the vendored snapshot, run scripts/vendor-skills.sh.
+Skill folders are namespaced by the prefixes above to avoid collisions (the
+flutter/dart skills already carry their `flutter-`/`dart-` topic prefix upstream,
+so they are vendored as-is). To refresh the vendored snapshot, run
+scripts/vendor-skills.sh.
 
 The default MCP server set and catalog reference the Model Context Protocol
 reference servers (modelcontextprotocol/servers) and entries curated from

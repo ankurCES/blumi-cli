@@ -6,8 +6,10 @@
 //! A `.bundled-version` stamp lets an upgraded binary refresh its own skills
 //! without re-scanning on every launch.
 //!
-//! Sources (all MIT-licensed; see NOTICE): obra/superpowers (`sp-*`),
-//! leonxlnx/taste-skill (`taste-*`), jeffallan/claude-skills (`cs-*`).
+//! Sources (MIT or BSD-3-Clause; see NOTICE): obra/superpowers (`sp-*`),
+//! leonxlnx/taste-skill (`taste-*`), jeffallan/claude-skills (`cs-*`),
+//! udapy/rust-agentic-skills (`ras-*`), flutter/skills (`flutter-*`),
+//! dart-lang/skills (`dart-*`), workos/auth.md (`workos-auth`).
 
 use include_dir::{include_dir, Dir};
 use std::path::Path;
@@ -15,8 +17,9 @@ use std::path::Path;
 static BUNDLED: Dir<'_> = include_dir!("$CARGO_MANIFEST_DIR/bundled/skills");
 
 /// Bumped whenever the vendored snapshot changes, so an upgraded binary
-/// re-materializes its bundled skills.
-const BUNDLE_VERSION: &str = "1";
+/// re-materializes its bundled skills. v2 adds flutter/skills, dart-lang/skills,
+/// and udapy/rust-agentic-skills; v3 adds workos/auth.md (`workos-auth`).
+const BUNDLE_VERSION: &str = "3";
 /// Ownership marker written into each bundled skill dir.
 const MARKER: &str = ".bundled";
 
@@ -94,7 +97,36 @@ mod tests {
 
     #[test]
     fn bundle_is_non_empty() {
-        assert!(bundled_count() >= 80, "expected the vendored skills");
+        // 93 original + 27 from flutter/dart/rust-agentic (v2).
+        assert!(bundled_count() >= 110, "expected the vendored skills");
+    }
+
+    #[test]
+    fn new_repo_skills_are_present() {
+        let names: Vec<String> = BUNDLED
+            .dirs()
+            .filter_map(|d| {
+                d.path()
+                    .file_name()
+                    .map(|n| n.to_string_lossy().into_owned())
+            })
+            .collect();
+        assert!(
+            names.iter().any(|n| n == "flutter-add-widget-test"),
+            "flutter skill"
+        );
+        assert!(
+            names.iter().any(|n| n == "dart-use-pattern-matching"),
+            "dart skill"
+        );
+        assert!(
+            names.iter().any(|n| n == "ras-rust-core"),
+            "rust-agentic skill"
+        );
+        assert!(
+            names.iter().any(|n| n == "workos-auth"),
+            "workos auth.md skill"
+        );
     }
 
     #[test]
