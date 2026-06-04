@@ -2,6 +2,10 @@
 **/*.rs.bk
 *.pdb
 
+# Stray Xcode/SwiftPM build output (e.g. from iOS tooling run at the repo root).
+# blugo's own Flutter artifacts are ignored by blugo/.gitignore.
+/build/
+
 # blumi runtime data (never commit)
 /.blumi/
 blumi.db
