@@ -10,6 +10,7 @@ mod cost;
 mod dialog;
 mod diff;
 mod highlight;
+mod icons;
 mod logo;
 mod markdown;
 mod mascot;

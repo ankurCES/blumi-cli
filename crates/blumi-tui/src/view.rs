@@ -1,8 +1,9 @@
 //! Rendering.
 
+use crate::icons;
 use crate::model::{fmt_dur, Entry, Focus, Model};
 use crate::primitives::{centered_rect, shorten, truncate};
-use crate::theme::{icon, Theme};
+use crate::theme::Theme;
 use blumi_protocol::TodoStatus;
 use ratatui::layout::{Alignment, Constraint, Layout, Rect};
 use ratatui::style::{Color, Modifier, Style};
@@ -216,7 +217,7 @@ fn render_sidebar(model: &mut Model, f: &mut Frame, area: Rect, theme: &Theme) {
                 theme,
                 "(no projects)",
                 |ws, i| {
-                    let star = if ws.pinned { "★" } else { " " };
+                    let star = if ws.pinned { icons::pin() } else { " " };
                     let style = if i == model.ws_sel { sel_style } else { body };
                     vec![
                         Span::styled(format!("{star} "), theme.accent()),
@@ -278,7 +279,7 @@ fn render_dashboard(model: &mut Model, f: &mut Frame, area: Rect, theme: &Theme)
     // A full rounded box (posting-style), with a live ● dot + "agent" title.
     let title = Line::from(vec![
         Span::styled(
-            format!(" {} ", icon::DOT),
+            format!(" {} ", icons::dot()),
             Style::default().fg(dot_color).add_modifier(Modifier::BOLD),
         ),
         Span::styled(
@@ -443,7 +444,7 @@ fn metrics_lines(model: &Model, theme: &Theme, w: usize, dot_color: Color) -> Ve
     lines.push(Line::from(vec![
         Span::styled(format!("{:>7} ", "status"), theme.dim()),
         Span::styled(
-            format!("{} ", icon::DOT),
+            format!("{} ", icons::dot()),
             Style::default().fg(dot_color).add_modifier(Modifier::BOLD),
         ),
         Span::styled(
@@ -556,10 +557,10 @@ fn agent_lines(model: &Model, theme: &Theme, w: usize) -> Vec<Line<'static>> {
                 theme.accent(),
             ),
             crate::model::AgentStatus::Done => {
-                (icon::OK.to_string(), Style::default().fg(theme.success))
+                (icons::ok().to_string(), Style::default().fg(theme.success))
             }
             crate::model::AgentStatus::Failed => {
-                ("✗".to_string(), Style::default().fg(theme.error))
+                (icons::fail().to_string(), Style::default().fg(theme.error))
             }
         };
         lines.push(Line::from(vec![
@@ -599,7 +600,7 @@ fn task_lines(model: &Model, theme: &Theme, w: usize) -> Vec<Line<'static>> {
         .collect();
     for todo in &model.todos {
         let (mark, style) = match todo.status {
-            TodoStatus::Completed => (icon::OK.to_string(), Style::default().fg(theme.success)),
+            TodoStatus::Completed => (icons::ok().to_string(), Style::default().fg(theme.success)),
             TodoStatus::InProgress => (
                 crate::mascot::spinner(model.spinner_frame).to_string(),
                 theme.accent(),
@@ -640,8 +641,8 @@ fn activity_lines(model: &Model, theme: &Theme, w: usize) -> Vec<Line<'static>> 
     let mut lines: Vec<Line> = Vec::new();
     for (name, ok) in tools {
         let (mark, style) = match ok {
-            Some(true) => (icon::OK.to_string(), Style::default().fg(theme.success)),
-            Some(false) => (icon::ERR.to_string(), Style::default().fg(theme.error)),
+            Some(true) => (icons::ok().to_string(), Style::default().fg(theme.success)),
+            Some(false) => (icons::err().to_string(), Style::default().fg(theme.error)),
             None => (
                 crate::mascot::spinner(model.spinner_frame).to_string(),
                 theme.accent(),
@@ -913,7 +914,7 @@ fn render_dialog(model: &mut Model, f: &mut Frame, area: Rect, theme: &Theme) {
         .border_type(BorderType::Rounded)
         .border_style(Style::default().fg(theme.primary))
         .title(Span::styled(
-            format!(" {} blumi · {title} ", icon::FLOWER),
+            format!(" {} blumi · {title} ", icons::agent()),
             theme.bold_primary(),
         ));
     let inner = block.inner(popup);
@@ -972,7 +973,7 @@ fn render_header(model: &Model, f: &mut Frame, area: Rect, theme: &Theme) {
     // session title is its own segment so the brand stays a stable app signature.
     let mut spans = vec![
         Span::styled("▶▮◀ ", theme.dim()),
-        Span::styled(format!("{} blumi", icon::FLOWER), theme.bold_primary()),
+        Span::styled(format!("{} blumi", icons::agent()), theme.bold_primary()),
     ];
     if !model.session_title.is_empty() {
         spans.push(div());
@@ -1035,7 +1036,11 @@ fn render_header(model: &Model, f: &mut Frame, area: Rect, theme: &Theme) {
         spans.push(Span::styled("   ", theme.dim()));
         for (i, (name, remote)) in model.tabs.iter().enumerate() {
             let active = i == model.active_tab;
-            let glyph = if *remote { "☁" } else { "▪" };
+            let glyph = if *remote {
+                icons::remote()
+            } else {
+                icons::local()
+            };
             let chip = format!(" {glyph} {name} ");
             let style = if active {
                 theme.bold_primary()
@@ -1179,13 +1184,20 @@ fn build_lines(model: &Model, width: usize, theme: &Theme) -> Vec<Line<'static>>
         match entry {
             Entry::User(t) => {
                 let content = wrap_lines(t, inner, theme.body());
-                push_card(&mut lines, icon::USER, "you", theme.accent, content, width);
+                push_card(
+                    &mut lines,
+                    icons::user(),
+                    "you",
+                    theme.accent,
+                    content,
+                    width,
+                );
             }
             Entry::Assistant(t) => {
                 let content = crate::markdown::render_markdown(t, inner, theme);
                 push_card(
                     &mut lines,
-                    icon::FLOWER,
+                    icons::agent(),
                     "blumi",
                     theme.primary,
                     content,
@@ -1206,10 +1218,10 @@ fn build_lines(model: &Model, width: usize, theme: &Theme) -> Vec<Line<'static>>
                         crate::mascot::spinner(model.spinner_frame).to_string(),
                         theme.accent,
                     ),
-                    Some(true) => (icon::OK.to_string(), theme.success),
-                    Some(false) => (icon::ERR.to_string(), theme.error),
+                    Some(true) => (icons::ok().to_string(), theme.success),
+                    Some(false) => (icons::err().to_string(), theme.error),
                 };
-                let mut label = format!("{} {name}", icon::TOOL);
+                let mut label = format!("{} {name}", icons::tool());
                 if let Some(d) = diff_stat {
                     label.push_str(&format!("  {d}"));
                 }
@@ -1262,7 +1274,7 @@ fn build_lines(model: &Model, width: usize, theme: &Theme) -> Vec<Line<'static>>
         let content = crate::markdown::render_markdown(s, inner, theme);
         push_card(
             &mut lines,
-            icon::FLOWER,
+            icons::agent(),
             "blumi",
             theme.primary,
             content,
@@ -1298,24 +1310,24 @@ fn push_card(
     content: Vec<Line<'static>>,
     width: usize,
 ) {
-    let head = format!("{} {glyph} {label} ", icon::TL);
+    let head = format!("{} {glyph} {label} ", icons::tl());
     let used = head.chars().count();
-    let rule = icon::H.repeat(width.saturating_sub(used).max(1));
+    let rule = icons::h().repeat(width.saturating_sub(used).max(1));
     out.push(Line::from(Span::styled(
         format!("{head}{rule}"),
         Style::default().fg(color).add_modifier(Modifier::BOLD),
     )));
     let gutter = Style::default().fg(color);
     for l in content {
-        let mut spans = vec![Span::styled(format!("{} ", icon::V), gutter)];
+        let mut spans = vec![Span::styled(format!("{} ", icons::v()), gutter)];
         spans.extend(l.spans);
         out.push(Line::from(spans));
     }
     out.push(Line::from(Span::styled(
         format!(
             "{}{}",
-            icon::BL,
-            icon::H.repeat(width.saturating_sub(1).max(1))
+            icons::bl(),
+            icons::h().repeat(width.saturating_sub(1).max(1))
         ),
         gutter,
     )));
@@ -1327,8 +1339,8 @@ fn bar(frac: f64, width: usize) -> String {
     let filled = (frac.clamp(0.0, 1.0) * w as f64).round() as usize;
     format!(
         "{}{}",
-        icon::BAR_FULL.repeat(filled),
-        icon::BAR_EMPTY.repeat(w - filled)
+        icons::bar_full().repeat(filled),
+        icons::bar_empty().repeat(w - filled)
     )
 }
 

@@ -676,24 +676,7 @@ pub fn init_fill_from_env() {
     }
 }
 
-/// Icons — crush's glyph alphabet (from charmbracelet/crush styles.go), which
-/// project_mythara also adopts. Dingbats render at width 1 in most terminals.
-pub mod icon {
-    pub const FLOWER: &str = "✿"; // the brand mark / agent
-    pub const USER: &str = "›"; // user prompt marker
-    pub const TOOL: &str = "▸"; // a tool call
-    pub const OK: &str = "✓"; // success
-    pub const ERR: &str = "×"; // failure (crush uses ×, not ✗)
-    pub const DOT: &str = "●"; // status / live dot
-                               // Rounded box-drawing for cards (widely supported in modern terminals).
-    pub const TL: &str = "╭";
-    pub const BL: &str = "╰";
-    pub const H: &str = "─";
-    pub const V: &str = "│";
-    // Progress-bar cells.
-    pub const BAR_FULL: &str = "█";
-    pub const BAR_EMPTY: &str = "░";
-}
+// Icons moved to the `crate::icons` module (unicode / nerd / ascii modes).
 
 #[cfg(test)]
 mod tests {
