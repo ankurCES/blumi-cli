@@ -54,5 +54,21 @@ for triple in \
   done
 done
 
+# workos/auth.md (MIT) — not a skills/ repo: AUTH.md is itself the skill manifest.
+# Vendor it as the `workos-auth` skill (frontmatter + AUTH.md), keeping the
+# service/provider implementation guides under references/.
+echo "→ workos/auth.md"
+clone="$TMP/workos-auth"
+git clone --depth 1 -q "https://github.com/workos/auth.md" "$clone"
+[ -f "$clone/LICENSE" ] && cp "$clone/LICENSE" "$LIC/workos-auth-LICENSE"
+out="$DEST/workos-auth"
+mkdir -p "$out/references"
+# Keep the description free of ": " (invalid in an unquoted YAML scalar) and
+# quote it, so the frontmatter parses cleanly.
+authmd_desc="WorkOS auth.md — how an agent authenticates to a service via agentic registration (discover, register, claim with OTP when there is no user identity or no ID-JAG, exchange an ID-JAG for an access token, call the API, handle revocation). Load before implementing agent-to-service authentication, or when an API returns 401 with a WWW-Authenticate resource_metadata pointer."
+{ printf -- '---\nname: workos-auth\ndescription: "%s"\n---\n\n' "$authmd_desc"; cat "$clone/AUTH.md"; } > "$out/SKILL.md"
+[ -f "$clone/agent-services/README.md" ] && cp "$clone/agent-services/README.md" "$out/references/agent-services.md"
+[ -f "$clone/agent-providers/README.md" ] && cp "$clone/agent-providers/README.md" "$out/references/agent-providers.md"
+
 echo "vendored $(find "$DEST" -name SKILL.md | wc -l | tr -d ' ') skills into $DEST"
 du -sh "$DEST"

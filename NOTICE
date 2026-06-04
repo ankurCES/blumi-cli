@@ -19,6 +19,10 @@ crates/blumi-skills/bundled/licenses/.
   https://github.com/flutter/skills
 - dart-lang/skills            (prefix: dart-)     — BSD-3-Clause, Copyright the Dart project authors
   https://github.com/dart-lang/skills
+- workos/auth.md              (skill: workos-auth) — MIT, Copyright (c) 2026 WorkOS
+  https://github.com/workos/auth.md
+  (AUTH.md is vendored as the `workos-auth` SKILL.md; its agent-services /
+  agent-providers implementation guides are kept under references/.)
 
 Skill folders are namespaced by the prefixes above to avoid collisions (the
 flutter/dart skills already carry their `flutter-`/`dart-` topic prefix upstream,
