@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:blugo/data/api.dart';
 import 'package:blugo/data/cache.dart';
 import 'package:blugo/data/elevenlabs.dart';
 import 'package:blugo/data/events.dart';
@@ -118,6 +119,44 @@ void main() {
     test('tolerates an empty/absent voices list', () {
       expect(parseElevenLabsVoices('{"voices":[]}'), isEmpty);
       expect(parseElevenLabsVoices('{}'), isEmpty);
+    });
+  });
+
+  group('grid + tasks', () {
+    test('TaskItem parses owner (remote attribution); empty → local', () {
+      final local = TaskItem.fromMap(
+          {'id': 't1', 'title': 'a', 'state': 'todo', 'priority': 2});
+      expect(local.owner, isNull);
+
+      final remote = TaskItem.fromMap({
+        'id': 't2',
+        'title': 'b',
+        'state': 'doing',
+        'priority': 1,
+        'owner': 'mac-2'
+      });
+      expect(remote.owner, 'mac-2');
+
+      final empty = TaskItem.fromMap(
+          {'id': 't3', 'title': 'c', 'state': 'todo', 'priority': 3, 'owner': ''});
+      expect(empty.owner, isNull);
+    });
+
+    test('GridPeer parses discovery fields', () {
+      final p = GridPeer.fromMap({
+        'id': 'mac-2._blumi._tcp.local.',
+        'name': 'mac-2',
+        'host': '10.0.0.150',
+        'port': 7777,
+        'version': '0.1.0',
+        'grid_id': 'cf0e840b2f11',
+        'online': true,
+      });
+      expect(p.name, 'mac-2');
+      expect(p.host, '10.0.0.150');
+      expect(p.port, 7777);
+      expect(p.online, isTrue);
+      expect(p.gridId, 'cf0e840b2f11');
     });
   });
 

@@ -729,7 +729,13 @@ pub async fn run(
     // Advertise on the LAN over mDNS so blugo auto-discovers this gateway. Held
     // for the server's lifetime; unregisters on drop. Best-effort (no-op on
     // loopback / failure).
-    let _beacon = crate::discovery::advertise(ip, addr.port(), auth.is_some(), grid_id.as_deref());
+    let _beacon = crate::discovery::advertise(
+        ip,
+        addr.port(),
+        auth.is_some(),
+        grid_id.as_deref(),
+        Some(provider.config.grid.node_name.as_str()),
+    );
 
     // Grid: browse for same-grid peers on a dedicated thread (mdns-sd's browse
     // Receiver is blocking), feeding the shared registry. Excludes our own

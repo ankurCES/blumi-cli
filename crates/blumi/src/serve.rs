@@ -137,6 +137,11 @@ fn install(config: &BlumiConfig, host: Option<String>, port: Option<u16>) -> any
     let port = port.unwrap_or(DEFAULT_PORT);
     let exe = exe()?;
     let log = config.paths.home.join("serve.log");
+    // Run the service in the directory it was installed from (so the task board
+    // + dispatched work use a real workspace, not `/`).
+    let cwd = std::env::current_dir()
+        .map(|p| p.display().to_string())
+        .unwrap_or_else(|_| config.paths.home.display().to_string());
     let plist = plist_path()?;
     if let Some(parent) = plist.parent() {
         std::fs::create_dir_all(parent)?;
@@ -155,6 +160,7 @@ fn install(config: &BlumiConfig, host: Option<String>, port: Option<u16>) -> any
   </array>
   <key>RunAtLoad</key><true/>
   <key>KeepAlive</key><true/>
+  <key>WorkingDirectory</key><string>{cwd}</string>
   <key>StandardOutPath</key><string>{log}</string>
   <key>StandardErrorPath</key><string>{log}</string>
 </dict>
@@ -204,13 +210,17 @@ fn install(config: &BlumiConfig, host: Option<String>, port: Option<u16>) -> any
     let host = resolve_host(host);
     let port = port.unwrap_or(DEFAULT_PORT);
     let exe = exe()?;
+    // Run the service in the directory it was installed from (real workspace).
+    let cwd = std::env::current_dir()
+        .map(|p| p.display().to_string())
+        .unwrap_or_else(|_| config.paths.home.display().to_string());
     let unit = unit_path()?;
     if let Some(parent) = unit.parent() {
         std::fs::create_dir_all(parent)?;
     }
     let body = format!(
         "[Unit]\nDescription=blumi gateway for the blugo app\nAfter=network-online.target\n\n\
-         [Service]\nExecStart={exe} serve run --host {host} --port {port}\nRestart=always\nRestartSec=3\n\n\
+         [Service]\nExecStart={exe} serve run --host {host} --port {port}\nWorkingDirectory={cwd}\nRestart=always\nRestartSec=3\n\n\
          [Install]\nWantedBy=default.target\n"
     );
     std::fs::write(&unit, body).with_context(|| format!("writing {}", unit.display()))?;
