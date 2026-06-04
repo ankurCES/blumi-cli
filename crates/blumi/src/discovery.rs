@@ -13,13 +13,21 @@
 use mdns_sd::{ServiceDaemon, ServiceInfo};
 use std::net::{IpAddr, Ipv4Addr};
 
-const SERVICE_TYPE: &str = "_blumi._tcp.local.";
+pub(crate) const SERVICE_TYPE: &str = "_blumi._tcp.local.";
 
 /// Holds the live mDNS registration; unregisters and shuts the daemon down when
 /// dropped (i.e. when the server stops).
 pub struct Beacon {
     daemon: ServiceDaemon,
     fullname: String,
+}
+
+impl Beacon {
+    /// The mDNS fullname this beacon registered (e.g. `mac._blumi._tcp.local.`),
+    /// used by the grid browser to exclude our own advertisement.
+    pub fn fullname(&self) -> &str {
+        &self.fullname
+    }
 }
 
 impl Drop for Beacon {
@@ -32,7 +40,15 @@ impl Drop for Beacon {
 /// Advertise this gateway on the LAN. Keep the returned [`Beacon`] alive for as
 /// long as the server runs. Returns `None` when there's nothing to advertise
 /// (loopback-only bind, IPv6, or registration failure) — never panics.
-pub fn advertise(bind_ip: IpAddr, port: u16, auth_required: bool) -> Option<Beacon> {
+///
+/// When `grid_id` is `Some`, a non-sensitive `grid` TXT key is published so grid
+/// peers can find each other (the secret itself is never advertised).
+pub fn advertise(
+    bind_ip: IpAddr,
+    port: u16,
+    auth_required: bool,
+    grid_id: Option<&str>,
+) -> Option<Beacon> {
     // Resolve a concrete LAN IPv4 to publish. A wildcard bind (0.0.0.0) is
     // turned into the primary LAN address; loopback isn't reachable by phones.
     let ip: Ipv4Addr = match bind_ip {
@@ -55,12 +71,17 @@ pub fn advertise(bind_ip: IpAddr, port: u16, auth_required: bool) -> Option<Beac
     let host_name = format!("{base}.local.");
     let version = env!("CARGO_PKG_VERSION");
     let auth = if auth_required { "required" } else { "none" };
-    let props: [(&str, &str); 4] = [
+    let mut props: Vec<(&str, &str)> = vec![
         ("name", raw.as_str()),
         ("version", version),
         ("auth", auth),
         ("path", "/"),
     ];
+    // Non-sensitive grid identity so same-grid peers can find each other; the
+    // shared secret is never advertised.
+    if let Some(gid) = grid_id.filter(|g| !g.is_empty()) {
+        props.push(("grid", gid));
+    }
 
     let daemon = ServiceDaemon::new().ok()?;
     let info = ServiceInfo::new(

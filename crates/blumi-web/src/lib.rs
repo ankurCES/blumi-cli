@@ -213,6 +213,11 @@ pub trait Management: Send + Sync {
     fn task_next(&self) -> Option<serde_json::Value>;
     /// Advance a task to done (or review).
     fn task_advance(&self, id: &str, review: bool);
+    /// Discovered grid peers as JSON (`{ self: {...}, peers: [...] }`), or
+    /// `{ enabled: false, peers: [] }` when the grid is disabled. Default off.
+    fn grid_peers(&self) -> serde_json::Value {
+        serde_json::json!({ "enabled": false, "peers": [] })
+    }
 }
 
 /// Autonomous-loop state, surfaced over `/api/loop/status`.
@@ -308,6 +313,7 @@ pub fn router(state: AppState) -> Router {
         .route("/api/cron/remove", post(api::cron_remove))
         .route("/api/skills", get(api::skills))
         .route("/api/tasks", get(api::tasks))
+        .route("/api/grid/peers", get(api::grid_peers))
         .route("/api/memory", get(api::memory_get).post(api::memory_set))
         .route("/api/usage", get(api::usage))
         .route("/api/status", get(api::status))
