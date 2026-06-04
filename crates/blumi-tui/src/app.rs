@@ -136,6 +136,8 @@ pub struct TuiConfig {
     pub brain_mode: String,
     /// Auto-continue step budget (dashboard display + `/autocontinue` default).
     pub auto_continue: u32,
+    /// User themes loaded from ~/.blumi/themes/*.toml (appended to the built-ins).
+    pub themes: Vec<crate::theme::Theme>,
 }
 
 /// Run the interactive TUI, sourcing sessions from `factory`. Restores the
@@ -191,6 +193,10 @@ async fn run_loop(
     model.tasks_path = cfg.tasks_path;
     model.brain_mode = cfg.brain_mode;
     model.auto_continue = cfg.auto_continue;
+    // Built-in palettes + any user themes from ~/.blumi/themes; re-sync the active
+    // theme in case a user theme overrides the default (rose) at index 0.
+    model.themes = crate::theme::ThemeRegistry::builtin().with_user(cfg.themes);
+    model.theme = model.themes.get(model.theme_idx);
 
     let mut session = factory.create().await?;
     let mut events = session.subscribe();
