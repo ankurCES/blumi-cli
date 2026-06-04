@@ -35,14 +35,28 @@ class _ConnectScreenState extends State<ConnectScreen> {
             shrinkWrap: true,
             padding: const EdgeInsets.all(24),
             children: [
-              Text('✿ blugo',
-                  style: TextStyle(
-                      fontSize: 44,
-                      fontWeight: FontWeight.bold,
-                      color: cs.primary)),
+              Center(
+                child: Image.asset(
+                  'assets/icon/blugo_mark.png',
+                  width: 96,
+                  height: 96,
+                  filterQuality: FilterQuality.medium,
+                ),
+              ),
+              const SizedBox(height: 10),
+              Center(
+                child: Text('blugo',
+                    style: TextStyle(
+                        fontSize: 44,
+                        fontWeight: FontWeight.bold,
+                        color: cs.primary)),
+              ),
               const SizedBox(height: 6),
-              Text('connect to your blumi gateway',
-                  style: TextStyle(color: cs.onSurface.withValues(alpha: 0.6))),
+              Center(
+                child: Text('connect to your blumi gateway',
+                    style:
+                        TextStyle(color: cs.onSurface.withValues(alpha: 0.6))),
+              ),
               const SizedBox(height: 28),
               TextField(
                 controller: _host,

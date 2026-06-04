@@ -52,7 +52,7 @@ void main() {
 
   testWidgets('connect screen renders', (tester) async {
     await tester.pumpWidget(MaterialApp(home: ConnectScreen(AppController())));
-    expect(find.text('✿ blugo'), findsOneWidget);
+    expect(find.text('blugo'), findsOneWidget);
     expect(find.text('Connect'), findsOneWidget);
   });
 }
