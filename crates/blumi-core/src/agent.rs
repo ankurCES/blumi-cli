@@ -537,7 +537,7 @@ fn finalize_tool_calls(accum: BTreeMap<u32, ToolAccum>) -> Vec<ToolCall> {
             let arguments = if a.args.trim().is_empty() {
                 serde_json::json!({})
             } else {
-                serde_json::from_str(&a.args).unwrap_or(serde_json::json!({}))
+                parse_tool_args(&a.args).unwrap_or(serde_json::json!({}))
             };
             let id = a.id.map(ToolCallId::from).unwrap_or_default();
             Some(ToolCall {
@@ -547,6 +547,65 @@ fn finalize_tool_calls(accum: BTreeMap<u32, ToolAccum>) -> Vec<ToolCall> {
             })
         })
         .collect()
+}
+
+/// Parse model-emitted tool-call arguments into JSON, tolerating the malformed
+/// output some models produce for large string values. The classic offender is
+/// a multi-line `content` (e.g. a plan written via `FileWrite`): models — and
+/// many OpenAI-compatible / local gateways especially — emit *raw*, unescaped
+/// control characters (newlines, tabs) inside the JSON string, which strict JSON
+/// forbids. A small `Bash` call rarely trips this; a big plan almost always
+/// does. Previously a failed parse silently became `{}`, which then surfaced as
+/// a misleading "missing field `path`". We first try a strict parse, then retry
+/// after escaping stray control characters inside strings. Returns `None` only
+/// when the JSON is unrecoverable (e.g. truncated mid-stream).
+fn parse_tool_args(raw: &str) -> Option<serde_json::Value> {
+    if let Ok(v) = serde_json::from_str::<serde_json::Value>(raw) {
+        return Some(v);
+    }
+    let repaired = escape_control_chars_in_strings(raw);
+    serde_json::from_str::<serde_json::Value>(&repaired).ok()
+}
+
+/// Escape raw control characters (U+0000–U+001F) that appear *inside* JSON
+/// string literals — `serde_json` rejects them in strict mode. A small state
+/// machine tracks string/escape context so whitespace *between* tokens (which
+/// JSON permits) is left untouched and only characters within quotes are fixed.
+fn escape_control_chars_in_strings(s: &str) -> String {
+    let mut out = String::with_capacity(s.len() + 16);
+    let mut in_string = false;
+    let mut escaped = false;
+    for c in s.chars() {
+        if !in_string {
+            if c == '"' {
+                in_string = true;
+            }
+            out.push(c);
+            continue;
+        }
+        if escaped {
+            // Previous char was a backslash; emit this verbatim (valid escape).
+            out.push(c);
+            escaped = false;
+            continue;
+        }
+        match c {
+            '\\' => {
+                out.push(c);
+                escaped = true;
+            }
+            '"' => {
+                out.push(c);
+                in_string = false;
+            }
+            '\n' => out.push_str("\\n"),
+            '\r' => out.push_str("\\r"),
+            '\t' => out.push_str("\\t"),
+            c if (c as u32) < 0x20 => out.push_str(&format!("\\u{:04x}", c as u32)),
+            _ => out.push(c),
+        }
+    }
+    out
 }
 
 /// Drop any tool-result message whose `tool_use` isn't present earlier in the
@@ -932,5 +991,51 @@ mod tests {
         assert_eq!(calls.len(), 1);
         assert_eq!(calls[0].name, "Bash");
         assert_eq!(calls[0].arguments["command"], "ls");
+    }
+
+    #[test]
+    fn finalize_repairs_raw_newlines_in_string_args() {
+        // A FileWrite for a plan: the model put RAW newlines inside the JSON
+        // `content` string (invalid strict JSON). Before the repair this parsed
+        // to `{}` and the tool failed with a misleading "missing field `path`".
+        let mut accum = BTreeMap::new();
+        accum.insert(
+            0u32,
+            ToolAccum {
+                id: Some("w1".into()),
+                name: Some("FileWrite".into()),
+                args: "{\"path\":\"docs/plan.md\",\"content\":\"# Plan\nline one\n\tindented\"}"
+                    .into(),
+            },
+        );
+        let calls = finalize_tool_calls(accum);
+        assert_eq!(calls.len(), 1);
+        assert_eq!(calls[0].arguments["path"], "docs/plan.md");
+        assert_eq!(
+            calls[0].arguments["content"], "# Plan\nline one\n\tindented",
+            "raw control chars inside the string should be preserved as real newlines/tabs"
+        );
+    }
+
+    #[test]
+    fn parse_tool_args_handles_strict_and_malformed() {
+        // Strict-valid JSON is returned as-is.
+        let ok = parse_tool_args("{\"path\":\"a\",\"content\":\"x\"}").unwrap();
+        assert_eq!(ok["path"], "a");
+
+        // Raw newline inside a string is repaired (not collapsed to {}).
+        let fixed = parse_tool_args("{\"content\":\"a\nb\"}").unwrap();
+        assert_eq!(fixed["content"], "a\nb");
+
+        // Whitespace BETWEEN tokens (legal JSON) must survive untouched.
+        let spaced = parse_tool_args("{\n  \"k\": \"v\"\n}").unwrap();
+        assert_eq!(spaced["k"], "v");
+
+        // A backslash-escaped sequence already in the string is left intact.
+        let esc = parse_tool_args("{\"content\":\"line\\nkept\"}").unwrap();
+        assert_eq!(esc["content"], "line\nkept");
+
+        // Genuinely truncated JSON stays unrecoverable.
+        assert!(parse_tool_args("{\"path\":\"a\",\"content\":\"oops").is_none());
     }
 }
