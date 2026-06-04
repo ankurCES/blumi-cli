@@ -29,14 +29,13 @@ class _BlugoAppState extends State<BlugoApp> {
 
   @override
   Widget build(BuildContext context) {
-    return MaterialApp(
-      title: 'blugo',
-      debugShowCheckedModeBanner: false,
-      theme: themeByName('rose').toThemeData(),
-      home: AnimatedBuilder(
-        animation: app,
-        builder: (context, _) =>
-            app.connected ? HomeShell(app) : ConnectScreen(app),
+    return AnimatedBuilder(
+      animation: app,
+      builder: (context, _) => MaterialApp(
+        title: 'blugo',
+        debugShowCheckedModeBanner: false,
+        theme: themeByName(app.themeName).toThemeData(),
+        home: app.connected ? HomeShell(app) : ConnectScreen(app),
       ),
     );
   }

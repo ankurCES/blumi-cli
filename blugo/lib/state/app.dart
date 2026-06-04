@@ -37,6 +37,10 @@ class AppController extends ChangeNotifier {
     return _discoveredRaw.where((s) => !saved.contains(s.id)).toList();
   }
 
+  /// Selected UI theme (persisted) + runtime auto-approve (yolo) toggle.
+  String themeName = 'rose';
+  bool yolo = false;
+
   bool get connected => session != null;
 
   static const _kServers = 'servers';
@@ -46,6 +50,7 @@ class AppController extends ChangeNotifier {
 
   Future<void> _loadServers() async {
     final p = await SharedPreferences.getInstance();
+    themeName = p.getString('theme') ?? themeName;
     final raw = p.getString(_kServers);
     if (raw != null) {
       try {
@@ -213,6 +218,23 @@ class AppController extends ChangeNotifier {
       notifyListeners();
     }
     await l?.stop();
+  }
+
+  // --- control center --------------------------------------------------------
+
+  Future<void> setTheme(String name) async {
+    themeName = name;
+    notifyListeners();
+    final p = await SharedPreferences.getInstance();
+    await p.setString('theme', name);
+  }
+
+  Future<void> setYolo(bool on) async {
+    yolo = on;
+    notifyListeners();
+    try {
+      await session?.api.setYolo(on);
+    } catch (_) {}
   }
 
   Future<void> _open() async {

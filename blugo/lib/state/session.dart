@@ -183,6 +183,12 @@ class BlumiSession extends ChangeNotifier {
     } catch (_) {}
   }
 
+  /// Optimistically reflect a model change made via the control center.
+  void applyModel(String model) {
+    modelName = model;
+    notifyListeners();
+  }
+
   double get contextFrac =>
       contextSize > 0 ? (contextTokens / contextSize).clamp(0.0, 1.0) : 0.0;
 
