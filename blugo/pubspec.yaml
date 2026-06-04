@@ -41,6 +41,8 @@ dependencies:
   record: ^7.0.0
   audioplayers: ^6.7.0
   path_provider: ^2.1.5
+  gpt_markdown: ^1.1.7
+  flutter_highlight: ^0.7.0
 
 dev_dependencies:
   flutter_test:

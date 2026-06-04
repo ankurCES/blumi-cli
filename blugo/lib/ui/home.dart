@@ -5,6 +5,7 @@ import '../data/voice.dart';
 import '../state/app.dart';
 import '../state/session.dart';
 import 'control.dart';
+import 'markdown.dart';
 import 'palette.dart';
 import 'thinking.dart';
 
@@ -265,7 +266,7 @@ class EntryView extends StatelessWidget {
           glyph: '✿',
           label: streaming ? 'blumi…' : 'blumi',
           color: cs.primary,
-          child: SelectableText(text),
+          child: BlumiMarkdown(text),
         ),
       NoticeEntry(:final text) => Padding(
           padding: const EdgeInsets.symmetric(vertical: 4),
