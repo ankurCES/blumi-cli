@@ -903,11 +903,15 @@ fn render_dialog(model: &mut Model, f: &mut Frame, area: Rect, theme: &Theme) {
         .as_ref()
         .map(|d| d.title.clone())
         .unwrap_or_default();
+    // Tuxedo-style title: "✿ blumi · <title>" (keeps the picker name as a substring).
     let block = Block::default()
         .borders(Borders::ALL)
         .border_type(BorderType::Rounded)
         .border_style(Style::default().fg(theme.primary))
-        .title(Span::styled(format!(" {title} "), theme.bold_primary()));
+        .title(Span::styled(
+            format!(" {} blumi · {title} ", icon::FLOWER),
+            theme.bold_primary(),
+        ));
     let inner = block.inner(popup);
     f.render_widget(block, popup);
 
@@ -922,21 +926,32 @@ fn render_dialog(model: &mut Model, f: &mut Frame, area: Rect, theme: &Theme) {
     ]);
     f.render_widget(Paragraph::new(filter_line), filter_area);
 
+    // Rows: marker + label (left) … key/hint (right-aligned), with the selected
+    // row filled (selection surface) for a clear focus, tuxedo-style.
+    let total = list_area.width as usize;
     let rows: Vec<Line> = d
         .rows()
         .into_iter()
         .map(|(label, hint, selected)| {
             let marker = if selected { "❯ " } else { "  " };
-            let label_style = if selected {
-                theme.bold_primary()
+            let used = 2 + label.chars().count() + hint.chars().count() + 1;
+            let pad = total.saturating_sub(used);
+            let (mk, lbl, fill, key) = if selected {
+                let base = theme.selection();
+                (
+                    base.fg(theme.accent).add_modifier(Modifier::BOLD),
+                    base.add_modifier(Modifier::BOLD),
+                    base,
+                    base.fg(theme.fg_subtle),
+                )
             } else {
-                theme.body()
+                (theme.accent(), theme.body(), Style::default(), theme.dim())
             };
             Line::from(vec![
-                Span::styled(marker, theme.accent()),
-                Span::styled(label.to_string(), label_style),
-                Span::raw("   "),
-                Span::styled(hint.to_string(), theme.dim()),
+                Span::styled(marker, mk),
+                Span::styled(label.to_string(), lbl),
+                Span::styled(" ".repeat(pad), fill),
+                Span::styled(format!("{hint} "), key),
             ])
         })
         .collect();
