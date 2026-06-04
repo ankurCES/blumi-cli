@@ -97,6 +97,11 @@ pub async fn build_session(
     registry.register(Arc::new(blumi_core::Typed(
         blumi_skills::GridStatusTool::new(),
     )));
+    // Grid dispatch: run self-contained jobs on grid peers (round-robin) so a
+    // single prompt can fan work across the fleet and collate the results.
+    registry.register(Arc::new(blumi_core::Typed(
+        blumi_skills::GridDispatchTool::new(),
+    )));
 
     // Cross-session recall: full-text (FTS5) search over past sessions. Skipped
     // if the history DB can't be opened — it must never block startup.

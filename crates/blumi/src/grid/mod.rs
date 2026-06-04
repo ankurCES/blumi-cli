@@ -18,6 +18,7 @@ use mdns_sd::{ServiceDaemon, ServiceEvent};
 use sha2::{Digest, Sha256};
 use std::collections::HashMap;
 use std::net::Ipv4Addr;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use tokio_util::sync::CancellationToken;
@@ -221,6 +222,54 @@ impl blumi_core::GridOverflow for GridOverflowHook {
         {
             Ok(out) if !out.trim().is_empty() => Some(out),
             _ => None,
+        }
+    }
+}
+
+/// Explicit per-job dispatch hook for the `grid_dispatch` agent tool: run a
+/// self-contained job on a chosen (or round-robin) grid peer and return its
+/// output. This is what lets a single chat prompt fan work across the whole grid
+/// — the model calls it once per job, so distribution doesn't depend on the
+/// local sub-agent cap being exceeded (the [`GridOverflowHook`] limitation).
+pub struct GridDispatchHook {
+    pub registry: Arc<PeerRegistry>,
+    pub secret: String,
+    /// Round-robin cursor over live peers when no peer is named.
+    pub cursor: AtomicUsize,
+}
+
+#[async_trait::async_trait]
+impl blumi_core::GridDispatch for GridDispatchHook {
+    async fn dispatch(&self, peer: Option<&str>, prompt: &str) -> Result<(String, String), String> {
+        let peers = self.registry.live();
+        if peers.is_empty() {
+            return Err("no live grid peers to dispatch to".to_string());
+        }
+        // Choose a peer: by name/host match if requested, else round-robin.
+        let chosen = match peer.map(str::trim).filter(|p| !p.is_empty()) {
+            Some(want) => {
+                let w = want.to_lowercase();
+                peers
+                    .iter()
+                    .find(|p| {
+                        p.name.to_lowercase().contains(&w) || p.id.to_lowercase().contains(&w)
+                    })
+                    .cloned()
+                    .ok_or_else(|| format!("no live grid peer matching '{want}'"))?
+            }
+            None => {
+                let idx = self.cursor.fetch_add(1, Ordering::Relaxed) % peers.len();
+                peers[idx].clone()
+            }
+        };
+        let client = client::Client::for_peer(&chosen, &self.secret);
+        match client
+            .run_task(prompt.to_string(), Duration::from_secs(900))
+            .await
+        {
+            Ok(out) if !out.trim().is_empty() => Ok((chosen.name.clone(), out)),
+            Ok(_) => Err(format!("peer '{}' returned no output", chosen.name)),
+            Err(e) => Err(format!("peer '{}' failed: {e}", chosen.name)),
         }
     }
 }

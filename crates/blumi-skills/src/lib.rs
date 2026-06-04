@@ -3,6 +3,7 @@
 
 mod bundled;
 mod catalog;
+mod grid_dispatch;
 mod grid_status;
 mod memory;
 mod memory_tool;
@@ -17,6 +18,7 @@ mod run_tests;
 
 pub use bundled::{bundled_count, sync_bundled_skills};
 pub use catalog::{Skill, SkillCatalog, SkillMeta};
+pub use grid_dispatch::GridDispatchTool;
 pub use grid_status::GridStatusTool;
 pub use memory::MemorySnapshot;
 pub use memory_tool::MemoryTool;

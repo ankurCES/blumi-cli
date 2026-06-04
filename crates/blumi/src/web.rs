@@ -771,6 +771,14 @@ pub async fn run(
             registry: reg.clone(),
             secret: grid_secret.clone().unwrap_or_default(),
         }));
+        // Explicit per-job dispatch for the `grid_dispatch` agent tool, so a
+        // single chat prompt can fan jobs across the whole grid (round-robin) and
+        // collate the results — independent of the local sub-agent cap.
+        blumi_core::set_grid_dispatch(std::sync::Arc::new(crate::grid::GridDispatchHook {
+            registry: reg.clone(),
+            secret: grid_secret.clone().unwrap_or_default(),
+            cursor: std::sync::atomic::AtomicUsize::new(0),
+        }));
         let self_id = _beacon.as_ref().map(|b| b.fullname().to_string());
         std::thread::spawn(move || {
             crate::grid::browse_into(

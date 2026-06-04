@@ -79,6 +79,37 @@ pub fn grid_info() -> Option<Arc<dyn GridInfo>> {
     GRID_INFO.read().ok().and_then(|g| g.clone())
 }
 
+/// A hook the gateway sets so the `grid_dispatch` agent tool can run a
+/// self-contained job on another machine in the grid and bring the result back.
+/// Unlike [`GridOverflow`] (which only fires when the local sub-agent cap is
+/// exceeded and always picks one peer), this is an *explicit* per-job dispatch
+/// the model drives — so a single prompt can fan work across the whole fleet,
+/// round-robin, and collate the results. The impl lives in the binary (it owns
+/// the peer registry + grid secret); blumi-core only calls it.
+#[async_trait]
+pub trait GridDispatch: Send + Sync {
+    /// Run `prompt` on a grid peer. If `peer` is `Some` and non-empty, target the
+    /// peer whose name/host matches it; otherwise pick the next peer round-robin.
+    /// Returns `Ok((peer_name, output))` on success, or `Err(message)` when no
+    /// peer is available or the remote run failed.
+    async fn dispatch(&self, peer: Option<&str>, prompt: &str) -> Result<(String, String), String>;
+}
+
+static GRID_DISPATCH: StdRwLock<Option<Arc<dyn GridDispatch>>> = StdRwLock::new(None);
+
+/// Register the process-global grid-dispatch hook (the gateway sets this at
+/// startup when the grid is enabled).
+pub fn set_grid_dispatch(hook: Arc<dyn GridDispatch>) {
+    if let Ok(mut g) = GRID_DISPATCH.write() {
+        *g = Some(hook);
+    }
+}
+
+/// The current grid-dispatch hook, if one is registered.
+pub fn grid_dispatch() -> Option<Arc<dyn GridDispatch>> {
+    GRID_DISPATCH.read().ok().and_then(|g| g.clone())
+}
+
 /// A sub-agent template.
 #[derive(Debug, Clone)]
 pub struct AgentDef {
