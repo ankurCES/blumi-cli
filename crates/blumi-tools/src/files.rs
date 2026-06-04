@@ -277,6 +277,63 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn execute_coerces_provider_field_names() {
+        // The full execute() path normalizes whatever field names the model/
+        // provider wrote (Anthropic editor: file_path/file_text/old_str/new_str;
+        // camelCase; double-encoded string args) to the tool's schema keys — so a
+        // tool call never fails with "missing field `path`" across model types.
+        let dir = tempfile::tempdir().unwrap();
+        let c = ctx(dir.path());
+
+        // FileWrite via Anthropic `create` style (file_path + file_text).
+        let w = blumi_core::Typed(FileWrite);
+        let res = blumi_core::Tool::execute(
+            &w,
+            json!({ "command": "create", "file_path": "a.txt", "file_text": "v1\n" }),
+            &c,
+            CancellationToken::new(),
+        )
+        .await
+        .unwrap();
+        assert!(!res.is_error(), "create-style write should parse + run");
+        assert_eq!(
+            std::fs::read_to_string(dir.path().join("a.txt")).unwrap(),
+            "v1\n"
+        );
+
+        // FileEdit via `str_replace` style (old_str / new_str) + camelCase path.
+        let e = blumi_core::Typed(FileEdit);
+        let res = blumi_core::Tool::execute(
+            &e,
+            json!({ "filePath": "a.txt", "old_str": "v1", "new_str": "v2" }),
+            &c,
+            CancellationToken::new(),
+        )
+        .await
+        .unwrap();
+        assert!(!res.is_error(), "str_replace-style edit should parse + run");
+        assert_eq!(
+            std::fs::read_to_string(dir.path().join("a.txt")).unwrap(),
+            "v2\n"
+        );
+
+        // Double-encoded JSON-string arguments (some OpenAI-style gateways).
+        let res = blumi_core::Tool::execute(
+            &w,
+            json!(r#"{"path":"b.txt","content":"hi"}"#),
+            &c,
+            CancellationToken::new(),
+        )
+        .await
+        .unwrap();
+        assert!(!res.is_error(), "stringified args should parse + run");
+        assert_eq!(
+            std::fs::read_to_string(dir.path().join("b.txt")).unwrap(),
+            "hi"
+        );
+    }
+
+    #[tokio::test]
     async fn write_then_read_roundtrip() {
         let dir = tempfile::tempdir().unwrap();
         let c = ctx(dir.path());
