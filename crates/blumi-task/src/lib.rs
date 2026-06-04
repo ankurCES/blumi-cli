@@ -68,6 +68,10 @@ pub struct Task {
     pub state: TaskState,
     pub created_at: String,
     pub updated_at: String,
+    /// Grid peer currently executing this task (display name). `None` = local /
+    /// unassigned. Backward-compatible: absent in older boards.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub owner: Option<String>,
 }
 
 /// Counts by state, for progress summaries.
@@ -132,6 +136,7 @@ impl TaskBoard {
             state: TaskState::Todo,
             created_at: ts.clone(),
             updated_at: ts,
+            owner: None,
         });
         id
     }
@@ -165,6 +170,17 @@ impl TaskBoard {
     /// callers that don't depend on `time`).
     pub fn set_state_now(&mut self, id_or_pos: &str, state: TaskState) -> Option<String> {
         self.set_state(id_or_pos, state, OffsetDateTime::now_utc())
+    }
+
+    /// Set (or clear) the grid peer executing a task. Returns the task's title,
+    /// or `None` if not found.
+    pub fn set_owner(&mut self, id_or_pos: &str, owner: Option<String>) -> Option<String> {
+        let i = self.index_of(id_or_pos)?;
+        self.tasks[i].owner = owner;
+        self.tasks[i].updated_at = OffsetDateTime::now_utc()
+            .format(&Rfc3339)
+            .unwrap_or_default();
+        Some(self.tasks[i].title.clone())
     }
 
     /// Remove a task; returns whether anything was removed.

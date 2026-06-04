@@ -177,6 +177,28 @@ pub struct RemoteConfig {
     pub instances: Vec<RemoteInstance>,
 }
 
+/// Distributed-grid settings. Several `blumi serve` gateways that share one
+/// `secret` form a grid; the orchestrator (the instance the phone connects to)
+/// hands tasks off to peers for execution on their own runtimes. The secret
+/// authenticates peer↔peer traffic — it is NEVER advertised over mDNS (only a
+/// non-sensitive `grid_id` digest is) and is kept out of git (settings.json is
+/// written 0600). It can also be supplied via `BLUMI_GRID__SECRET`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(default)]
+pub struct GridConfig {
+    /// Master switch. Off = behave exactly as today (no browse, no /api/grid/*).
+    pub enabled: bool,
+    /// Shared secret. Same value on every node = same grid. Empty + enabled =
+    /// refuse to form a grid (fail closed).
+    pub secret: String,
+    /// Public, non-sensitive grid identity advertised in mDNS TXT so peers only
+    /// surface same-grid instances. Blank = derived from the secret digest.
+    pub grid_id: String,
+    /// Optional friendly label for this node in the peer list / UI. Blank =
+    /// fall back to the machine hostname.
+    pub node_name: String,
+}
+
 /// Project-workspace discovery for the TUI's left sidebar.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(default)]
@@ -512,6 +534,9 @@ pub struct BlumiConfig {
     /// Remote blumi instances the TUI can attach to as tabs.
     #[serde(default)]
     pub remote: RemoteConfig,
+    /// Distributed-grid settings (peer discovery + task hand-off).
+    #[serde(default)]
+    pub grid: GridConfig,
     /// Project-workspace discovery for the TUI sidebar.
     #[serde(default)]
     pub workspaces: WorkspaceConfig,
@@ -541,6 +566,7 @@ impl Default for BlumiConfig {
             voice: VoiceSettings::default(),
             brain: BrainConfig::default(),
             remote: RemoteConfig::default(),
+            grid: GridConfig::default(),
             workspaces: WorkspaceConfig::default(),
             git: GitConfig::default(),
             paths: Paths::default(),

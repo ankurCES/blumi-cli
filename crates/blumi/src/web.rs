@@ -106,6 +106,8 @@ impl blumi_web::SessionProvider for WebSessionProvider {
 struct WebManagement {
     config: BlumiConfig,
     store: Option<Arc<Store>>,
+    /// Grid membership + live peer registry, when the grid is enabled.
+    grid: Option<crate::grid::GridShared>,
 }
 
 impl WebManagement {
@@ -199,6 +201,13 @@ impl Management for WebManagement {
         };
         board.set_state_now(id, to);
         board.save().ok();
+    }
+
+    fn grid_peers(&self) -> serde_json::Value {
+        match &self.grid {
+            Some(g) => g.peers_json(env!("CARGO_PKG_VERSION")),
+            None => serde_json::json!({ "enabled": false, "peers": [] }),
+        }
     }
 
     fn memory(&self) -> (String, String) {
@@ -491,9 +500,27 @@ pub async fn run(
         context_size: config.llm.context_size,
     };
 
+    // Grid: derive our public grid_id (None when disabled) and, if enabled, a
+    // peer registry that the mDNS browser (spawned after we advertise) feeds.
+    let grid_id = crate::grid::grid_id(&config.grid);
+    let grid_registry = grid_id.as_ref().map(|_| crate::grid::PeerRegistry::new());
+    let grid_shared = match (&grid_id, &grid_registry) {
+        (Some(gid), Some(reg)) => Some(crate::grid::GridShared {
+            grid_id: gid.clone(),
+            node_name: if config.grid.node_name.trim().is_empty() {
+                whoami::fallible::hostname().unwrap_or_else(|_| "blumi".to_string())
+            } else {
+                config.grid.node_name.clone()
+            },
+            registry: reg.clone(),
+        }),
+        _ => None,
+    };
+
     let mgmt = Arc::new(WebManagement {
         config: config.clone(),
         store: store.clone(),
+        grid: grid_shared,
     });
 
     let provider = Arc::new(WebSessionProvider { config, store });
@@ -523,7 +550,22 @@ pub async fn run(
     // Advertise on the LAN over mDNS so blugo auto-discovers this gateway. Held
     // for the server's lifetime; unregisters on drop. Best-effort (no-op on
     // loopback / failure).
-    let _beacon = crate::discovery::advertise(ip, addr.port(), auth.is_some());
+    let _beacon = crate::discovery::advertise(ip, addr.port(), auth.is_some(), grid_id.as_deref());
+
+    // Grid: browse for same-grid peers on a dedicated thread (mdns-sd's browse
+    // Receiver is blocking), feeding the shared registry. Excludes our own
+    // advertisement by mDNS fullname. Runs for the process lifetime.
+    if let (Some(gid), Some(reg)) = (grid_id, grid_registry) {
+        let self_id = _beacon.as_ref().map(|b| b.fullname().to_string());
+        std::thread::spawn(move || {
+            crate::grid::browse_into(
+                gid,
+                self_id,
+                reg,
+                tokio_util::sync::CancellationToken::new(),
+            );
+        });
+    }
 
     let result = blumi_web::serve(provider, mgmt, web, addr, auth).await;
     let _ = std::fs::remove_file(&lock);

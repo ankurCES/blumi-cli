@@ -391,6 +391,11 @@ pub async fn tasks(State(state): State<AppState>) -> Json<Value> {
     Json(state.mgmt().tasks())
 }
 
+/// Discovered grid peers: `{ self: {...}, peers: [...] }` (or disabled).
+pub async fn grid_peers(State(state): State<AppState>) -> Json<Value> {
+    Json(state.mgmt().grid_peers())
+}
+
 /// Loop status: { running, iter, current }.
 pub async fn loop_status(State(state): State<AppState>) -> Json<Value> {
     let st = state.loop_status().read().await.clone();

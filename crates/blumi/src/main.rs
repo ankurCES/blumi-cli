@@ -5,6 +5,7 @@ mod cron;
 mod discovery;
 mod engine;
 mod gateway;
+mod grid;
 mod loop_run;
 mod mcp;
 mod onboarding;

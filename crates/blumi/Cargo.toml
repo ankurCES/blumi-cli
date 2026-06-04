@@ -44,10 +44,13 @@ rand.workspace = true
 reqwest.workspace = true
 eventsource-stream.workspace = true
 futures.workspace = true
-# LAN auto-discovery: advertise `_blumi._tcp` so blugo finds gateways. whoami
-# pinned to 1.x to match blumi-web (one copy in the tree).
+sha2.workspace = true
+# LAN auto-discovery: advertise + browse `_blumi._tcp` for the grid. whoami
+# pinned to 1.x to match blumi-web (one copy in the tree); flume matches the
+# version mdns-sd already pulls in (its browse Receiver is a flume channel).
 mdns-sd = "0.20"
 whoami = "1"
+flume = "0.11"
 
 [dev-dependencies]
 tempfile = "3"
