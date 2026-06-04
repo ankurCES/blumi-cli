@@ -21,6 +21,16 @@ pub enum Focus {
     Dashboard,
 }
 
+/// Editor input mode (vim-flavored, but optional). `Insert` is the default and
+/// the only mode a chat-first user ever needs; `Nav` lets power users drive the
+/// transcript with j/k/g/G and vim chords without the editor eating keys. Only
+/// meaningful while `Focus::Editor`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Mode {
+    Insert,
+    Nav,
+}
+
 /// Which tab the left explorer sidebar is showing.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SidebarTab {
@@ -264,10 +274,17 @@ pub struct Model {
     pub cron_jobs: Vec<(String, String)>,
 
     pub focus: Focus,
+    /// Editor input mode (Insert default / Nav for power-user transcript driving).
+    pub mode: Mode,
+    /// A pending vim chord (e.g. the first `g` of `gg`) + when it was pressed.
+    pub chord: Option<(char, Instant)>,
     /// Lines scrolled up from the bottom; 0 = following the latest output.
     pub scrollback: u16,
     /// Whether the run dashboard sidebar is shown.
     pub show_dashboard: bool,
+    /// Whether the left explorer rail is shown (toggled with Ctrl+B; also gated
+    /// by terminal width).
+    pub explorer_open: bool,
 
     pub input: TextArea<'static>,
     pub history: Vec<String>,
@@ -394,8 +411,11 @@ impl Model {
             show_reasoning: true,
             cron_jobs: Vec::new(),
             focus: Focus::Editor,
+            mode: Mode::Insert,
+            chord: None,
             scrollback: 0,
             show_dashboard: true,
+            explorer_open: true,
             input,
             history: Vec::new(),
             history_pos: None,
@@ -558,6 +578,45 @@ impl Model {
     pub fn toggle_sidebar_tab(&mut self) {
         self.sidebar_tab = self.sidebar_tab.toggled();
         self.mark_dirty();
+    }
+
+    /// Toggle the left explorer rail (Ctrl+B).
+    pub fn toggle_explorer(&mut self) {
+        self.explorer_open = !self.explorer_open;
+        self.mark_dirty();
+    }
+    /// Toggle the right agent rail (Ctrl+J / `/tasks`).
+    pub fn toggle_dashboard(&mut self) {
+        self.show_dashboard = !self.show_dashboard;
+        self.mark_dirty();
+    }
+    /// Switch editor mode (Insert ↔ Nav), redrawing on change.
+    pub fn set_mode(&mut self, mode: Mode) {
+        if self.mode != mode {
+            self.mode = mode;
+            self.mark_dirty();
+        }
+    }
+    /// Record/resolve a vim chord on `c`. Returns true when `c` completes a
+    /// same-key chord pressed within the 600 ms window (e.g. the 2nd `g` of `gg`).
+    pub fn chord(&mut self, c: char) -> bool {
+        let now = Instant::now();
+        if let Some((prev, at)) = self.chord {
+            if prev == c && now.duration_since(at).as_millis() <= 600 {
+                self.chord = None;
+                return true;
+            }
+        }
+        self.chord = Some((c, now));
+        false
+    }
+    /// Drop a stale chord (called on tick) so a lone `g` doesn't linger.
+    pub fn clear_stale_chord(&mut self) {
+        if let Some((_, at)) = self.chord {
+            if Instant::now().duration_since(at).as_millis() > 600 {
+                self.chord = None;
+            }
+        }
     }
 
     /// Move the active explorer list's selection (clamped).

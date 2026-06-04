@@ -2,7 +2,7 @@
 
 use crate::commands;
 use crate::dialog::{Action, Picker};
-use crate::model::{Entry, Focus, Model, Msg, PendingApproval, PlanReview};
+use crate::model::{Entry, Focus, Mode, Model, Msg, PendingApproval, PlanReview};
 use blumi_core::SessionHandle;
 use blumi_protocol::{ApprovalScope, Command, Decision, Event};
 use crossterm::event::{Event as TermEvent, KeyCode, KeyEventKind, KeyModifiers};
@@ -11,6 +11,7 @@ pub async fn update(model: &mut Model, msg: Msg, session: &SessionHandle) {
     match msg {
         Msg::Tick => {
             model.spinner_frame = model.spinner_frame.wrapping_add(1);
+            model.clear_stale_chord();
             tick_tool_charms(model);
             if model.busy {
                 // Accumulate active-with-bot time (tick is ~50ms).
@@ -194,6 +195,16 @@ async fn handle_term(model: &mut Model, ev: TermEvent, session: &SessionHandle) 
                 return;
             }
 
+            // Ctrl+B / Ctrl+J collapse-toggle the left explorer / right agent rails.
+            if ctrl && matches!(key.code, KeyCode::Char('b')) {
+                model.toggle_explorer();
+                return;
+            }
+            if ctrl && matches!(key.code, KeyCode::Char('j')) {
+                model.toggle_dashboard();
+                return;
+            }
+
             // Slash-command popup navigation (while typing a "/..." command).
             if model.slash_active() && handle_slash_key(model, key, session).await {
                 model.mark_dirty();
@@ -245,16 +256,48 @@ async fn handle_term(model: &mut Model, ev: TermEvent, session: &SessionHandle) 
                 return;
             }
 
+            // Nav mode (Focus::Editor): drive the transcript with vim keys without
+            // the editor capturing text; any printable / i / Enter returns to Insert.
+            if model.focus == Focus::Editor && model.mode == Mode::Nav {
+                match key.code {
+                    KeyCode::Tab => model.focus = next_focus(model),
+                    KeyCode::Char('j') | KeyCode::Down => {
+                        model.scrollback = model.scrollback.saturating_sub(1)
+                    }
+                    KeyCode::Char('k') | KeyCode::Up => {
+                        model.scrollback = model.scrollback.saturating_add(1)
+                    }
+                    KeyCode::PageDown => model.scrollback = model.scrollback.saturating_sub(5),
+                    KeyCode::PageUp => model.scrollback = model.scrollback.saturating_add(5),
+                    KeyCode::Char('g') if model.chord('g') => {
+                        model.scrollback = u16::MAX; // gg → oldest
+                    }
+                    KeyCode::Char('g') => {} // first g of a chord; wait for the second
+                    KeyCode::Char('G') => model.scrollback = 0, // latest
+                    KeyCode::Char('i') | KeyCode::Enter => model.set_mode(Mode::Insert),
+                    KeyCode::Esc => {}
+                    KeyCode::Char(c) => {
+                        model.set_mode(Mode::Insert);
+                        model.input.insert_char(c);
+                    }
+                    _ => {}
+                }
+                model.mark_dirty();
+                return;
+            }
+
             match key.code {
                 KeyCode::Esc => {
                     if model.busy {
                         let _ = session.send(Command::Cancel).await;
-                    } else {
+                    } else if !model.input_text().is_empty() {
                         model.clear_input();
+                    } else {
+                        // Empty + idle editor: drop into Nav mode (vim-style).
+                        model.set_mode(crate::model::Mode::Nav);
                     }
                 }
                 KeyCode::Tab => model.focus = next_focus(model),
-                KeyCode::Char('j') if ctrl => model.input.insert_newline(),
                 KeyCode::Enter
                     if key
                         .modifiers
@@ -960,6 +1003,48 @@ mod tests {
     }
     fn test_session() -> SessionHandle {
         blumi_core::spawn_session(blumi_protocol::SessionId::new(), "m", Arc::new(NoopRunner))
+    }
+
+    async fn press(m: &mut Model, s: &SessionHandle, code: KeyCode, mods: KeyModifiers) {
+        let ev = crossterm::event::KeyEvent::new(code, mods);
+        update(m, Msg::Term(TermEvent::Key(ev)), s).await;
+    }
+
+    #[tokio::test]
+    async fn esc_enters_nav_then_key_returns_insert() {
+        let mut m = Model::new("m".into(), "/tmp".into());
+        let s = test_session();
+        assert_eq!(m.mode, Mode::Insert);
+        // Esc on an empty idle editor drops into Nav.
+        press(&mut m, &s, KeyCode::Esc, KeyModifiers::NONE).await;
+        assert_eq!(m.mode, Mode::Nav);
+        // `i` returns to Insert.
+        press(&mut m, &s, KeyCode::Char('i'), KeyModifiers::NONE).await;
+        assert_eq!(m.mode, Mode::Insert);
+    }
+
+    #[tokio::test]
+    async fn ctrl_b_and_ctrl_j_toggle_rails() {
+        let mut m = Model::new("m".into(), "/tmp".into());
+        let s = test_session();
+        assert!(m.explorer_open && m.show_dashboard);
+        press(&mut m, &s, KeyCode::Char('b'), KeyModifiers::CONTROL).await;
+        assert!(!m.explorer_open, "ctrl+b hides explorer");
+        press(&mut m, &s, KeyCode::Char('j'), KeyModifiers::CONTROL).await;
+        assert!(!m.show_dashboard, "ctrl+j hides agent rail");
+    }
+
+    #[tokio::test]
+    async fn nav_gg_and_shift_g_scroll() {
+        let mut m = Model::new("m".into(), "/tmp".into());
+        let s = test_session();
+        m.mode = Mode::Nav;
+        press(&mut m, &s, KeyCode::Char('g'), KeyModifiers::NONE).await; // first g: waits
+        assert_eq!(m.scrollback, 0);
+        press(&mut m, &s, KeyCode::Char('g'), KeyModifiers::NONE).await; // gg → oldest
+        assert_eq!(m.scrollback, u16::MAX);
+        press(&mut m, &s, KeyCode::Char('G'), KeyModifiers::NONE).await; // G → latest
+        assert_eq!(m.scrollback, 0);
     }
 
     #[test]

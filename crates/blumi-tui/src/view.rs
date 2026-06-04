@@ -47,11 +47,12 @@ pub fn render(model: &mut Model, f: &mut Frame) {
     // its established threshold; the sidebar only appears when there's room left
     // over for it (so adding it never displaces the dashboard).
     let show_right = model.show_dashboard && !model.is_empty() && chat.width >= DASHBOARD_MIN_WIDTH;
-    let show_left = if show_right {
-        chat.width >= DASHBOARD_MIN_WIDTH + SIDEBAR_WIDTH
-    } else {
-        chat.width >= SIDEBAR_WIDTH + 60
-    };
+    let show_left = model.explorer_open
+        && if show_right {
+            chat.width >= DASHBOARD_MIN_WIDTH + SIDEBAR_WIDTH
+        } else {
+            chat.width >= SIDEBAR_WIDTH + 60
+        };
 
     let mut constraints: Vec<Constraint> = Vec::new();
     if show_left {
@@ -1535,6 +1536,8 @@ fn render_status(model: &Model, f: &mut Frame, area: Rect, theme: &Theme) {
             ("/", "cmd"),
             ("^p", "palette"),
             ("tab", "focus"),
+            ("esc", "nav"),
+            ("^b", "rails"),
             ("^y", "yolo"),
             ("^c", "quit"),
         ]
@@ -1558,7 +1561,8 @@ fn render_status(model: &Model, f: &mut Frame, area: Rect, theme: &Theme) {
         )
     } else {
         let l = match model.focus {
-            Focus::Editor => "EDIT",
+            Focus::Editor if model.mode == crate::model::Mode::Nav => "NAV",
+            Focus::Editor => "INSERT",
             Focus::Chat => "CHAT",
             Focus::Sidebar => "EXPL",
             Focus::Dashboard => "AGENT",
