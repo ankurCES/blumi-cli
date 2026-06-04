@@ -271,22 +271,35 @@ fn render_sidebar(model: &mut Model, f: &mut Frame, area: Rect, theme: &Theme) {
         }
         SidebarTab::Sessions => {
             let title_w = list_area.width.saturating_sub(2) as usize;
+            // Configured gateways/remotes (live attach) first, then stored sessions.
+            let entries = model.session_entries();
             render_list(
                 f,
                 list_area,
-                &model.recent_sessions,
+                &entries,
                 model.sess_sel,
                 focused,
                 theme,
                 "(no sessions)",
-                |(_, title), i| {
+                |entry, i| {
                     let style = if i == model.sess_sel { sel_style } else { body };
-                    let t = if title.trim().is_empty() {
-                        "(untitled)"
-                    } else {
-                        title
-                    };
-                    vec![Span::styled(format!(" {}", truncate(t, title_w)), style)]
+                    match entry {
+                        crate::model::SessionEntry::Remote(name) => {
+                            let label = format!("{} {} (live)", crate::icons::remote(), name);
+                            vec![Span::styled(
+                                format!(" {}", truncate(&label, title_w)),
+                                style,
+                            )]
+                        }
+                        crate::model::SessionEntry::Stored(_, title) => {
+                            let t = if title.trim().is_empty() {
+                                "(untitled)"
+                            } else {
+                                title
+                            };
+                            vec![Span::styled(format!(" {}", truncate(t, title_w)), style)]
+                        }
+                    }
                 },
             );
         }

@@ -857,7 +857,7 @@ fn sidebar_click(model: &mut Model, col: u16, row: u16) {
     // List rows (active tab).
     let (sel, len) = match model.sidebar_tab {
         SidebarTab::Workspaces => (model.ws_sel, model.workspaces.len()),
-        SidebarTab::Sessions => (model.sess_sel, model.recent_sessions.len()),
+        SidebarTab::Sessions => (model.sess_sel, model.session_entries().len()),
         SidebarTab::Skills => (model.skill_sel, model.skills.len()),
     };
     if let Some(idx) = list_click_index(model.sidebar_list_area, sel, len, col, row) {

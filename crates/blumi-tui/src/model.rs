@@ -204,6 +204,16 @@ pub enum SessionRequest {
     SwitchTab(usize),
 }
 
+/// A row in the Sessions explorer. Configured remote instances (gateways you can
+/// attach to live — e.g. the local `blumi serve` your phone drives) are listed
+/// first, then recent stored sessions you can resume.
+pub enum SessionEntry {
+    /// A configured remote instance, by name — selecting it attaches live.
+    Remote(String),
+    /// A stored session `(id, title)` — selecting it resumes the transcript.
+    Stored(String, String),
+}
+
 pub struct Model {
     pub model_name: String,
     pub working_dir: String,
@@ -639,6 +649,23 @@ impl Model {
         }
     }
 
+    /// The Sessions explorer rows: configured remotes (live attach) first, then
+    /// recent stored sessions (resume). One source of truth for nav/select/render
+    /// so the prepended remotes index consistently everywhere.
+    pub fn session_entries(&self) -> Vec<SessionEntry> {
+        let mut v: Vec<SessionEntry> = self
+            .remotes
+            .iter()
+            .map(|n| SessionEntry::Remote(n.clone()))
+            .collect();
+        v.extend(
+            self.recent_sessions
+                .iter()
+                .map(|(id, title)| SessionEntry::Stored(id.clone(), title.clone())),
+        );
+        v
+    }
+
     /// Move the active explorer list's selection (clamped).
     pub fn sidebar_move(&mut self, delta: isize) {
         match self.sidebar_tab {
@@ -646,7 +673,7 @@ impl Model {
                 self.ws_sel = step_index(self.ws_sel, delta, self.workspaces.len())
             }
             SidebarTab::Sessions => {
-                self.sess_sel = step_index(self.sess_sel, delta, self.recent_sessions.len())
+                self.sess_sel = step_index(self.sess_sel, delta, self.session_entries().len())
             }
             SidebarTab::Skills => {
                 self.skill_sel = step_index(self.skill_sel, delta, self.skills.len())
@@ -663,11 +690,18 @@ impl Model {
                     self.session_request = Some(SessionRequest::OpenWorkspace(ws.path.clone()));
                 }
             }
-            SidebarTab::Sessions => {
-                if let Some((id, _)) = self.recent_sessions.get(self.sess_sel) {
+            SidebarTab::Sessions => match self.session_entries().get(self.sess_sel) {
+                // A configured remote/gateway → attach live (same as `/remote`),
+                // so you watch its running turn + active agents in this TUI.
+                Some(SessionEntry::Remote(name)) => {
+                    self.session_request = Some(SessionRequest::Remote(name.clone()));
+                }
+                // A stored session → resume its transcript.
+                Some(SessionEntry::Stored(id, _)) => {
                     self.session_request = Some(SessionRequest::Resume(id.clone()));
                 }
-            }
+                None => {}
+            },
             // Skills are browse-only in the rail; the agent loads them via the
             // `skill` tool. Selecting one is a no-op (no session change).
             SidebarTab::Skills => {}
