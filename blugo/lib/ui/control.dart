@@ -30,7 +30,7 @@ class _ControlCenter extends StatelessWidget {
   Widget build(BuildContext context) {
     final cs = Theme.of(context).colorScheme;
     return DefaultTabController(
-      length: 4,
+      length: 5,
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
@@ -49,6 +49,7 @@ class _ControlCenter extends StatelessWidget {
             indicatorColor: cs.primary,
             tabs: const [
               Tab(text: 'Settings'),
+              Tab(text: 'Tasks'),
               Tab(text: 'Usage'),
               Tab(text: 'Skills'),
               Tab(text: 'Memory'),
@@ -57,6 +58,7 @@ class _ControlCenter extends StatelessWidget {
           Expanded(
             child: TabBarView(children: [
               _SettingsTab(app, scroll),
+              _TasksTab(app, scroll),
               _UsageTab(app, scroll),
               _SkillsTab(app, scroll),
               _MemoryTab(app, scroll),
@@ -186,6 +188,126 @@ class _SettingsTabState extends State<_SettingsTab> {
                 style: TextStyle(color: cs.onSurface.withValues(alpha: 0.6))),
             value: app.yolo,
             onChanged: app.setYolo,
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+// --- Tasks (the persistent board) ------------------------------------------
+
+class _TasksTab extends StatefulWidget {
+  final AppController app;
+  final ScrollController scroll;
+  const _TasksTab(this.app, this.scroll);
+  @override
+  State<_TasksTab> createState() => _TasksTabState();
+}
+
+class _TasksTabState extends State<_TasksTab> {
+  late Future<List<TaskItem>> _tasks;
+
+  @override
+  void initState() {
+    super.initState();
+    _tasks = widget.app.session!.api.tasks();
+  }
+
+  // Display order + glyph/colour per state.
+  static const _order = ['doing', 'review', 'todo', 'done', 'cancelled'];
+
+  (String, Color) _style(String state, ColorScheme cs) => switch (state) {
+        'doing' => ('▶', cs.primary),
+        'review' => ('→', cs.secondary),
+        'done' => ('✓', Colors.greenAccent),
+        'cancelled' => ('✗', cs.onSurface.withValues(alpha: 0.4)),
+        _ => ('○', cs.onSurface.withValues(alpha: 0.7)),
+      };
+
+  @override
+  Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+    return FutureBuilder<List<TaskItem>>(
+      future: _tasks,
+      builder: (context, snap) {
+        if (!snap.hasData) {
+          return const Center(child: CircularProgressIndicator());
+        }
+        final tasks = snap.data!;
+        if (tasks.isEmpty) {
+          return Center(
+              child: Text('(no tasks — add with `blumi task add`)',
+                  style: TextStyle(color: cs.onSurface.withValues(alpha: 0.6))));
+        }
+        final byState = {for (final s in _order) s: <TaskItem>[]};
+        for (final t in tasks) {
+          (byState[t.state] ?? byState['todo']!).add(t);
+        }
+        return RefreshIndicator(
+          onRefresh: () async {
+            final f = widget.app.session!.api.tasks();
+            setState(() => _tasks = f);
+            await f;
+          },
+          child: ListView(
+            controller: widget.scroll,
+            padding: const EdgeInsets.all(16),
+            children: [
+              for (final state in _order)
+                if (byState[state]!.isNotEmpty) ...[
+                  Padding(
+                    padding: const EdgeInsets.only(top: 8, bottom: 4),
+                    child: Text('${state.toUpperCase()} · ${byState[state]!.length}',
+                        style: TextStyle(
+                            fontWeight: FontWeight.bold,
+                            fontSize: 12,
+                            color: cs.onSurface.withValues(alpha: 0.7))),
+                  ),
+                  for (final t in byState[state]!) _taskTile(t, cs),
+                ],
+            ],
+          ),
+        );
+      },
+    );
+  }
+
+  Widget _taskTile(TaskItem t, ColorScheme cs) {
+    final (glyph, color) = _style(t.state, cs);
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 3),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text('$glyph ', style: TextStyle(color: color)),
+          Container(
+            margin: const EdgeInsets.only(right: 8, top: 1),
+            padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
+            decoration: BoxDecoration(
+              color: cs.onSurface.withValues(alpha: 0.1),
+              borderRadius: BorderRadius.circular(4),
+            ),
+            child: Text('P${t.priority}',
+                style: TextStyle(fontSize: 10, color: cs.onSurface.withValues(alpha: 0.7))),
+          ),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(t.title,
+                    style: TextStyle(
+                        decoration: t.state == 'done' || t.state == 'cancelled'
+                            ? TextDecoration.lineThrough
+                            : null)),
+                if (t.detail.isNotEmpty)
+                  Text(t.detail,
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                          fontSize: 12, color: cs.onSurface.withValues(alpha: 0.6))),
+              ],
+            ),
           ),
         ],
       ),
