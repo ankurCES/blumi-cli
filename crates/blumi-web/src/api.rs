@@ -296,23 +296,31 @@ pub async fn chat_stream(
     State(state): State<AppState>,
     headers: HeaderMap,
 ) -> Sse<impl Stream<Item = Result<SseEvent, Infallible>>> {
+    // A present `Last-Event-ID` means "reconnect — replay the gap to heal".
+    // An absent one means "fresh connect": the client already loaded the
+    // transcript via /api/messages, so we send only *live* events and skip the
+    // history backlog (replaying it would duplicate messages on the client).
     let last = headers
         .get("last-event-id")
         .and_then(|v| v.to_str().ok())
-        .and_then(|s| s.parse::<u64>().ok())
-        .unwrap_or(0);
+        .and_then(|s| s.parse::<u64>().ok());
 
     let session = state.current().await;
     // Subscribe before reading the backlog so nothing slips through the gap.
     let mut rx = session.subscribe();
-    let backlog = session.events_since(last);
+    let backlog = session.events_since(last.unwrap_or(0));
+    let head = backlog.last().map(|e| e.seq).unwrap_or(0);
+    let replay = last.is_some();
+    let start = last.unwrap_or(head); // fresh connect starts at the current head
 
     let stream = async_stream::stream! {
-        let mut high = last;
-        for env in backlog {
-            if env.seq > high {
-                high = env.seq;
-                yield Ok(to_sse(&env));
+        let mut high = start;
+        if replay {
+            for env in backlog {
+                if env.seq > high {
+                    high = env.seq;
+                    yield Ok(to_sse(&env));
+                }
             }
         }
         loop {

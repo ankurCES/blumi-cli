@@ -31,7 +31,12 @@ class EventStream {
         final req =
             http.Request('GET', Uri.parse('${conn.baseUrl}/api/chat/stream'));
         req.headers['Accept'] = 'text/event-stream';
-        req.headers['Last-Event-ID'] = '$_lastSeq';
+        // Only send Last-Event-ID on a reconnect (once we've seen events) so the
+        // first connect is live-only — the transcript already came from
+        // /api/messages, and replaying history here would duplicate it.
+        if (_lastSeq > 0) {
+          req.headers['Last-Event-ID'] = '$_lastSeq';
+        }
         if (conn.token != null) {
           req.headers['Authorization'] = 'Bearer ${conn.token}';
         }
