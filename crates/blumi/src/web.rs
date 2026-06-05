@@ -108,6 +108,8 @@ struct WebManagement {
     store: Option<Arc<Store>>,
     /// Grid membership + live peer registry, when the grid is enabled.
     grid: Option<crate::grid::GridShared>,
+    /// Semantic memory store for diffusion ingest (`None` = memory disabled).
+    mem: Option<Arc<blumi_persist::SemanticMemoryImpl>>,
 }
 
 impl WebManagement {
@@ -236,6 +238,22 @@ impl Management for WebManagement {
         match &self.grid {
             Some(g) => g.peers_json(env!("CARGO_PKG_VERSION")),
             None => serde_json::json!({ "enabled": false, "peers": [] }),
+        }
+    }
+
+    async fn grid_memory_ingest(
+        &self,
+        namespace: &str,
+        kind: &str,
+        text: &str,
+        origin: &str,
+    ) -> serde_json::Value {
+        match &self.mem {
+            Some(mem) => {
+                let ok = mem.ingest_remote(namespace, kind, text, origin).await;
+                serde_json::json!({ "ok": ok })
+            }
+            None => serde_json::json!({ "ok": false, "error": "memory disabled" }),
         }
     }
 
@@ -744,6 +762,26 @@ pub async fn run(
     let url = format!("http://{addr}");
     let store = Store::open(&config.paths.db).await.ok().map(Arc::new);
 
+    // Semantic memory for the gateway itself: diffusion ingest (`/api/grid/memory`)
+    // + the background consolidation/eviction/diffusion sweep. Shares the
+    // process-global embeddings model with sessions; same DB file as the session
+    // store, so memories the agent writes are visible to the sweep and vice versa.
+    let mem: Option<Arc<blumi_persist::SemanticMemoryImpl>> = if config.memory.enabled {
+        store.as_ref().map(|s| {
+            Arc::new(blumi_persist::SemanticMemoryImpl::new(
+                s.clone(),
+                crate::engine::shared_embedder(&config),
+                blumi_persist::MemoryParams {
+                    dedup_threshold: config.memory.dedup_threshold,
+                    recall_floor: 0.35,
+                    max_per_namespace: config.memory.max_per_namespace,
+                },
+            ))
+        })
+    } else {
+        None
+    };
+
     let personas = crate::engine::resolve_personas(&config)
         .into_iter()
         .map(|p| (p.name, p.description))
@@ -801,6 +839,7 @@ pub async fn run(
         config: config.clone(),
         store: store.clone(),
         grid: grid_shared,
+        mem: mem.clone(),
     });
 
     let provider = Arc::new(WebSessionProvider { config, store });
@@ -859,6 +898,57 @@ pub async fn run(
             secret: grid_secret.clone().unwrap_or_default(),
             cursor: std::sync::atomic::AtomicUsize::new(0),
         }));
+
+        // SEDM background sweep: periodically consolidate near-dupes + evict the
+        // weakest locally, then diffuse worth-sharing, non-`user` memories to live
+        // peers. Each receiver re-admits through its own dedup gate; origin-tagging
+        // stops A→B→A bounce-back. The `user` namespace never leaves the node.
+        if let Some(mem) = mem.clone() {
+            let reg = reg.clone();
+            let secret = grid_secret.clone().unwrap_or_default();
+            let diffuse = provider.config.memory.diffuse;
+            let period = provider.config.memory.sweep_secs.max(15);
+            let origin = if provider.config.grid.node_name.trim().is_empty() {
+                whoami::fallible::hostname().unwrap_or_else(|_| "blumi".to_string())
+            } else {
+                provider.config.grid.node_name.clone()
+            };
+            tokio::spawn(async move {
+                let mut tick = tokio::time::interval(std::time::Duration::from_secs(period));
+                tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+                loop {
+                    tick.tick().await;
+                    let (merged, evicted) = mem.sweep().await;
+                    if merged > 0 || evicted > 0 {
+                        tracing::debug!("memory sweep: merged={merged} evicted={evicted}");
+                    }
+                    if !diffuse {
+                        continue;
+                    }
+                    // utility ≥ 1.0 = remembered at least once (fresh memories
+                    // qualify); the dedup gate on the receiver makes re-sends cheap.
+                    let export = mem.high_utility(1.0, 32).await;
+                    if export.is_empty() {
+                        continue;
+                    }
+                    for peer in reg.live() {
+                        let client = crate::grid::client::Client::for_peer(&peer, &secret);
+                        for (ns, kind, text) in &export {
+                            let _ = client
+                                .post_memory(
+                                    ns,
+                                    kind,
+                                    text,
+                                    &origin,
+                                    std::time::Duration::from_secs(10),
+                                )
+                                .await;
+                        }
+                    }
+                }
+            });
+        }
+
         let self_id = _beacon.as_ref().map(|b| b.fullname().to_string());
         std::thread::spawn(move || {
             crate::grid::browse_into(

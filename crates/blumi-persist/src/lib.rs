@@ -5,6 +5,9 @@
 //! FTS5 virtual table for cross-session search. Saving a session snapshot is
 //! idempotent (replace its messages). JSONL export lives elsewhere.
 
+mod memory_store;
+pub use memory_store::{MemoryParams, SemanticMemoryImpl};
+
 use async_trait::async_trait;
 use blumi_core::SessionSnapshot;
 use blumi_protocol::{Message, Role, Todo};
@@ -102,6 +105,11 @@ impl Store {
     async fn migrate(pool: &SqlitePool) -> Result<(), StoreError> {
         sqlx::migrate!("./migrations").run(pool).await?;
         Ok(())
+    }
+
+    /// Shared pool, for sibling modules in this crate (e.g. semantic memory).
+    pub(crate) fn pool(&self) -> &SqlitePool {
+        &self.pool
     }
 
     /// Insert or replace a session and all its messages.
@@ -368,7 +376,7 @@ fn derive_title(messages: &[Message]) -> String {
 
 /// Turn free text into a safe FTS5 query: each whitespace term quoted (phrase)
 /// and AND-ed. Avoids FTS5 syntax errors from arbitrary input.
-fn to_fts_query(q: &str) -> String {
+pub(crate) fn to_fts_query(q: &str) -> String {
     q.split_whitespace()
         .map(|t| format!("\"{}\"", t.replace('"', "\"\"")))
         .collect::<Vec<_>>()

@@ -11,7 +11,19 @@ use blumi_exec::LocalExecutor;
 use blumi_llm::{build_client, MockLlmClient};
 use blumi_protocol::{FinishReason, Message, SessionId, StreamChunk};
 use blumi_skills::MemorySnapshot;
-use std::sync::Arc;
+use std::sync::{Arc, OnceLock};
+
+/// Process-global embeddings client, built once from config and shared by every
+/// session and the gateway's memory scheduler — so the bundled model is loaded
+/// (and downloaded) a single time per process, not per session. `None` when
+/// embeddings are disabled or unavailable (callers fall back to FTS5).
+static EMBEDDER: OnceLock<Option<Arc<dyn blumi_core::EmbeddingClient>>> = OnceLock::new();
+
+pub fn shared_embedder(config: &BlumiConfig) -> Option<Arc<dyn blumi_core::EmbeddingClient>> {
+    EMBEDDER
+        .get_or_init(|| blumi_llm::build_embeddings_client(config))
+        .clone()
+}
 
 /// A markdown + code sample streamed by the offline `mock` provider, so the TUI
 /// (markdown, syntax highlighting, lists, streaming) can be exercised with no
@@ -75,11 +87,8 @@ pub async fn build_session(
         ))));
     }
 
-    // Long-term memory: the agent can persist to MEMORY.md / USER.md.
-    registry.register(Arc::new(blumi_core::Typed(blumi_skills::MemoryTool::new(
-        config.paths.memory_md(),
-        config.paths.user_md(),
-    ))));
+    // (The long-term `memory` tool is registered below, after the history DB
+    // opens, so it can be wired to the semantic vector store as well.)
 
     // Self-evolution: the agent can author its own skills, edit its own config
     // (validated before it lands), and reload itself in place to apply both.
@@ -119,6 +128,53 @@ pub async fn build_session(
                 None
             }
         };
+
+    // Semantic long-term memory (vector Store + RAG + SEDM governance), sharing
+    // the history DB. The embeddings client is process-global so the bundled
+    // model loads once. Absent store / disabled config → file-only memory
+    // (today's behaviour); embeddings off → FTS5 keyword fallback inside the store.
+    let embedder = if config.memory.enabled {
+        crate::engine::shared_embedder(config)
+    } else {
+        None
+    };
+    // Warm the model in the background so the first recall isn't slowed by the
+    // one-time load/download (best-effort; off the request hot path).
+    if let Some(emb) = &embedder {
+        let emb = emb.clone();
+        tokio::spawn(async move {
+            let _ = emb.embed(&["warmup".to_string()]).await;
+        });
+    }
+    let semantic: Option<Arc<blumi_persist::SemanticMemoryImpl>> = if config.memory.enabled {
+        history_store.as_ref().map(|store| {
+            Arc::new(blumi_persist::SemanticMemoryImpl::new(
+                store.clone(),
+                embedder.clone(),
+                blumi_persist::MemoryParams {
+                    dedup_threshold: config.memory.dedup_threshold,
+                    recall_floor: 0.35,
+                    max_per_namespace: config.memory.max_per_namespace,
+                },
+            ))
+        })
+    } else {
+        None
+    };
+    let memory_dyn: Option<Arc<dyn blumi_core::SemanticMemory>> = semantic.as_ref().map(|s| {
+        let d: Arc<dyn blumi_core::SemanticMemory> = s.clone();
+        d
+    });
+
+    // Long-term `memory` tool: MEMORY.md/USER.md mirror + the semantic store.
+    {
+        let mut tool =
+            blumi_skills::MemoryTool::new(config.paths.memory_md(), config.paths.user_md());
+        if let Some(mem) = &memory_dyn {
+            tool = tool.with_semantic(mem.clone());
+        }
+        registry.register(Arc::new(blumi_core::Typed(tool)));
+    }
 
     // Code intelligence: register the `Lsp` tool if any language servers are
     // configured (language-agnostic, keyed by file extension).
@@ -341,6 +397,10 @@ pub async fn build_session(
     // history DB) so a crash/restart resumes from the last step.
     if let Some(store) = &history_store {
         runner = runner.with_checkpoint(Arc::new(blumi_persist::CheckpointSinkImpl(store.clone())));
+    }
+    // Semantic recall: inject memories relevant to each turn as background context.
+    if let Some(mem) = &memory_dyn {
+        runner = runner.with_memory(mem.clone(), config.memory.recall_k as usize);
     }
     let runner = Arc::new(runner);
 

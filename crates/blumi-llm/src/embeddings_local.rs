@@ -1,40 +1,68 @@
 //! Bundled local embedding model via fastembed (ONNX Runtime).
 //!
-//! Compiled only with the `local-embeddings` feature. The model is downloaded
-//! once into the models cache dir on first use; thereafter it runs fully
-//! offline. Embedding is CPU-bound + synchronous, so it runs on a blocking
-//! thread to avoid stalling the async runtime.
+//! Compiled only with the `local-embeddings` feature. The model is loaded
+//! **lazily** on first use — the (~90 MB) download + load runs on a blocking
+//! thread, so enabling embeddings by default never blocks startup and an
+//! offline node simply degrades to FTS5 (the first `embed` errors, callers
+//! fall back). Once loaded it stays resident and runs fully offline.
 
 use async_trait::async_trait;
 use blumi_core::{EmbeddingClient, LlmError};
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
+use tokio::sync::OnceCell;
 
 pub struct LocalEmbeddingClient {
-    inner: Arc<Mutex<fastembed::TextEmbedding>>,
+    /// Lazily-initialised model: empty until the first embed downloads/loads it.
+    cell: OnceCell<Arc<Mutex<fastembed::TextEmbedding>>>,
     model_id: String,
+    cache_dir: PathBuf,
     dim: usize,
 }
 
 impl LocalEmbeddingClient {
-    /// Load the model (downloading on first use) into `cache_dir`.
+    /// Prepare the client WITHOUT loading the model. `dim` is derived from the
+    /// model id up front (so the vector store can size itself); the actual model
+    /// download/load is deferred to the first [`embed`](Self::embed) call.
     pub fn new(model_id: &str, cache_dir: PathBuf) -> Result<Self, LlmError> {
-        use fastembed::{EmbeddingModel, InitOptions, TextEmbedding};
-        let (model, dim) = match model_id {
-            "all-MiniLM-L6-v2" | "all-minilm-l6-v2" => (EmbeddingModel::AllMiniLML6V2, 384),
-            _ => (EmbeddingModel::BGESmallENV15, 384),
+        // All bundled models are 384-dim; kept as a match so adding a model that
+        // isn't forces a conscious dim update.
+        let dim = match model_id {
+            "all-MiniLM-L6-v2" | "all-minilm-l6-v2" => 384,
+            _ => 384, // bge-small-en-v1.5 (default)
         };
-        let opts = InitOptions::new(model)
-            .with_cache_dir(cache_dir)
-            .with_show_download_progress(false);
-        let emb = TextEmbedding::try_new(opts).map_err(|e| {
-            LlmError::Other(anyhow::anyhow!("load embedding model '{model_id}': {e}"))
-        })?;
         Ok(LocalEmbeddingClient {
-            inner: Arc::new(Mutex::new(emb)),
+            cell: OnceCell::new(),
             model_id: model_id.to_string(),
+            cache_dir,
             dim,
         })
+    }
+
+    /// Get the model, loading it (downloading on first ever use) if needed.
+    async fn model(&self) -> Result<Arc<Mutex<fastembed::TextEmbedding>>, LlmError> {
+        self.cell
+            .get_or_try_init(|| async {
+                let model_id = self.model_id.clone();
+                let cache_dir = self.cache_dir.clone();
+                tokio::task::spawn_blocking(move || {
+                    use fastembed::{EmbeddingModel, InitOptions, TextEmbedding};
+                    let model = match model_id.as_str() {
+                        "all-MiniLM-L6-v2" | "all-minilm-l6-v2" => EmbeddingModel::AllMiniLML6V2,
+                        _ => EmbeddingModel::BGESmallENV15,
+                    };
+                    let opts = InitOptions::new(model)
+                        .with_cache_dir(cache_dir)
+                        .with_show_download_progress(false);
+                    TextEmbedding::try_new(opts)
+                        .map(|e| Arc::new(Mutex::new(e)))
+                        .map_err(|e| LlmError::Other(anyhow::anyhow!("load embedding model: {e}")))
+                })
+                .await
+                .map_err(|e| LlmError::Other(anyhow::anyhow!("embed model load join: {e}")))?
+            })
+            .await
+            .cloned()
     }
 }
 
@@ -44,10 +72,10 @@ impl EmbeddingClient for LocalEmbeddingClient {
         if texts.is_empty() {
             return Ok(Vec::new());
         }
+        let model = self.model().await?;
         let docs: Vec<String> = texts.to_vec();
-        let inner = self.inner.clone();
         tokio::task::spawn_blocking(move || {
-            let guard = inner
+            let guard = model
                 .lock()
                 .map_err(|_| LlmError::Other(anyhow::anyhow!("embedding lock poisoned")))?;
             guard

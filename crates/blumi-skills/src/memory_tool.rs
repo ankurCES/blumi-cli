@@ -6,23 +6,25 @@
 //! session picks up the changes.
 
 use async_trait::async_trait;
-use blumi_core::{ToolContext, ToolError, TypedTool};
+use blumi_core::{SemanticMemory, ToolContext, ToolError, TypedTool};
 use blumi_protocol::ToolResult;
 use schemars::JsonSchema;
 use serde::Deserialize;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 use tokio_util::sync::CancellationToken;
 
 #[derive(Debug, Deserialize, JsonSchema)]
 pub struct MemoryInput {
-    /// "add" (append an entry), "replace" (swap the entry containing `old_text`),
-    /// "remove" (delete it), or "read" (list current entries).
+    /// "add" (remember a fact), "query" (semantic search of long-term memory),
+    /// "replace" (swap the entry containing `old_text`), "remove" (delete it),
+    /// or "read" (list the current file entries).
     pub action: String,
     /// Which store: "memory" (your own notes) or "user" (facts about the user).
     /// Defaults to "memory".
     #[serde(default)]
     pub target: Option<String>,
-    /// Entry text, for add/replace.
+    /// Entry text for add/replace, or the search text for `query`.
     #[serde(default)]
     pub content: Option<String>,
     /// A substring identifying the entry to replace/remove.
@@ -30,15 +32,28 @@ pub struct MemoryInput {
     pub old_text: Option<String>,
 }
 
-/// Reads/writes the two memory files.
+/// Reads/writes the two memory files, and (when configured) mirrors writes into
+/// the semantic vector store + answers `query` with cross-session recall.
 pub struct MemoryTool {
     memory_md: PathBuf,
     user_md: PathBuf,
+    semantic: Option<Arc<dyn SemanticMemory>>,
 }
 
 impl MemoryTool {
     pub fn new(memory_md: PathBuf, user_md: PathBuf) -> Self {
-        MemoryTool { memory_md, user_md }
+        MemoryTool {
+            memory_md,
+            user_md,
+            semantic: None,
+        }
+    }
+
+    /// Attach the semantic memory store so `add` also writes an embedded,
+    /// dedup-gated memory and `query` can search across sessions.
+    pub fn with_semantic(mut self, semantic: Arc<dyn SemanticMemory>) -> Self {
+        self.semantic = Some(semantic);
+        self
     }
 
     fn path_for(&self, target: Option<&str>) -> &Path {
@@ -90,9 +105,13 @@ impl TypedTool for MemoryTool {
     }
 
     fn description(&self) -> &str {
-        "Persist long-term memory across sessions. action: add | replace | remove | read. \
-         target: \"memory\" (your own notes) or \"user\" (durable facts/preferences about the \
-         user). Use it to remember decisions, conventions, and preferences."
+        "Persist and recall long-term memory across sessions. action: add | query | replace | \
+         remove | read. `add` remembers a fact (also embedded for semantic recall, with \
+         near-duplicates merged automatically); `query` does a semantic search of everything \
+         remembered (set `content` to the search text). target: \"memory\" (your own notes) or \
+         \"user\" (durable facts/preferences about the user). Relevant memories are also surfaced \
+         automatically each turn, so use `query` for targeted lookups and `add` to capture \
+         decisions, conventions, and preferences worth keeping."
     }
 
     fn is_concurrency_safe(&self) -> bool {
@@ -111,6 +130,33 @@ impl TypedTool for MemoryTool {
 
         match input.action.as_str() {
             "read" => {}
+            "query" => {
+                let q = input
+                    .content
+                    .as_deref()
+                    .map(str::trim)
+                    .filter(|c| !c.is_empty())
+                    .ok_or_else(|| ToolError::InvalidInput("query requires `content`".into()))?;
+                let Some(sem) = &self.semantic else {
+                    return Ok(ToolResult::success(
+                        "Semantic memory is disabled; only file-based memory (action=read) is \
+                         available.",
+                    ));
+                };
+                let hits = sem.query(None, q, 8).await;
+                if hits.is_empty() {
+                    return Ok(ToolResult::success(format!("No memories found for '{q}'.")));
+                }
+                let mut out = format!("{} memories for '{q}':\n", hits.len());
+                for h in &hits {
+                    out.push_str(&format!(
+                        "- [{}] {}\n",
+                        h.namespace,
+                        h.text.replace('\n', " ")
+                    ));
+                }
+                return Ok(ToolResult::success(out));
+            }
             "add" => {
                 let content = input
                     .content
@@ -120,6 +166,16 @@ impl TypedTool for MemoryTool {
                     .ok_or_else(|| ToolError::InvalidInput("add requires `content`".into()))?;
                 if !entries.iter().any(|e| e == content) {
                     entries.push(content.to_string());
+                }
+                // Mirror into the semantic store (embedded + dedup-gated) so it
+                // is recallable across sessions, not just folded into the prompt.
+                if let Some(sem) = &self.semantic {
+                    let (ns, kind) = if target == "user" {
+                        ("user", "fact")
+                    } else {
+                        ("agent", "note")
+                    };
+                    sem.remember(ns, kind, content).await;
                 }
             }
             "replace" => {
@@ -158,7 +214,7 @@ impl TypedTool for MemoryTool {
             other => {
                 return Ok(ToolResult::invalid_input(
                     format!("unknown action '{other}'"),
-                    "use add, replace, remove, or read",
+                    "use add, query, replace, remove, or read",
                 ))
             }
         }

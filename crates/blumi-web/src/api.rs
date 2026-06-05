@@ -723,6 +723,57 @@ pub async fn grid_run(
     }
 }
 
+#[derive(Deserialize)]
+pub struct GridMemoryBody {
+    pub namespace: String,
+    #[serde(default)]
+    pub kind: String,
+    pub text: String,
+    /// Authoring node id, so the receiver tags it and never re-diffuses it.
+    #[serde(default)]
+    pub origin: String,
+}
+
+/// Peer-side: receive a memory diffused from another node and re-admit it
+/// locally through the dedup gate (SEDM cross-peer knowledge diffusion).
+/// Authenticated by the shared grid secret, not the human password.
+pub async fn grid_memory(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Json(body): Json<GridMemoryBody>,
+) -> Response {
+    let Some(secret) = state.grid_secret() else {
+        return (StatusCode::NOT_FOUND, "grid disabled").into_response();
+    };
+    let presented = headers
+        .get("x-blumi-grid")
+        .and_then(|h| h.to_str().ok())
+        .unwrap_or("");
+    if !constant_eq(secret.as_bytes(), presented.as_bytes()) {
+        return (StatusCode::UNAUTHORIZED, "grid auth required").into_response();
+    }
+    if body.text.trim().is_empty() || body.namespace.trim().is_empty() {
+        return Json(json!({ "ok": false, "error": "empty memory" })).into_response();
+    }
+    let origin = if body.origin.trim().is_empty() {
+        "peer"
+    } else {
+        body.origin.trim()
+    };
+    let kind = if body.kind.trim().is_empty() {
+        "note"
+    } else {
+        body.kind.trim()
+    };
+    Json(
+        state
+            .mgmt()
+            .grid_memory_ingest(body.namespace.trim(), kind, body.text.trim(), origin)
+            .await,
+    )
+    .into_response()
+}
+
 /// This node's live metrics: uptime, model, token usage, task counts (with a
 /// local-vs-remote-owner split), and loop state. Shared by `/api/grid/node`
 /// (peer-facing) and `/api/grid/metrics` (the orchestrator's "self").

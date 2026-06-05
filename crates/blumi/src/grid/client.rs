@@ -64,6 +64,35 @@ impl Client {
         Ok(out)
     }
 
+    /// Diffuse one memory to the peer (`POST /api/grid/memory`). `origin` is this
+    /// node's id, so the receiver tags it and never bounces it back. Best-effort.
+    pub async fn post_memory(
+        &self,
+        namespace: &str,
+        kind: &str,
+        text: &str,
+        origin: &str,
+        timeout: Duration,
+    ) -> anyhow::Result<()> {
+        let resp = self
+            .http
+            .post(format!("{}/api/grid/memory", self.base))
+            .header("x-blumi-grid", &self.secret)
+            .json(&serde_json::json!({
+                "namespace": namespace,
+                "kind": kind,
+                "text": text,
+                "origin": origin,
+            }))
+            .timeout(timeout)
+            .send()
+            .await?;
+        if !resp.status().is_success() {
+            anyhow::bail!("peer returned HTTP {}", resp.status());
+        }
+        Ok(())
+    }
+
     /// Fetch this peer's live metrics (`GET /api/grid/node`).
     pub async fn node_metrics(&self, timeout: Duration) -> anyhow::Result<serde_json::Value> {
         let resp = self

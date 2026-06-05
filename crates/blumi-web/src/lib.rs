@@ -253,6 +253,19 @@ pub trait Management: Send + Sync {
         serde_json::json!({ "ok": false, "error": "grid disabled" })
     }
 
+    /// Receive a memory diffused from a grid peer (SEDM cross-peer knowledge
+    /// diffusion). Re-admitted locally through the dedup gate and tagged with the
+    /// sender's `origin` so it never re-diffuses. Default: memory disabled.
+    async fn grid_memory_ingest(
+        &self,
+        _namespace: &str,
+        _kind: &str,
+        _text: &str,
+        _origin: &str,
+    ) -> serde_json::Value {
+        serde_json::json!({ "ok": false, "error": "memory disabled" })
+    }
+
     // --- Self-management ---
 
     /// The whole settings.json as JSON, with every secret redacted (for the
@@ -402,6 +415,7 @@ pub fn router(state: AppState) -> Router {
         .route("/api/grid/node", get(api::grid_node))
         .route("/api/grid/metrics", get(api::grid_metrics))
         .route("/api/grid/delegate", post(api::grid_delegate))
+        .route("/api/grid/memory", post(api::grid_memory))
         .route(
             "/api/self/config",
             get(api::self_config_get).post(api::self_config_set),

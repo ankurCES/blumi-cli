@@ -212,9 +212,10 @@ pub struct GridConfig {
 /// Local-embeddings settings — the backend for semantic memory + code search.
 /// `backend = "local"` runs a bundled ONNX model (the `local-embeddings` build
 /// feature); `"openai"` calls a configured OpenAI-compatible `/embeddings`
-/// endpoint (e.g. Ollama / llama.cpp); `"grid"` offloads to a peer. Disabled by
-/// default until a consumer (semantic memory) turns it on; when on, defaults to
-/// the bundled local model so it works fully offline.
+/// endpoint (e.g. Ollama / llama.cpp); `"grid"` offloads to a peer. On by
+/// default with the bundled local model so semantic memory works fully offline
+/// out of the box (first use downloads the ~90 MB model once, then it's cached).
+/// Set `enabled = false` for a lean install — callers fall back to FTS5 search.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct EmbeddingConfig {
@@ -233,11 +234,47 @@ pub struct EmbeddingConfig {
 impl Default for EmbeddingConfig {
     fn default() -> Self {
         EmbeddingConfig {
-            enabled: false,
+            enabled: true,
             backend: "local".into(),
             provider: String::new(),
             model: "bge-small-en-v1.5".into(),
             dim: 384,
+        }
+    }
+}
+
+/// Semantic long-term memory (the LangGraph "Store" + SEDM governance). Layered
+/// on the embeddings backend above; when embeddings are disabled it degrades to
+/// FTS5 keyword recall. Disable `enabled` to fall back to file-only MEMORY.md.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct MemoryConfig {
+    /// Master switch for the vector Store + per-turn RAG injection.
+    pub enabled: bool,
+    /// How many relevant memories to inject as background context per turn.
+    pub recall_k: u32,
+    /// Cosine similarity at/above which a new write MERGES into the existing
+    /// memory (SEDM write-admission dedup) instead of inserting a duplicate.
+    pub dedup_threshold: f32,
+    /// Max active memories kept per namespace; lowest-utility are evicted past
+    /// this (SEDM eviction). 0 = unbounded.
+    pub max_per_namespace: u32,
+    /// Diffuse high-utility, non-`user` memories to grid peers (SEDM cross-peer
+    /// knowledge diffusion). The `user` namespace never diffuses (privacy).
+    pub diffuse: bool,
+    /// Seconds between background consolidation/eviction + diffusion sweeps.
+    pub sweep_secs: u64,
+}
+
+impl Default for MemoryConfig {
+    fn default() -> Self {
+        MemoryConfig {
+            enabled: true,
+            recall_k: 5,
+            dedup_threshold: 0.92,
+            max_per_namespace: 2000,
+            diffuse: true,
+            sweep_secs: 60,
         }
     }
 }
@@ -583,6 +620,9 @@ pub struct BlumiConfig {
     /// Local-embeddings settings (semantic memory + code search backend).
     #[serde(default)]
     pub embeddings: EmbeddingConfig,
+    /// Semantic long-term memory (vector Store + RAG + SEDM governance).
+    #[serde(default)]
+    pub memory: MemoryConfig,
     /// Project-workspace discovery for the TUI sidebar.
     #[serde(default)]
     pub workspaces: WorkspaceConfig,
@@ -614,6 +654,7 @@ impl Default for BlumiConfig {
             remote: RemoteConfig::default(),
             grid: GridConfig::default(),
             embeddings: EmbeddingConfig::default(),
+            memory: MemoryConfig::default(),
             workspaces: WorkspaceConfig::default(),
             git: GitConfig::default(),
             paths: Paths::default(),
