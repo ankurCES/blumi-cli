@@ -37,8 +37,8 @@ runs its share and reports back, tagged by hostname and OS. When compute is expe
 yours sits idle. → jump to **[Grid (distributed)](#grid-distributed)**.
 
 <p align="center">
-  <img src="docs/screenshots/grid-desk.jpg" alt="blumi running at once across a MacBook Air, an ultrawide, a Linux laptop, and a foldable phone" width="900"><br>
-  <em>One job, four faces: a MacBook Air (Apple Silicon), an ultrawide, a Linux laptop (x86_64),
+  <img src="docs/screenshots/grid-desk.jpg" alt="blumi running at once across a MacBook Air, a MacBook Pro, a Linux laptop, and a foldable phone" width="900"><br>
+  <em>One job, four faces: a MacBook Air (Apple Silicon), a MacBook Pro (the orchestrator), a Linux laptop (x86_64),
   and the <strong>blugo</strong> phone app — every node running blumi, sharing the work.</em>
 </p>
 
