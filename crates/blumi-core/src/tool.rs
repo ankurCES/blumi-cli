@@ -112,6 +112,14 @@ pub trait Tool: Send + Sync {
     fn is_read_only(&self) -> bool {
         false
     }
+    /// May run in the parallel batch within a turn. Defaults to read-only +
+    /// concurrency-safe. Tools whose calls are independent of each other (e.g.
+    /// `delegate`, whose sub-agents are isolated) can opt in even when not
+    /// read-only — so a multi-call fan-out runs concurrently, which is what lets
+    /// over-cap sub-agents overflow to grid peers instead of serializing locally.
+    fn parallelizable(&self) -> bool {
+        self.is_read_only() && self.is_concurrency_safe()
+    }
     /// Only surfaced to the model on demand (via ToolSearch), not in the base
     /// tool list.
     fn is_deferred(&self) -> bool {
@@ -286,6 +294,9 @@ pub trait TypedTool: Send + Sync + 'static {
     fn is_read_only(&self) -> bool {
         false
     }
+    fn parallelizable(&self) -> bool {
+        self.is_read_only() && self.is_concurrency_safe()
+    }
     fn is_deferred(&self) -> bool {
         false
     }
@@ -320,6 +331,9 @@ impl<T: TypedTool> Tool for Typed<T> {
     }
     fn is_read_only(&self) -> bool {
         self.0.is_read_only()
+    }
+    fn parallelizable(&self) -> bool {
+        self.0.parallelizable()
     }
     fn is_deferred(&self) -> bool {
         self.0.is_deferred()

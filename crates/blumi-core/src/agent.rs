@@ -481,7 +481,7 @@ impl AgentTurnRunner {
             let safe = self
                 .registry
                 .get(&call.name)
-                .map(|t| t.is_read_only() && t.is_concurrency_safe())
+                .map(|t| t.parallelizable())
                 .unwrap_or(false);
             if safe {
                 parallel.push(call);

@@ -44,6 +44,34 @@ pub fn grid_id(cfg: &GridConfig) -> Option<String> {
     Some(digest.iter().take(6).map(|b| format!("{b:02x}")).collect())
 }
 
+/// Activate the grid for a non-gateway orchestrator (the standalone `blumi tui`
+/// / `blumi run`): browse for same-grid peers and register the dispatch +
+/// overflow hooks, so the `grid_dispatch` tool and over-cap sub-agent fan-out
+/// reach the grid even without a local `blumi serve`. Unlike the gateway it does
+/// NOT advertise (this node orchestrates; it isn't itself a dispatch target).
+/// No-op (returns `false`) when the grid is disabled. The browse thread + the
+/// process-global hooks live for the process lifetime.
+pub fn activate_orchestrator(config: &blumi_config::BlumiConfig) -> bool {
+    let Some(gid) = grid_id(&config.grid) else {
+        return false;
+    };
+    let registry = PeerRegistry::new();
+    let secret = config.grid.secret.clone();
+    blumi_core::set_grid_overflow(Arc::new(GridOverflowHook {
+        registry: registry.clone(),
+        secret: secret.clone(),
+    }));
+    blumi_core::set_grid_dispatch(Arc::new(GridDispatchHook {
+        registry: registry.clone(),
+        secret,
+        cursor: std::sync::atomic::AtomicUsize::new(0),
+    }));
+    std::thread::spawn(move || {
+        browse_into(gid, None, registry, CancellationToken::new());
+    });
+    true
+}
+
 /// A discovered grid peer.
 #[derive(Debug, Clone, serde::Serialize)]
 pub struct Peer {

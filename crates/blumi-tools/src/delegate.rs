@@ -27,6 +27,14 @@ impl TypedTool for Delegate {
         "delegate"
     }
 
+    /// Sub-agents are isolated (own child session + restricted registry), so
+    /// multiple `delegate` calls in a turn run concurrently. That's what lets a
+    /// fan-out exceed the local sub-agent cap and overflow onto grid peers
+    /// instead of serializing on this machine.
+    fn parallelizable(&self) -> bool {
+        true
+    }
+
     fn description(&self) -> &str {
         "Delegate a self-contained sub-task to a specialized sub-agent that runs with its own \
          restricted toolset and budget, then returns its final result. Agents: Explore and Plan \

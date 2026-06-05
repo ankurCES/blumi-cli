@@ -257,6 +257,12 @@ impl TuiSessionFactory {
 pub async fn run(config: BlumiConfig) -> anyhow::Result<()> {
     config.paths.ensure_dirs().ok();
 
+    // Join the grid as an orchestrator: browse for peers + register the
+    // grid_dispatch / sub-agent-overflow hooks, so the TUI's chat can fan work
+    // across the grid instead of only running locally. No-op when the grid is
+    // disabled; browse starts now so peers are discovered before the first turn.
+    crate::grid::activate_orchestrator(&config);
+
     let store = Store::open(&config.paths.db).await.ok().map(Arc::new);
 
     // Skills listing for the `/skills` command + dashboard.
