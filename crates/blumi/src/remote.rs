@@ -112,7 +112,12 @@ impl RemoteRunner {
 
     /// Start the persistent SSE reader once, capturing the (stable) local
     /// event/interaction channels and session state.
-    fn ensure_reader(&self, ctx: &TurnContext, state: &Arc<Mutex<SessionState>>) {
+    fn ensure_reader(
+        &self,
+        events: EventEmitter,
+        interactor: Interactor,
+        state: &Arc<Mutex<SessionState>>,
+    ) {
         if self.reader_started.swap(true, Ordering::SeqCst) {
             return;
         }
@@ -120,8 +125,8 @@ impl RemoteRunner {
             base: self.base.clone(),
             client: self.client.clone(),
             cookie: self.cookie.clone(),
-            events: ctx.events.clone(),
-            interactor: ctx.interactor.clone(),
+            events,
+            interactor,
             state: state.clone(),
             last_seq: self.last_seq.clone(),
             turn_done: self.turn_done.clone(),
@@ -182,6 +187,18 @@ impl Drop for RemoteRunner {
 
 #[async_trait]
 impl TurnRunner for RemoteRunner {
+    fn on_attach(
+        &self,
+        state: Arc<Mutex<SessionState>>,
+        events: EventEmitter,
+        interactor: Interactor,
+    ) {
+        // Start the live SSE reader immediately on attach so the remote's turns
+        // stream without waiting for a first local message. Login already ran in
+        // connect()/fetch_transcript, so the cookie is ready.
+        self.ensure_reader(events, interactor, &state);
+    }
+
     async fn run_turn(
         &self,
         state: Arc<Mutex<SessionState>>,
@@ -189,7 +206,7 @@ impl TurnRunner for RemoteRunner {
         ct: CancellationToken,
     ) -> DoneReason {
         self.ensure_login().await;
-        self.ensure_reader(&ctx, &state);
+        self.ensure_reader(ctx.events.clone(), ctx.interactor.clone(), &state);
 
         // The actor already appended the user's message; forward its text.
         let text = {

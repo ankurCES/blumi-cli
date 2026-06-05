@@ -39,6 +39,19 @@ pub trait TurnRunner: Send + Sync {
         ct: CancellationToken,
     ) -> DoneReason;
 
+    /// Called once when the session actor spawns, before any turn, with the
+    /// session's stable emitter/interactor + state. Lets a runner start
+    /// background work up front — e.g. a remote attach starting its live SSE
+    /// reader so the remote's turns stream immediately, without waiting for a
+    /// first local message. Default: no-op.
+    fn on_attach(
+        &self,
+        _state: Arc<Mutex<SessionState>>,
+        _events: EventEmitter,
+        _interactor: Interactor,
+    ) {
+    }
+
     /// Toggle auto-approve-all (yolo) at runtime. Default: no-op.
     fn set_yolo(&self, _on: bool) {}
 

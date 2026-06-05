@@ -103,6 +103,15 @@ pub fn spawn_session_seeded(seed: SessionState, runner: Arc<dyn TurnRunner>) -> 
         state: state.clone(),
     };
 
+    // Give the runner the session's stable emitter/interactor up front so it can
+    // start background work before the first turn (e.g. a remote attach's live
+    // SSE reader). No-op for ordinary local runners.
+    runner.on_attach(
+        state.clone(),
+        EventEmitter::new(event_tx.clone()),
+        Interactor::new(interaction_tx.clone()),
+    );
+
     let actor = SessionActor {
         id,
         state,
