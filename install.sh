@@ -49,6 +49,18 @@ say "${dim}platform: ${target}${off}"
 have curl || have wget || err "curl or wget is required"
 dl() { if have curl; then curl -fsSL "$1" -o "$2"; else wget -qO "$2" "$1"; fi; }
 
+# Install a binary into $BIN_DIR *atomically*: copy to a temp name in the same
+# directory, then rename over the target. A plain `cp` truncates the file in
+# place, which fails with "Text file busy" (ETXTBSY) when the destination is a
+# currently-running executable — e.g. the `blumi serve` gateway. A rename swaps
+# the directory entry and leaves the old inode intact for the running process,
+# so the update succeeds without stopping the service first.
+install_bin() {
+  cp "$1" "$BIN_DIR/$BIN.new"
+  chmod 0755 "$BIN_DIR/$BIN.new"
+  mv -f "$BIN_DIR/$BIN.new" "$BIN_DIR/$BIN"
+}
+
 mkdir -p "$BIN_DIR"
 tmp="$(mktemp -d)"; trap 'rm -rf "$tmp"' EXIT
 
@@ -62,14 +74,13 @@ if dl "$url" "$tmp/$asset" 2>/dev/null; then
   tar -xzf "$tmp/$asset" -C "$tmp"
   src="$(find "$tmp" -type f -name "$BIN" | head -n1 || true)"
   [ -n "$src" ] || err "release archive did not contain '$BIN'"
-  cp "$src" "$BIN_DIR/$BIN"
-  chmod 0755 "$BIN_DIR/$BIN"
+  install_bin "$src"
   how="prebuilt"
 else
   say "${dim}no prebuilt binary for ${target} — building from source…${off}"
   have cargo || err "no prebuilt binary and 'cargo' was not found.\n  install Rust (https://rustup.rs), then re-run this installer."
   cargo install --git "$REPO_URL" --locked --force --root "$tmp/cargo" "$BIN"
-  cp "$tmp/cargo/bin/$BIN" "$BIN_DIR/$BIN"
+  install_bin "$tmp/cargo/bin/$BIN"
   how="source"
 fi
 
