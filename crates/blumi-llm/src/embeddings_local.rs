@@ -93,6 +93,13 @@ impl EmbeddingClient for LocalEmbeddingClient {
     fn model_id(&self) -> &str {
         &self.model_id
     }
+
+    /// Ready only once the model has finished its one-time load/download — a
+    /// non-blocking peek at the lazy cell, so per-turn recall never stalls
+    /// waiting on the cold start (the background warmup drives the load).
+    fn ready(&self) -> bool {
+        self.cell.get().is_some()
+    }
 }
 
 #[cfg(test)]

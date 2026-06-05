@@ -74,9 +74,16 @@ impl SemanticMemoryImpl {
         self.store.pool()
     }
 
-    /// Embed + L2-normalize one text, or `None` if embeddings are off/erroring.
+    /// Embed + L2-normalize one text. Returns `None` when embeddings are off,
+    /// the model is still doing its one-time cold load (we NEVER block the hot
+    /// path on that — the background warmup loads it and [`backfill_vectors`]
+    /// fills in any memories written meanwhile), or it errors. Callers then fall
+    /// back to FTS5 / a vector-less insert.
     async fn embed_one(&self, text: &str) -> Option<Vec<f32>> {
         let emb = self.embedder.as_ref()?;
+        if !emb.ready() {
+            return None;
+        }
         let mut v = emb
             .embed(&[text.to_string()])
             .await
@@ -456,9 +463,40 @@ impl SemanticMemoryImpl {
         .unwrap_or(0)
     }
 
-    /// One governance sweep over every namespace: consolidate then evict.
-    /// Returns `(merged, evicted)` totals.
+    /// Backfill vectors for active memories that lack one — e.g. written during
+    /// the model's cold start (when [`embed_one`](Self::embed_one) returns
+    /// `None`). No-op until the model is ready; bounded per call. Returns how
+    /// many were embedded.
+    pub async fn backfill_vectors(&self, limit: i64) -> usize {
+        if self.embedder.as_ref().map(|e| e.ready()) != Some(true) {
+            return 0;
+        }
+        let rows = sqlx::query(
+            "SELECT m.id AS id, m.text AS text
+             FROM memories m LEFT JOIN memory_vectors v ON v.memory_id = m.id
+             WHERE m.status = 'active' AND v.memory_id IS NULL
+             LIMIT ?",
+        )
+        .bind(limit)
+        .fetch_all(self.pool())
+        .await
+        .unwrap_or_default();
+        let mut n = 0;
+        for r in &rows {
+            let id: i64 = r.get("id");
+            let text: String = r.get("text");
+            if let Some(v) = self.embed_one(&text).await {
+                self.insert_vector(id, &v).await;
+                n += 1;
+            }
+        }
+        n
+    }
+
+    /// One governance sweep over every namespace: backfill missing vectors, then
+    /// consolidate near-dupes, then evict the weakest. Returns `(merged, evicted)`.
     pub async fn sweep(&self) -> (usize, usize) {
+        self.backfill_vectors(64).await;
         let cap = self.params.max_per_namespace;
         let mut merged = 0;
         let mut evicted = 0;

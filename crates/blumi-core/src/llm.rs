@@ -87,4 +87,11 @@ pub trait EmbeddingClient: Send + Sync {
     fn dim(&self) -> usize;
     /// A stable id for the embedding model, so a model swap is detectable.
     fn model_id(&self) -> &str;
+    /// Whether the backend can embed *right now* without a blocking cold start.
+    /// A lazily-downloaded local model returns `false` until it has loaded, so
+    /// hot-path callers (per-turn recall) can skip rather than stall the turn.
+    /// Remote/endpoint backends are always ready. Default: `true`.
+    fn ready(&self) -> bool {
+        true
+    }
 }
