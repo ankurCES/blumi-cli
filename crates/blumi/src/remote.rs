@@ -130,6 +130,48 @@ impl RemoteRunner {
         };
         tokio::spawn(reader.run());
     }
+
+    /// Fetch the remote's current transcript so attaching shows the existing
+    /// conversation instead of a blank pane (and re-attaching after a TUI
+    /// restart re-pulls it). Best-effort: returns empty on any failure.
+    async fn fetch_transcript(&self) -> Vec<Message> {
+        self.ensure_login().await;
+        let url = format!("{}/api/messages", self.base);
+        let mut req = self.client.get(&url);
+        if let Some(c) = self.cookie.lock().await.as_ref() {
+            req = req.header(reqwest::header::COOKIE, c);
+        }
+        let Ok(resp) = req.send().await else {
+            return Vec::new();
+        };
+        let Ok(body) = resp.json::<serde_json::Value>().await else {
+            return Vec::new();
+        };
+        let items = body
+            .get("messages")
+            .and_then(|m| m.as_array())
+            .cloned()
+            .unwrap_or_default();
+        let mut out = Vec::new();
+        for it in items {
+            let role = it.get("role").and_then(|v| v.as_str()).unwrap_or("");
+            let text = it
+                .get("text")
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .to_string();
+            if text.trim().is_empty() {
+                continue;
+            }
+            match role {
+                "user" => out.push(Message::user(text)),
+                "assistant" => out.push(Message::assistant(text)),
+                // tool/system results aren't reconstructed for the seeded view.
+                _ => {}
+            }
+        }
+        out
+    }
 }
 
 impl Drop for RemoteRunner {
@@ -365,11 +407,15 @@ fn scope_str(s: ApprovalScope) -> &'static str {
     }
 }
 
-/// Build a [`SessionHandle`] backed by a [`RemoteRunner`] for `inst`.
-pub fn connect(inst: &RemoteInstance) -> SessionHandle {
+/// Build a [`SessionHandle`] backed by a [`RemoteRunner`] for `inst`, seeded with
+/// the remote's current transcript so the attach shows the existing conversation
+/// (the live phone/grid chats) rather than a blank pane.
+pub async fn connect(inst: &RemoteInstance) -> SessionHandle {
     let runner = Arc::new(RemoteRunner::new(inst));
     let id = SessionId::from(format!("remote:{}", inst.name));
-    spawn_session_seeded(SessionState::new(id, "remote"), runner)
+    let mut seed = SessionState::new(id, "remote");
+    seed.messages = runner.fetch_transcript().await;
+    spawn_session_seeded(seed, runner)
 }
 
 #[cfg(test)]

@@ -219,7 +219,7 @@ impl blumi_tui::SessionFactory for TuiSessionFactory {
         if inst.url.trim().is_empty() {
             anyhow::bail!("remote '{name}' has no url");
         }
-        Ok(crate::remote::connect(inst))
+        Ok(crate::remote::connect(inst).await)
     }
 
     fn workspaces(&self) -> Vec<blumi_tui::Workspace> {
