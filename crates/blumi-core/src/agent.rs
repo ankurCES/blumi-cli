@@ -204,7 +204,16 @@ impl TurnRunner for AgentTurnRunner {
             if query.trim().is_empty() {
                 None
             } else {
-                let hits = mem.recall(&query, self.recall_k).await;
+                // Defense-in-depth: never let recall stall a turn. A cold local
+                // model is already handled by `EmbeddingClient::ready()`, but a
+                // slow remote embed endpoint could hang — so cap it and skip the
+                // injection this turn if it doesn't answer quickly.
+                let hits = tokio::time::timeout(
+                    std::time::Duration::from_secs(3),
+                    mem.recall(&query, self.recall_k),
+                )
+                .await
+                .unwrap_or_default();
                 if hits.is_empty() {
                     None
                 } else {
