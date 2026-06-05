@@ -160,12 +160,32 @@ impl PeerRegistry {
         }
     }
 
-    /// Currently-online peers (per mDNS Resolved/Removed), sorted by id.
+    /// Currently-online peers, deduped by endpoint and sorted by id.
+    ///
+    /// A peer that is BOTH statically configured (`seed_static_peers`) and
+    /// mDNS-discovered would otherwise appear twice (different ids, same
+    /// host:port), skewing dispatch round-robin onto one machine. Collapse by
+    /// `(host, port)`, preferring the mDNS entry (richer name + version) over a
+    /// `static:` seed.
     pub fn live(&self) -> Vec<Peer> {
-        let mut out = Vec::new();
+        let mut by_endpoint: HashMap<(Ipv4Addr, u16), Peer> = HashMap::new();
         if let Ok(m) = self.inner.lock() {
-            out.extend(m.values().filter(|p| p.online).cloned());
+            for p in m.values().filter(|p| p.online) {
+                let key = (p.host, p.port);
+                match by_endpoint.get(&key) {
+                    Some(existing)
+                        if existing.id.starts_with("static:") && !p.id.starts_with("static:") =>
+                    {
+                        by_endpoint.insert(key, p.clone());
+                    }
+                    Some(_) => {}
+                    None => {
+                        by_endpoint.insert(key, p.clone());
+                    }
+                }
+            }
         }
+        let mut out: Vec<Peer> = by_endpoint.into_values().collect();
         out.sort_by(|a, b| a.id.cmp(&b.id));
         out
     }
