@@ -44,6 +44,41 @@ pub fn grid_id(cfg: &GridConfig) -> Option<String> {
     Some(digest.iter().take(6).map(|b| format!("{b:02x}")).collect())
 }
 
+/// Seed the registry with statically-configured peers (`IP` or `IP:port`,
+/// default port 7777), so the grid works without mDNS — robust against macOS
+/// multicast/Local-Network resets. Peers are marked online; real reachability is
+/// confirmed when actually dispatched to (and the shared secret authenticates).
+/// mDNS browse still runs and augments this set.
+pub fn seed_static_peers(registry: &PeerRegistry, peers: &[String], our_grid_id: &str) {
+    for spec in peers {
+        let spec = spec
+            .trim()
+            .trim_start_matches("http://")
+            .trim_start_matches("https://")
+            .trim_end_matches('/');
+        if spec.is_empty() {
+            continue;
+        }
+        let (host_s, port) = match spec.rsplit_once(':') {
+            Some((h, p)) => (h, p.parse::<u16>().unwrap_or(7777)),
+            None => (spec, 7777u16),
+        };
+        let Ok(host) = host_s.parse::<Ipv4Addr>() else {
+            continue;
+        };
+        registry.upsert(Peer {
+            id: format!("static:{host}:{port}"),
+            name: host_s.to_string(),
+            host,
+            port,
+            version: String::new(),
+            auth_required: true,
+            grid_id: our_grid_id.to_string(),
+            online: true,
+        });
+    }
+}
+
 /// Activate the grid for a non-gateway orchestrator (the standalone `blumi tui`
 /// / `blumi run`): browse for same-grid peers and register the dispatch +
 /// overflow hooks, so the `grid_dispatch` tool and over-cap sub-agent fan-out
@@ -57,6 +92,7 @@ pub fn activate_orchestrator(config: &blumi_config::BlumiConfig) -> bool {
     };
     let registry = PeerRegistry::new();
     let secret = config.grid.secret.clone();
+    seed_static_peers(&registry, &config.grid.peers, &gid);
     blumi_core::set_grid_overflow(Arc::new(GridOverflowHook {
         registry: registry.clone(),
         secret: secret.clone(),

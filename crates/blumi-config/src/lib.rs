@@ -202,6 +202,11 @@ pub struct GridConfig {
     /// Optional friendly label for this node in the peer list / UI. Blank =
     /// fall back to the machine hostname.
     pub node_name: String,
+    /// Static peer addresses (`IP` or `IP:port`, default port 7777) seeded into
+    /// the grid registry in addition to mDNS discovery. Lets the grid work when
+    /// multicast/mDNS is blocked (e.g. macOS resets a re-signed binary's
+    /// Local-Network permission). The shared secret still authenticates dispatch.
+    pub peers: Vec<String>,
 }
 
 /// Project-workspace discovery for the TUI's left sidebar.

@@ -765,6 +765,9 @@ pub async fn run(
     // Receiver is blocking), feeding the shared registry. Excludes our own
     // advertisement by mDNS fullname. Runs for the process lifetime.
     if let (Some(gid), Some(reg)) = (grid_id, grid_registry) {
+        // Seed statically-configured peers so the grid works without mDNS (robust
+        // to macOS multicast/Local-Network resets); the browse below augments it.
+        crate::grid::seed_static_peers(&reg, &provider.config.grid.peers, &gid);
         // When the grid is on, excess local sub-agents overflow to a peer for
         // remote execution (process-global hook read by blumi-core's spawner).
         blumi_core::set_grid_overflow(std::sync::Arc::new(crate::grid::GridOverflowHook {
