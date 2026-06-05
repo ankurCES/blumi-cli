@@ -325,6 +325,9 @@ pub struct AppState {
     /// Shared grid secret (when the grid is enabled), used to authenticate
     /// peer→peer `/api/grid/run` requests. `None` = grid disabled.
     grid_secret: Option<Arc<String>>,
+    /// Bumped on every session swap so a live SSE stream re-points to the new
+    /// session instead of going silent on the old (now-detached) one.
+    swaps: Arc<tokio::sync::watch::Sender<u64>>,
 }
 
 impl AppState {
@@ -338,6 +341,13 @@ impl AppState {
         let old = self.session.read().await.clone();
         self.provider.save(&old).await;
         *self.session.write().await = next;
+        // Wake live SSE streams so they re-subscribe to the new session.
+        self.swaps.send_modify(|g| *g += 1);
+    }
+
+    /// A receiver that fires whenever the current session is swapped.
+    pub(crate) fn session_changes(&self) -> tokio::sync::watch::Receiver<u64> {
+        self.swaps.subscribe()
     }
 
     /// Rebuild the current session in place (self-evolution): snapshot it, ask
@@ -477,6 +487,7 @@ pub async fn serve(
         started: std::time::Instant::now(),
         loop_status: Arc::new(RwLock::new(LoopStatus::default())),
         grid_secret: grid_secret.map(Arc::new),
+        swaps: Arc::new(tokio::sync::watch::channel(0u64).0),
     };
     // Self-management: react to the agent's Reload/Restart events server-side, so
     // `reload_self` / `restart_gateway` work for every client (incl. the phone)
