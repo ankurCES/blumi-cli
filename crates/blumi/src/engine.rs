@@ -9,7 +9,7 @@ use blumi_core::{
 };
 use blumi_exec::LocalExecutor;
 use blumi_llm::{build_client, MockLlmClient};
-use blumi_protocol::{FinishReason, SessionId, StreamChunk};
+use blumi_protocol::{FinishReason, Message, SessionId, StreamChunk};
 use blumi_skills::MemorySnapshot;
 use std::sync::Arc;
 
@@ -103,16 +103,22 @@ pub async fn build_session(
         blumi_skills::GridDispatchTool::new(),
     )));
 
-    // Cross-session recall: full-text (FTS5) search over past sessions. Skipped
-    // if the history DB can't be opened — it must never block startup.
-    match blumi_persist::Store::open(&config.paths.db).await {
-        Ok(store) => {
-            registry.register(Arc::new(blumi_core::Typed(
-                blumi_tools::SessionSearch::new(Arc::new(store)),
-            )));
-        }
-        Err(e) => tracing::warn!("session history unavailable; SessionSearch disabled: {e}"),
-    }
+    // Cross-session recall (FTS5) + durable-execution checkpoints share one
+    // history DB. Skipped if it can't be opened — it must never block startup.
+    let history_store: Option<Arc<blumi_persist::Store>> =
+        match blumi_persist::Store::open(&config.paths.db).await {
+            Ok(store) => {
+                let store = Arc::new(store);
+                registry.register(Arc::new(blumi_core::Typed(
+                    blumi_tools::SessionSearch::new(store.clone()),
+                )));
+                Some(store)
+            }
+            Err(e) => {
+                tracing::warn!("session history unavailable; SessionSearch disabled: {e}");
+                None
+            }
+        };
 
     // Code intelligence: register the `Lsp` tool if any language servers are
     // configured (language-agnostic, keyed by file extension).
@@ -316,26 +322,45 @@ pub async fn build_session(
         .with_max_local_agents(config.llm.max_local_agents),
     );
 
-    let runner = Arc::new(
-        AgentTurnRunner::new(
-            llm,
-            registry,
-            perms,
-            executor,
-            options,
-            config.llm.max_iterations,
-            config.llm.context_size,
-            system_prompt,
-            work_dir.clone(),
-        )
-        .with_spawner(spawner)
-        .with_personas(personas, &active)
-        .with_auto_continue(config.llm.max_auto_continue)
-        .with_auto_continue_tokens(config.llm.max_auto_continue_tokens),
-    );
+    let mut runner = AgentTurnRunner::new(
+        llm,
+        registry,
+        perms,
+        executor,
+        options,
+        config.llm.max_iterations,
+        config.llm.context_size,
+        system_prompt,
+        work_dir.clone(),
+    )
+    .with_spawner(spawner)
+    .with_personas(personas, &active)
+    .with_auto_continue(config.llm.max_auto_continue)
+    .with_auto_continue_tokens(config.llm.max_auto_continue_tokens);
+    // Durable execution: checkpoint the turn after each tool step (shares the
+    // history DB) so a crash/restart resumes from the last step.
+    if let Some(store) = &history_store {
+        runner = runner.with_checkpoint(Arc::new(blumi_persist::CheckpointSinkImpl(store.clone())));
+    }
+    let runner = Arc::new(runner);
 
-    let state =
+    let mut state =
         seed.unwrap_or_else(|| blumi_core::SessionState::new(SessionId::new(), model.clone()));
+    // Durable execution: if this session has an in-progress turn checkpointed
+    // (interrupted mid-turn), resume from the last completed tool step.
+    if let Some(store) = &history_store {
+        if let Ok(Some(cp)) = store.take_incomplete(state.id.as_str()).await {
+            if cp.messages.len() > state.messages.len() {
+                state.messages = cp.messages;
+                state.todos = cp.todos;
+                state.messages.push(Message::user(
+                    "[Resuming after an interruption — continue exactly where you left off; \
+                     do not repeat already-completed steps.]"
+                        .to_string(),
+                ));
+            }
+        }
+    }
     Ok(blumi_core::spawn_session_seeded(state, runner))
 }
 

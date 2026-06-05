@@ -5,13 +5,15 @@
 //! FTS5 virtual table for cross-session search. Saving a session snapshot is
 //! idempotent (replace its messages). JSONL export lives elsewhere.
 
+use async_trait::async_trait;
 use blumi_core::SessionSnapshot;
-use blumi_protocol::{Message, Role};
+use blumi_protocol::{Message, Role, Todo};
 use sqlx::sqlite::{SqliteConnectOptions, SqliteJournalMode, SqlitePoolOptions};
 use sqlx::{Row, SqlitePool};
 use std::collections::HashSet;
 use std::path::Path;
 use std::str::FromStr;
+use std::sync::Arc;
 use time::format_description::well_known::Rfc3339;
 use time::OffsetDateTime;
 
@@ -50,6 +52,16 @@ pub struct SearchHit {
     pub session_id: String,
     pub title: String,
     pub snippet: String,
+}
+
+/// An in-progress turn loaded for resume (durable execution).
+#[derive(Debug, Clone)]
+pub struct StoredCheckpoint {
+    pub messages: Vec<Message>,
+    pub todos: Vec<Todo>,
+    pub model: String,
+    pub turn_seq: u32,
+    pub step: u32,
 }
 
 /// The persistence store.
@@ -231,6 +243,88 @@ impl Store {
             .await?;
         Ok(())
     }
+
+    // --- Durable-execution checkpoints (LangGraph-checkpointer analog) -------
+
+    /// Save (overwrite) the in-progress checkpoint for the current turn.
+    pub async fn save_checkpoint(&self, cp: &blumi_core::Checkpoint) -> Result<(), StoreError> {
+        let now = OffsetDateTime::now_utc()
+            .format(&Rfc3339)
+            .unwrap_or_default();
+        let messages_json = serde_json::to_string(&cp.messages)?;
+        let todos_json = serde_json::to_string(&cp.todos)?;
+        sqlx::query(
+            "INSERT INTO checkpoints
+                (session_id, turn_seq, step, messages_json, todos_json, model, status, created_at)
+             VALUES (?, ?, ?, ?, ?, ?, 'in_progress', ?)
+             ON CONFLICT(session_id, turn_seq) DO UPDATE SET
+                step=excluded.step, messages_json=excluded.messages_json,
+                todos_json=excluded.todos_json, model=excluded.model,
+                status='in_progress', created_at=excluded.created_at",
+        )
+        .bind(&cp.session_id)
+        .bind(cp.turn_seq as i64)
+        .bind(cp.step as i64)
+        .bind(messages_json)
+        .bind(todos_json)
+        .bind(&cp.model)
+        .bind(now)
+        .execute(&self.pool)
+        .await?;
+        Ok(())
+    }
+
+    /// The latest in-progress checkpoint for a session (for resume), if any.
+    pub async fn take_incomplete(
+        &self,
+        session_id: &str,
+    ) -> Result<Option<StoredCheckpoint>, StoreError> {
+        let Some(row) = sqlx::query(
+            "SELECT turn_seq, step, messages_json, todos_json, model
+             FROM checkpoints WHERE session_id = ? AND status = 'in_progress'
+             ORDER BY turn_seq DESC LIMIT 1",
+        )
+        .bind(session_id)
+        .fetch_optional(&self.pool)
+        .await?
+        else {
+            return Ok(None);
+        };
+        let messages: Vec<Message> = serde_json::from_str(&row.get::<String, _>("messages_json"))?;
+        let todos: Vec<Todo> =
+            serde_json::from_str(&row.get::<String, _>("todos_json")).unwrap_or_default();
+        Ok(Some(StoredCheckpoint {
+            messages,
+            todos,
+            model: row.get("model"),
+            turn_seq: row.get::<i64, _>("turn_seq") as u32,
+            step: row.get::<i64, _>("step") as u32,
+        }))
+    }
+
+    /// Clear a session's checkpoint (the turn completed cleanly).
+    pub async fn clear_checkpoint(&self, session_id: &str) -> Result<(), StoreError> {
+        sqlx::query("DELETE FROM checkpoints WHERE session_id = ?")
+            .bind(session_id)
+            .execute(&self.pool)
+            .await?;
+        Ok(())
+    }
+}
+
+/// Adapts a shared [`Store`] to the core [`blumi_core::CheckpointSink`] trait so
+/// the agent loop can persist checkpoints without depending on this crate.
+/// Best-effort: storage errors are swallowed (durability must never break a turn).
+pub struct CheckpointSinkImpl(pub Arc<Store>);
+
+#[async_trait]
+impl blumi_core::CheckpointSink for CheckpointSinkImpl {
+    async fn save(&self, cp: blumi_core::Checkpoint) {
+        let _ = self.0.save_checkpoint(&cp).await;
+    }
+    async fn done(&self, session_id: &str) {
+        let _ = self.0.clear_checkpoint(session_id).await;
+    }
 }
 
 fn row_to_meta(r: &sqlx::sqlite::SqliteRow) -> SessionMeta {
@@ -284,6 +378,36 @@ fn to_fts_query(q: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn checkpoint_round_trip() {
+        let store = Store::open_in_memory().await.unwrap();
+        let sid = "s-cp";
+        assert!(store.take_incomplete(sid).await.unwrap().is_none());
+
+        let cp = blumi_core::Checkpoint {
+            session_id: sid.to_string(),
+            turn_seq: 1,
+            step: 0,
+            messages: vec![Message::user("hi".to_string())],
+            todos: vec![],
+            model: "m".to_string(),
+        };
+        store.save_checkpoint(&cp).await.unwrap();
+
+        // Overwrite the same turn at a later step.
+        let mut cp2 = cp.clone();
+        cp2.step = 1;
+        cp2.messages.push(Message::assistant("yo".to_string()));
+        store.save_checkpoint(&cp2).await.unwrap();
+
+        let got = store.take_incomplete(sid).await.unwrap().unwrap();
+        assert_eq!(got.step, 1);
+        assert_eq!(got.messages.len(), 2);
+
+        store.clear_checkpoint(sid).await.unwrap();
+        assert!(store.take_incomplete(sid).await.unwrap().is_none());
+    }
     use blumi_protocol::{Message, SessionId};
 
     fn snapshot(id: &str, msgs: Vec<Message>) -> SessionSnapshot {

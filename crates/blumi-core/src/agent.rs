@@ -56,6 +56,9 @@ pub struct AgentTurnRunner {
     personas: Vec<Persona>,
     /// The currently-active persona (layered onto the system prompt).
     active: std::sync::Mutex<Persona>,
+    /// Durable-execution sink: persists the turn after each tool step so a
+    /// crash/restart can resume from the last step. `None` = no durability.
+    checkpoint: Option<Arc<dyn crate::CheckpointSink>>,
 }
 
 impl AgentTurnRunner {
@@ -87,12 +90,20 @@ impl AgentTurnRunner {
             journal: Arc::new(ChangeJournal::new()),
             personas: Vec::new(),
             active: std::sync::Mutex::new(Persona::default()),
+            checkpoint: None,
         }
     }
 
     /// Enable sub-agent delegation (the `delegate` tool's backend).
     pub fn with_spawner(mut self, spawner: Arc<dyn SubAgentSpawner>) -> Self {
         self.spawner = Some(spawner);
+        self
+    }
+
+    /// Enable durable execution: checkpoint the turn after each tool step so a
+    /// crash/gateway-restart resumes mid-turn instead of replaying it.
+    pub fn with_checkpoint(mut self, sink: Arc<dyn crate::CheckpointSink>) -> Self {
+        self.checkpoint = Some(sink);
         self
     }
 
@@ -157,7 +168,7 @@ impl TurnRunner for AgentTurnRunner {
             (false, false) => format!("{}\n\n{}", self.system_prompt, persona.instructions),
         };
 
-        for _iteration in 0..self.max_iterations {
+        for iteration in 0..self.max_iterations {
             if ct.is_cancelled() {
                 return DoneReason::Cancelled;
             }
@@ -300,6 +311,11 @@ impl TurnRunner for AgentTurnRunner {
                 if !text.is_empty() {
                     state.lock().await.messages.push(Message::assistant(text));
                 }
+                // Turn completed cleanly — clear any in-progress checkpoint.
+                if let Some(cp) = &self.checkpoint {
+                    let sid = state.lock().await.id.as_str().to_string();
+                    cp.done(&sid).await;
+                }
                 return DoneReason::Completed;
             }
 
@@ -370,6 +386,16 @@ impl TurnRunner for AgentTurnRunner {
                         ));
                     }
                 }
+            }
+
+            // Durable-execution checkpoint: persist the turn after this tool
+            // step so a crash/restart resumes here instead of replaying the turn.
+            if let Some(cp) = &self.checkpoint {
+                let snapshot = {
+                    let st = state.lock().await;
+                    crate::Checkpoint::from_state(&st, iteration)
+                };
+                cp.save(snapshot).await;
             }
 
             if ct.is_cancelled() {
