@@ -241,7 +241,16 @@ impl Management for WebManagement {
 
     fn grid_peer_ids(&self) -> Vec<String> {
         match &self.grid {
-            Some(g) => g.registry.live().into_iter().map(|p| p.id).collect(),
+            // Key by stable host:port, NOT the registry id (which flips between
+            // `static:host:port` and the mDNS fullname when mDNS resolves a
+            // seeded peer mid-loop). `grid_dispatch` resolves it back to a live
+            // peer, so a key captured a moment earlier never goes stale.
+            Some(g) => g
+                .registry
+                .live()
+                .into_iter()
+                .map(|p| format!("{}:{}", p.host, p.port))
+                .collect(),
             None => Vec::new(),
         }
     }
@@ -290,7 +299,10 @@ impl Management for WebManagement {
         if secret.trim().is_empty() {
             return serde_json::json!({ "ok": false, "error": "no grid secret" });
         }
-        let Some(peer) = grid.registry.get(peer_id) else {
+        // Resolve tolerantly: `peer_id` may be a stable host:port key (from the
+        // loop) or an exact id (from the HTTP endpoint), and the registry id can
+        // change under us when mDNS resolves a static peer.
+        let Some(peer) = grid.registry.resolve(peer_id) else {
             return serde_json::json!({ "ok": false, "error": "peer offline" });
         };
 

@@ -194,6 +194,34 @@ impl PeerRegistry {
     pub fn get(&self, id: &str) -> Option<Peer> {
         self.inner.lock().ok()?.get(id).cloned()
     }
+
+    /// Resolve a peer by exact id, OR by `host:port` (or bare `host`), against
+    /// the currently-online peers. Tolerant of the static-vs-mDNS id flip: a
+    /// peer seeded as `static:<host>:<port>` gets re-keyed to its mDNS fullname
+    /// once mDNS resolves it, so an id captured a moment earlier can go stale
+    /// mid-dispatch. Matching on the stable host:port avoids that race.
+    pub fn resolve(&self, key: &str) -> Option<Peer> {
+        // Exact id, if it's still online.
+        if let Some(p) = self.get(key) {
+            if p.online {
+                return Some(p);
+            }
+        }
+        // Else match host:port (or bare host) among online peers. Strip a
+        // `static:` prefix so a stale static id still resolves to the live peer.
+        let bare = key.strip_prefix("static:").unwrap_or(key);
+        let (want_host, want_port) = match bare.rsplit_once(':') {
+            Some((h, p)) => (h, p.parse::<u16>().ok()),
+            None => (bare, None),
+        };
+        self.live().into_iter().find(|p| {
+            p.host.to_string() == want_host
+                && match want_port {
+                    Some(port) => p.port == port,
+                    None => true,
+                }
+        })
+    }
 }
 
 /// What the gateway shares about its own grid membership, held by the web
@@ -417,5 +445,53 @@ mod tests {
         assert_eq!(p.base_url(), "http://10.0.0.2:7777");
         reg.mark_offline("a._blumi._tcp.local.");
         assert!(reg.live().is_empty());
+    }
+
+    #[test]
+    fn resolve_by_host_port_survives_id_change() {
+        let reg = PeerRegistry::new();
+        reg.upsert(Peer {
+            id: "static:10.0.0.5:7777".into(),
+            name: "10.0.0.5".into(),
+            host: Ipv4Addr::new(10, 0, 0, 5),
+            port: 7777,
+            version: String::new(),
+            auth_required: true,
+            grid_id: "g".into(),
+            online: true,
+        });
+        // Exact id resolves.
+        assert!(reg.resolve("static:10.0.0.5:7777").is_some());
+        // The stable host:port key (what the loop now round-robins over) resolves.
+        assert_eq!(reg.resolve("10.0.0.5:7777").unwrap().port, 7777);
+        // An id that was never seeded won't match by id...
+        assert!(reg.get("ghost._blumi._tcp.local.").is_none());
+        // ...but the live peer is still reachable via its host:port.
+        assert!(reg.resolve("10.0.0.5:7777").is_some());
+        // Offline peers don't resolve.
+        reg.mark_offline("static:10.0.0.5:7777");
+        assert!(reg.resolve("10.0.0.5:7777").is_none());
+    }
+
+    #[test]
+    fn live_dedups_static_and_mdns_for_same_endpoint() {
+        let reg = PeerRegistry::new();
+        let mk = |id: &str| Peer {
+            id: id.into(),
+            name: id.into(),
+            host: Ipv4Addr::new(10, 0, 0, 7),
+            port: 7777,
+            version: String::new(),
+            auth_required: true,
+            grid_id: "g".into(),
+            online: true,
+        };
+        reg.upsert(mk("static:10.0.0.7:7777"));
+        reg.upsert(mk("predator._blumi._tcp.local."));
+        // The same host:port seeded twice (static + mDNS) collapses to one
+        // peer, preferring the richer mDNS entry.
+        let live = reg.live();
+        assert_eq!(live.len(), 1);
+        assert_eq!(live[0].id, "predator._blumi._tcp.local.");
     }
 }

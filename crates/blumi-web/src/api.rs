@@ -502,14 +502,14 @@ pub async fn loop_stop(State(state): State<AppState>) -> Json<Value> {
 /// repeat until the board is empty or someone stops it.
 async fn run_loop(state: AppState, review: bool, grid: bool) {
     let mut rr: usize = 0; // round-robin cursor over live peers
-    let mut fails: usize = 0; // consecutive grid dispatch failures
     loop {
         if !state.loop_status().read().await.running {
             break;
         }
 
         // Grid mode: dispatch the next todo to a live peer (round-robin), which
-        // runs it on its own runtime. Falls back to local when no peers exist.
+        // runs it on its own runtime. Falls back to local when no peers exist
+        // OR when every live peer fails this task (so the board still advances).
         if grid {
             let peers = state.mgmt().grid_peer_ids();
             if !peers.is_empty() {
@@ -517,26 +517,39 @@ async fn run_loop(state: AppState, review: bool, grid: bool) {
                     break;
                 };
                 let id = todo["id"].as_str().unwrap_or_default().to_string();
-                let peer = peers[rr % peers.len()].clone();
-                rr += 1;
-                {
-                    let mut st = state.loop_status().write().await;
-                    st.iter += 1;
-                    st.current = format!("{} @ {peer}", todo["title"].as_str().unwrap_or_default());
-                }
-                let res = state.mgmt().grid_dispatch(&id, &peer, review).await;
-                if res["ok"].as_bool() == Some(true) {
-                    fails = 0;
-                } else {
-                    fails += 1;
-                    // Every live peer failed this task — stop to avoid a hot loop.
-                    if fails > peers.len() {
+                let title = todo["title"].as_str().unwrap_or_default().to_string();
+
+                // Try each live peer once for THIS task. A dispatch can fail
+                // transiently — a peer briefly busy, or its registry id changing
+                // when mDNS resolves a statically-seeded peer mid-loop — so
+                // rotate through the peers instead of breaking the whole loop.
+                let mut dispatched = false;
+                for _ in 0..peers.len() {
+                    if !state.loop_status().read().await.running {
+                        break;
+                    }
+                    let peer = peers[rr % peers.len()].clone();
+                    rr += 1;
+                    {
+                        let mut st = state.loop_status().write().await;
+                        st.iter += 1;
+                        st.current = format!("{title} @ {peer}");
+                    }
+                    if state.mgmt().grid_dispatch(&id, &peer, review).await["ok"].as_bool()
+                        == Some(true)
+                    {
+                        dispatched = true;
                         break;
                     }
                 }
-                continue;
+                if dispatched {
+                    continue;
+                }
+                // Every live peer failed this task → fall through and run it
+                // locally so the loop keeps making progress instead of spinning
+                // on a task it keeps releasing back to `todo`.
             }
-            // No live peers → fall through to local execution.
+            // No live peers (or all peers failed) → local execution below.
         }
 
         let Some(todo) = state.mgmt().task_next() else {
