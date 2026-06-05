@@ -118,6 +118,16 @@ login` / the in-app settings. See **[Configuration](https://github.com/ankurCES/
 Run `blumi <command> --help` for any subcommand. Full reference:
 **[CLI Usage](https://github.com/ankurCES/blumi-cli/wiki/CLI-Usage)**.
 
+## Architecture
+
+One **UI-agnostic core** emits a single typed event stream, so the terminal UI, the web UI, and
+the blugo phone app are all just renderers of the same session. A turn flows **Command → session
+actor → tools → grid**, and streams back as **Events** that re-render every surface.
+
+<p align="center">
+  <img src="docs/diagrams/tui-architecture.png" alt="blumi TUI architecture — ratatui MVU UI, the blumi-core session actor, tools/runtime, and the grid, with the numbered request (Command) and response (Event) flow" width="940">
+</p>
+
 ## Always-on gateway
 
 Run blumi as a background service so a phone (or browser) can reach it over your LAN:
@@ -132,6 +142,11 @@ It auto-advertises over mDNS (`_blumi._tcp`) so blugo discovers it on the same W
 Guide: **[Gateway (blumi serve)](https://github.com/ankurCES/blumi-cli/wiki/Gateway)**.
 
 ## Grid (distributed)
+
+<p align="center">
+  <img src="docs/diagrams/grid-flow.gif" alt="Animated network flow — a task sent from the blugo phone app fans out across the grid to every peer, and the results return to the requester" width="900"><br>
+  <em>Grid task execution: a task from <strong>blugo</strong> → the orchestrator → fanned to every live peer → results return, tagged by machine.</em>
+</p>
 
 Several gateways that share one **grid secret** form a *grid*: they auto-discover each other on the
 LAN and hand work off for execution on remote runtimes (orchestrator-dispatch). Discovery is mDNS
