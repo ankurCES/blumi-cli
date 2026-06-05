@@ -12,6 +12,7 @@
 <p align="center">
   <a href="https://github.com/ankurCES/blumi-cli/actions/workflows/ci.yml"><img src="https://github.com/ankurCES/blumi-cli/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
   <a href="https://github.com/ankurCES/blumi-cli/wiki"><img src="https://img.shields.io/badge/docs-wiki-7c5cff" alt="Wiki"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-Apache--2.0-blue" alt="License: Apache-2.0"></a>
 </p>
 
 `blumi` is a single Rust binary whose UI-agnostic core emits one typed event stream, so every
@@ -274,3 +275,10 @@ Permissions are interactive by default; a toggleable **YOLO mode** skips prompts
 because it hit the per-turn tool cap, the runtime **auto-continues** in the same session and
 narrates each step, bounded by a step budget and a token ceiling — so long tasks finish without
 nudging. See the [Wiki](https://github.com/ankurCES/blumi-cli/wiki) for the full feature tour.
+
+---
+
+## License
+
+Licensed under the **[Apache License 2.0](LICENSE)** © 2026 ankurCES — see [`LICENSE`](LICENSE)
+and [`NOTICE`](NOTICE). Permissive, with an explicit patent grant. Contributions welcome.
