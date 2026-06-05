@@ -27,6 +27,30 @@ Flutter **phone app** that's a 1:1 mirror of the TUI, optimized for foldables.
 > installation, configuration, the always-on gateway, the mobile app, the distributed grid,
 > voice, self-management, and troubleshooting, each with step-by-step guides for different setups.
 
+### 🌐 One grid, every machine you own
+
+blumi turns the idle compute on your LAN into a single **distributed AI grid**. Point several
+`blumi serve` gateways at the same secret and they auto-discover each other; then **fan one task
+across all of them** — from the terminal, the web UI, or right from your phone — and each machine
+runs its share and reports back, tagged by hostname and OS. When compute is expensive, none of
+yours sits idle. → jump to **[Grid (distributed)](#grid-distributed)**.
+
+<p align="center">
+  <img src="docs/screenshots/grid-desk.jpg" alt="blumi running at once across a MacBook Air, an ultrawide, a Linux laptop, and a foldable phone" width="900"><br>
+  <em>One job, four faces: a MacBook Air (Apple Silicon), an ultrawide, a Linux laptop (x86_64),
+  and the <strong>blugo</strong> phone app — every node running blumi, sharing the work.</em>
+</p>
+
+<p align="center">
+  <img src="docs/screenshots/grid-delegate-tab.jpg" alt="blugo Grid tab: delegate a task across peers, with per-machine results" width="250">
+  &nbsp;&nbsp;
+  <img src="docs/screenshots/grid-phone-in-hand.jpg" alt="driving the grid from the phone with three machines computing behind it" width="380">
+</p>
+<p align="center">
+  <em>Delegate a task across the grid from your phone (left) — pick a peer or broadcast to all —
+  and watch every machine answer (right). No model tool-calling required.</em>
+</p>
+
 ---
 
 # Part 1 — blumi CLI
@@ -108,15 +132,56 @@ Guide: **[Gateway (blumi serve)](https://github.com/ankurCES/blumi-cli/wiki/Gate
 
 ## Grid (distributed)
 
-Several gateways that share one **grid secret** form a *grid*: they auto-discover each other and
-hand off tasks for execution on remote runtimes (orchestrator-dispatch). Enable per node in
-`settings.json`:
+Several gateways that share one **grid secret** form a *grid*: they auto-discover each other on the
+LAN and hand work off for execution on remote runtimes (orchestrator-dispatch). Discovery is mDNS
+(`_blumi._tcp`) with **optional static peers** for networks where multicast is locked down. Every
+result comes back tagged with the machine that produced it (hostname + OS), and live runs stream
+into any TUI/blugo via `/remote` attach.
+
+**Three ways to distribute work across the grid:**
+
+- **From the phone — blugo's `Grid` tab** *(deterministic, model-independent)*: pick *all peers* or
+  one, type a task, tap **Delegate over grid** → each machine runs it and reports back. It's a
+  direct dispatch over the API, so it works on **any model** (no tool-calling required).
+- **From chat — the `grid_dispatch` tool**: the agent spreads sub-tasks across peers and collates
+  the per-machine results into one reply (terminal, web, or phone).
+- **Distributed task board — `blumi loop` (grid mode)**: round-robins the task board across live
+  peers; the board shows which machine ran (and is running) each task.
+
+Enable per node in `settings.json` — **same secret = same grid**:
 
 ```json
-"grid": { "enabled": true, "secret": "one-shared-secret" }
+"grid": {
+  "enabled": true,
+  "secret": "one-shared-secret-on-every-node",
+  "peers": ["10.0.0.150:7777", "10.0.0.113:7777"]
+}
 ```
 
-Same secret = same grid. Guide: **[Grid (distributed)](https://github.com/ankurCES/blumi-cli/wiki/Grid)**.
+`peers` is optional (mDNS finds peers automatically); list `IP:port` of the other nodes when
+multicast is unavailable. Restart each gateway after editing —
+`launchctl kickstart -k gui/$(id -u)/com.blumi.serve` (macOS) /
+`systemctl --user restart blumi-serve` (Linux). Full walkthrough:
+**[Grid (distributed)](https://github.com/ankurCES/blumi-cli/wiki/Grid)**.
+
+<p align="center">
+  <img src="docs/screenshots/grid-delegate-tab.jpg" alt="blugo Grid delegation tab with per-machine results" width="250">
+  &nbsp;
+  <img src="docs/screenshots/grid-dispatch-phone.jpg" alt="grid_dispatch fan-out across peers in blugo chat" width="250">
+  &nbsp;
+  <img src="docs/screenshots/grid-leaderboard-phone.jpg" alt="per-machine grid benchmark leaderboard in blugo" width="250">
+</p>
+<p align="center">
+  <em>From the phone: the <strong>Grid delegation tab</strong> with live per-machine results (left),
+  a chat-driven <code>grid_dispatch</code> fan-out (center), and a per-machine leaderboard (right).</em>
+</p>
+
+<p align="center">
+  <img src="docs/screenshots/grid-tui-mac.png" alt="blumi TUI executing on the macOS (Apple Silicon) peer" width="430">
+  &nbsp;
+  <img src="docs/screenshots/grid-tui-linux.png" alt="blumi TUI executing on the Linux (x86_64) peer" width="430"><br>
+  <em>The same job executing live on two peers — macOS / Apple Silicon (left) and Linux / x86_64 (right).</em>
+</p>
 
 ## Workspace layout
 
@@ -169,8 +234,10 @@ multi-pane when unfolded.
 
 **Highlights:** streaming chat with markdown + syntax-highlighted code, tool cards, approval /
 clarify / plan cards, the animated thinking mascot, sessions, a control center
-(model / persona / theme / YOLO / voice / tasks / usage / skills / memory), LAN auto-discovery of
-gateways, multiple saved instances, and voice (ElevenLabs / OpenAI TTS + Whisper STT).
+(model / persona / theme / YOLO / voice / tasks / **grid** / usage / skills / memory), a **Grid tab**
+that delegates a task across your LAN grid and shows each machine's result (works on any model),
+LAN auto-discovery of gateways, multiple saved instances, and voice (ElevenLabs / OpenAI TTS +
+Whisper STT).
 
 ## Connect it
 
@@ -199,7 +266,8 @@ TUI, the embedded web UI, the full provider matrix (OpenAI-compatible, Anthropic
 Gemini), sub-agents, MCP, SKILL.md skills + dual memory, FTS5 session search, cron, Docker/SSH
 executors, LSP, playbooks, messaging gateways + voice, the task board + autonomous `blumi loop`,
 the local-LLM approval **brain**, the **`blumi serve` gateway**, the **blugo** phone app, and the
-**grid** (peer discovery + task hand-off, landing incrementally) are all in place.
+**distributed grid** (LAN peer discovery + chat / phone / loop task delegation, each result tagged
+by machine) are all in place.
 
 Permissions are interactive by default; a toggleable **YOLO mode** skips prompts (`ctrl+y` /
 `/yolo` in the TUI, the web header toggle, or `--yolo` for headless runs). When a turn stops only
