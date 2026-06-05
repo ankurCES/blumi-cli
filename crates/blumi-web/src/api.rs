@@ -624,6 +624,24 @@ pub async fn grid_dispatch(
 }
 
 #[derive(Deserialize)]
+pub struct GridDelegateBody {
+    pub prompt: String,
+    /// "all" / empty = broadcast to every live peer; else a peer name/host:port.
+    #[serde(default)]
+    pub target: String,
+}
+
+/// Orchestrator-side: delegate a free-form prompt over the grid (human-authed).
+/// Runs it on the target peer(s) and returns each peer's output — deterministic,
+/// no model tool-call required (unlike the `grid_dispatch` agent tool).
+pub async fn grid_delegate(
+    State(state): State<AppState>,
+    Json(body): Json<GridDelegateBody>,
+) -> Json<Value> {
+    Json(state.mgmt().grid_delegate(&body.prompt, &body.target).await)
+}
+
+#[derive(Deserialize)]
 pub struct GridRunBody {
     pub prompt: String,
 }

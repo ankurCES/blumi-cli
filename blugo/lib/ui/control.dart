@@ -33,7 +33,7 @@ class _ControlCenter extends StatelessWidget {
   Widget build(BuildContext context) {
     final cs = Theme.of(context).colorScheme;
     return DefaultTabController(
-      length: 6,
+      length: 7,
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
@@ -54,6 +54,7 @@ class _ControlCenter extends StatelessWidget {
               Tab(text: 'Settings'),
               Tab(text: 'Status'),
               Tab(text: 'Tasks'),
+              Tab(text: 'Grid'),
               Tab(text: 'Usage'),
               Tab(text: 'Skills'),
               Tab(text: 'Memory'),
@@ -64,6 +65,7 @@ class _ControlCenter extends StatelessWidget {
               _SettingsTab(app, scroll),
               _StatusTab(app, scroll),
               _TasksTab(app, scroll),
+              _GridTab(app, scroll),
               _UsageTab(app, scroll),
               _SkillsTab(app, scroll),
               _MemoryTab(app, scroll),
@@ -1124,6 +1126,236 @@ class _TasksTabState extends State<_TasksTab> {
             ),
           ),
         ],
+      ),
+    );
+  }
+}
+
+// --- Grid (task delegation) ------------------------------------------------
+
+/// Delegate a free-form task across the grid, deterministically over the API
+/// (`POST /api/grid/delegate`) — no model tool-call needed, so it works on any
+/// model. Pick a target (all peers, or one), type a task, see each machine's
+/// result.
+class _GridTab extends StatefulWidget {
+  final AppController app;
+  final ScrollController scroll;
+  const _GridTab(this.app, this.scroll);
+  @override
+  State<_GridTab> createState() => _GridTabState();
+}
+
+class _GridTabState extends State<_GridTab>
+    with AutomaticKeepAliveClientMixin {
+  @override
+  bool get wantKeepAlive => true;
+
+  ApiClient get _api => widget.app.session!.api;
+  final _prompt = TextEditingController();
+  String _target = 'all';
+  List<GridPeer> _peers = [];
+  bool _loadingPeers = true;
+  bool _busy = false;
+  String? _error;
+  List<Map<String, dynamic>> _results = [];
+
+  @override
+  void initState() {
+    super.initState();
+    _loadPeers();
+  }
+
+  @override
+  void dispose() {
+    _prompt.dispose();
+    super.dispose();
+  }
+
+  Future<void> _loadPeers() async {
+    setState(() => _loadingPeers = true);
+    try {
+      final (peers, _) = await _api.gridPeers();
+      if (!mounted) return;
+      setState(() {
+        _peers = peers;
+        if (_target != 'all' && !peers.any((p) => p.name == _target)) {
+          _target = 'all';
+        }
+        _loadingPeers = false;
+      });
+    } catch (_) {
+      if (!mounted) return;
+      setState(() {
+        _peers = [];
+        _loadingPeers = false;
+      });
+    }
+  }
+
+  Future<void> _delegate() async {
+    final text = _prompt.text.trim();
+    if (text.isEmpty || _busy) return;
+    FocusScope.of(context).unfocus();
+    setState(() {
+      _busy = true;
+      _error = null;
+      _results = [];
+    });
+    try {
+      final r = await _api.gridDelegate(text, target: _target);
+      if (!mounted) return;
+      if (r['ok'] == true) {
+        setState(() => _results =
+            ((r['results'] as List?) ?? []).cast<Map<String, dynamic>>());
+      } else {
+        setState(() => _error = r['error']?.toString() ?? 'delegation failed');
+      }
+    } catch (e) {
+      if (!mounted) return;
+      setState(() => _error = '$e');
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    super.build(context);
+    final cs = Theme.of(context).colorScheme;
+    return ListView(
+      controller: widget.scroll,
+      padding: const EdgeInsets.all(16),
+      children: [
+        Row(children: [
+          _label('Live peers', cs),
+          const Spacer(),
+          IconButton(
+            tooltip: 'Refresh peers',
+            visualDensity: VisualDensity.compact,
+            icon: const Icon(Icons.refresh, size: 18),
+            onPressed: _loadingPeers ? null : _loadPeers,
+          ),
+        ]),
+        if (_loadingPeers)
+          const Padding(
+              padding: EdgeInsets.all(8), child: LinearProgressIndicator())
+        else if (_peers.isEmpty)
+          Text('no live grid peers',
+              style: TextStyle(color: cs.onSurface.withValues(alpha: 0.6)))
+        else
+          for (final p in _peers)
+            Padding(
+              padding: const EdgeInsets.symmetric(vertical: 3),
+              child: Row(children: [
+                const Icon(Icons.dns, size: 16, color: Colors.greenAccent),
+                const SizedBox(width: 8),
+                Text(p.name,
+                    style: const TextStyle(fontWeight: FontWeight.w600)),
+                const SizedBox(width: 8),
+                Text(p.host,
+                    style: TextStyle(
+                        fontSize: 12,
+                        color: cs.onSurface.withValues(alpha: 0.6))),
+              ]),
+            ),
+        const SizedBox(height: 18),
+        _label('Delegate a task', cs),
+        const SizedBox(height: 4),
+        Row(children: [
+          Text('Run on ',
+              style: TextStyle(color: cs.onSurface.withValues(alpha: 0.7))),
+          DropdownButton<String>(
+            value: _target,
+            onChanged:
+                _busy ? null : (v) => setState(() => _target = v ?? 'all'),
+            items: [
+              const DropdownMenuItem(
+                  value: 'all', child: Text('all peers (broadcast)')),
+              for (final p in _peers)
+                DropdownMenuItem(value: p.name, child: Text(p.name)),
+            ],
+          ),
+        ]),
+        const SizedBox(height: 8),
+        TextField(
+          controller: _prompt,
+          minLines: 2,
+          maxLines: 5,
+          decoration: InputDecoration(
+            hintText: 'e.g. Run `hostname` and report your OS and CPU count',
+            border: const OutlineInputBorder(),
+            isDense: true,
+            filled: true,
+            fillColor: cs.surfaceContainerHighest.withValues(alpha: 0.3),
+          ),
+        ),
+        const SizedBox(height: 10),
+        SizedBox(
+          width: double.infinity,
+          child: FilledButton.icon(
+            onPressed: (_busy || _peers.isEmpty) ? null : _delegate,
+            icon: _busy
+                ? const SizedBox(
+                    width: 16,
+                    height: 16,
+                    child: CircularProgressIndicator(strokeWidth: 2))
+                : const Icon(Icons.hub, size: 18),
+            label: Text(_busy ? 'Delegating…' : 'Delegate over grid'),
+          ),
+        ),
+        if (_error != null) ...[
+          const SizedBox(height: 10),
+          Text(_error!, style: TextStyle(color: cs.error)),
+        ],
+        if (_results.isNotEmpty) ...[
+          const SizedBox(height: 18),
+          _label('Results (${_results.length})', cs),
+          const SizedBox(height: 4),
+          for (final r in _results) _resultCard(r, cs),
+        ],
+      ],
+    );
+  }
+
+  Widget _resultCard(Map<String, dynamic> r, ColorScheme cs) {
+    final ok = r['ok'] == true;
+    final peer = r['peer']?.toString() ?? 'peer';
+    final host = r['host']?.toString() ?? '';
+    final ms = (r['ms'] as num?)?.toInt() ?? 0;
+    final body = ok
+        ? (r['output']?.toString() ?? '')
+        : (r['error']?.toString() ?? 'failed');
+    return Card(
+      margin: const EdgeInsets.only(bottom: 8),
+      child: Padding(
+        padding: const EdgeInsets.all(10),
+        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Row(children: [
+            Icon(ok ? Icons.check_circle : Icons.error,
+                size: 16, color: ok ? Colors.greenAccent : cs.error),
+            const SizedBox(width: 6),
+            Text(peer, style: const TextStyle(fontWeight: FontWeight.bold)),
+            const SizedBox(width: 6),
+            Expanded(
+              child: Text(host,
+                  style: TextStyle(
+                      fontSize: 11,
+                      color: cs.onSurface.withValues(alpha: 0.55))),
+            ),
+            Text('${(ms / 1000).toStringAsFixed(1)}s',
+                style: TextStyle(
+                    fontSize: 11,
+                    color: cs.onSurface.withValues(alpha: 0.55))),
+          ]),
+          const SizedBox(height: 6),
+          SelectableText(
+            body,
+            style: TextStyle(
+                fontFamily: 'monospace',
+                fontSize: 12.5,
+                color: ok ? cs.onSurface : cs.error),
+          ),
+        ]),
       ),
     );
   }

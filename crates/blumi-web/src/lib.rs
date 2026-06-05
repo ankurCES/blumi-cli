@@ -245,6 +245,14 @@ pub trait Management: Send + Sync {
         serde_json::json!({ "ok": false, "error": "grid disabled" })
     }
 
+    /// Delegate a free-form prompt over the grid: run it on `target` ("all" or
+    /// empty = every live peer concurrently; else a peer name / host / host:port)
+    /// and return each peer's output. Deterministic — does NOT depend on the
+    /// model choosing to call a tool. Default: grid disabled.
+    async fn grid_delegate(&self, _prompt: &str, _target: &str) -> serde_json::Value {
+        serde_json::json!({ "ok": false, "error": "grid disabled" })
+    }
+
     // --- Self-management ---
 
     /// The whole settings.json as JSON, with every secret redacted (for the
@@ -393,6 +401,7 @@ pub fn router(state: AppState) -> Router {
         .route("/api/grid/run", post(api::grid_run))
         .route("/api/grid/node", get(api::grid_node))
         .route("/api/grid/metrics", get(api::grid_metrics))
+        .route("/api/grid/delegate", post(api::grid_delegate))
         .route(
             "/api/self/config",
             get(api::self_config_get).post(api::self_config_set),

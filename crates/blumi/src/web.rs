@@ -351,6 +351,71 @@ impl Management for WebManagement {
         }
     }
 
+    async fn grid_delegate(&self, prompt: &str, target: &str) -> serde_json::Value {
+        let Some(grid) = &self.grid else {
+            return serde_json::json!({ "ok": false, "error": "grid disabled" });
+        };
+        let secret = self.config.grid.secret.clone();
+        if secret.trim().is_empty() {
+            return serde_json::json!({ "ok": false, "error": "no grid secret" });
+        }
+        if prompt.trim().is_empty() {
+            return serde_json::json!({ "ok": false, "error": "empty prompt" });
+        }
+        let live = grid.registry.live();
+        if live.is_empty() {
+            return serde_json::json!({ "ok": false, "error": "no live grid peers" });
+        }
+        // "all"/empty → every live peer; else match by name / id / host / host:port.
+        let t = target.trim();
+        let targets: Vec<_> = if t.is_empty() || t.eq_ignore_ascii_case("all") {
+            live
+        } else {
+            let w = t.to_lowercase();
+            let matched: Vec<_> = live
+                .into_iter()
+                .filter(|p| {
+                    p.name.to_lowercase().contains(&w)
+                        || p.id.to_lowercase().contains(&w)
+                        || p.host.to_string() == t
+                        || format!("{}:{}", p.host, p.port) == t
+                })
+                .collect();
+            if matched.is_empty() {
+                return serde_json::json!({ "ok": false, "error": format!("no live peer matching '{t}'") });
+            }
+            matched
+        };
+
+        // Fan out concurrently: each peer runs the prompt as one turn on its own
+        // runtime and returns its output, tagged with the machine.
+        let prompt = prompt.to_string();
+        let jobs = targets.into_iter().map(|peer| {
+            let secret = secret.clone();
+            let prompt = prompt.clone();
+            async move {
+                let client = crate::grid::client::Client::for_peer(&peer, &secret);
+                let started = std::time::Instant::now();
+                let res = client
+                    .run_task(prompt, std::time::Duration::from_secs(900))
+                    .await;
+                let ms = started.elapsed().as_millis() as u64;
+                match res {
+                    Ok(output) => serde_json::json!({
+                        "peer": peer.name, "host": peer.host.to_string(),
+                        "ok": true, "output": output, "ms": ms,
+                    }),
+                    Err(e) => serde_json::json!({
+                        "peer": peer.name, "host": peer.host.to_string(),
+                        "ok": false, "error": e.to_string(), "ms": ms,
+                    }),
+                }
+            }
+        });
+        let results = futures::future::join_all(jobs).await;
+        serde_json::json!({ "ok": true, "count": results.len(), "results": results })
+    }
+
     // --- Self-management ---
 
     fn self_config_get(&self) -> serde_json::Value {

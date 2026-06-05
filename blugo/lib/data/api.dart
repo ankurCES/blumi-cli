@@ -252,6 +252,13 @@ class ApiClient {
       _postJson('/api/grid/dispatch',
           {'task_id': taskId, 'peer_id': peerId, 'review': review});
 
+  /// Delegate a free-form prompt over the grid (deterministic — no model
+  /// tool-call). `target` = 'all' (broadcast to every live peer) or a peer
+  /// name/host. Returns `{ ok, results: [{peer, host, ok, output|error, ms}] }`.
+  Future<Map<String, dynamic>> gridDelegate(String prompt,
+          {String target = 'all'}) =>
+      _postJson('/api/grid/delegate', {'prompt': prompt, 'target': target});
+
   // --- Self-management ---
 
   /// Reload the agent in place (apply config/skill changes).
