@@ -258,22 +258,42 @@ struct Reader {
 impl Reader {
     async fn run(self) {
         let mut backoff_ms = 500u64;
+        // Last error surfaced to the user, so a given failure is reported once
+        // (on change) instead of spamming on every reconnect attempt.
+        let mut last_err: Option<String> = None;
         loop {
             if self.cancel.is_cancelled() {
                 return;
             }
             match self.connect_and_read().await {
                 ReadOutcome::Cancelled => return,
-                ReadOutcome::Disconnected => {
-                    // Reconnect with a capped backoff; the next attach uses
-                    // last_seq so we don't replay what we already saw.
-                    tokio::select! {
-                        _ = self.cancel.cancelled() => return,
-                        _ = tokio::time::sleep(std::time::Duration::from_millis(backoff_ms)) => {}
+                // Connected fine (then the stream dropped) — clear the latch so a
+                // later failure is reported again.
+                ReadOutcome::Disconnected => last_err = None,
+                // Couldn't connect (refused / wrong host) or an HTTP error —
+                // surface it ONCE so a misconfigured remote isn't a silent blank
+                // pane, then keep retrying quietly.
+                ReadOutcome::Failed(msg) => {
+                    if last_err.as_deref() != Some(msg.as_str()) {
+                        self.events.emit(Event::Error {
+                            kind: "remote".into(),
+                            message: msg.clone(),
+                            hint: Some(
+                                "check the instance URL/password with /remote — the gateway \
+                                 binds its LAN IP, not 127.0.0.1"
+                                    .into(),
+                            ),
+                        });
+                        last_err = Some(msg);
                     }
-                    backoff_ms = (backoff_ms * 2).min(8_000);
                 }
             }
+            // Reconnect with a capped backoff; last_seq avoids replaying events.
+            tokio::select! {
+                _ = self.cancel.cancelled() => return,
+                _ = tokio::time::sleep(std::time::Duration::from_millis(backoff_ms)) => {}
+            }
+            backoff_ms = (backoff_ms * 2).min(8_000);
         }
     }
 
@@ -290,15 +310,10 @@ impl Reader {
 
         let resp = match req.send().await {
             Ok(r) if r.status().is_success() => r,
-            Ok(r) => {
-                self.events.emit(Event::Error {
-                    kind: "remote".into(),
-                    message: format!("remote stream returned {}", r.status()),
-                    hint: None,
-                });
-                return ReadOutcome::Disconnected;
-            }
-            Err(_) => return ReadOutcome::Disconnected,
+            Ok(r) => return ReadOutcome::Failed(format!("remote stream returned {}", r.status())),
+            // Couldn't even connect (refused / DNS / wrong host) — reported by
+            // run() so a misconfigured remote isn't a silent blank pane.
+            Err(_) => return ReadOutcome::Failed(format!("can't reach remote at {}", self.base)),
         };
 
         let mut stream = resp.bytes_stream().eventsource();
@@ -407,7 +422,10 @@ impl Reader {
 
 enum ReadOutcome {
     Cancelled,
+    /// Connected, then the stream dropped — retry quietly.
     Disconnected,
+    /// Never connected (refused / wrong host) or an HTTP error — surfaced once.
+    Failed(String),
 }
 
 fn decision_str(d: Decision) -> &'static str {
