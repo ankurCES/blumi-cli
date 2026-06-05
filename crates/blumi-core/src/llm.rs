@@ -74,3 +74,17 @@ pub trait LlmClient: Send + Sync {
         ProviderCaps::default()
     }
 }
+
+/// A text-embedding client — the backend for semantic memory + code search.
+/// One per backend (a bundled local ONNX model, an OpenAI-compatible endpoint,
+/// or a grid peer). The rest of the system only sees this trait; a `None`
+/// builder result means embeddings are disabled (callers fall back to FTS5).
+#[async_trait]
+pub trait EmbeddingClient: Send + Sync {
+    /// Embed a batch of texts, returning one vector per input in order.
+    async fn embed(&self, texts: &[String]) -> Result<Vec<Vec<f32>>, LlmError>;
+    /// Vector dimensionality (fixed per model) — stored alongside vectors.
+    fn dim(&self) -> usize;
+    /// A stable id for the embedding model, so a model swap is detectable.
+    fn model_id(&self) -> &str;
+}

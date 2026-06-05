@@ -33,7 +33,7 @@ pub use emit::{EventEmitter, InteractionKind, InteractionReply, InteractionReque
 pub use error::{ExecError, LlmError, ToolError};
 pub use eventlog::EventLog;
 pub use exec::{DirEntry, ExecOutput, ExecRequest, Executor};
-pub use llm::{LlmClient, LlmOptions, ProviderCaps, ToolSpec};
+pub use llm::{EmbeddingClient, LlmClient, LlmOptions, ProviderCaps, ToolSpec};
 pub use permissions::{PermissionEngine, PermissionOutcome};
 pub use persona::{builtin_personas, Persona};
 pub use pipeline::execute_tool_call;

@@ -16,6 +16,9 @@ pub struct Paths {
     pub memory_dir: PathBuf,
     /// Session JSONL exports, `<home>/sessions`.
     pub sessions: PathBuf,
+    /// Cache for bundled/downloaded models (e.g. the local embedder),
+    /// `<home>/models`.
+    pub models_dir: PathBuf,
     /// The project / working directory the agent operates in.
     pub working_dir: PathBuf,
 }
@@ -33,6 +36,7 @@ impl Paths {
             skills: home.join("skills"),
             memory_dir: home.join("memory"),
             sessions: home.join("sessions"),
+            models_dir: home.join("models"),
             working_dir: working_dir.as_ref().to_path_buf(),
             home,
         }
@@ -51,9 +55,15 @@ impl Paths {
         self.home.join("settings.json")
     }
 
-    /// Create the home, skills, memory, and sessions directories if missing.
+    /// Create the home, skills, memory, sessions, and models directories.
     pub fn ensure_dirs(&self) -> std::io::Result<()> {
-        for dir in [&self.home, &self.skills, &self.memory_dir, &self.sessions] {
+        for dir in [
+            &self.home,
+            &self.skills,
+            &self.memory_dir,
+            &self.sessions,
+            &self.models_dir,
+        ] {
             std::fs::create_dir_all(dir)?;
         }
         Ok(())

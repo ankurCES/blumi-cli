@@ -209,6 +209,39 @@ pub struct GridConfig {
     pub peers: Vec<String>,
 }
 
+/// Local-embeddings settings — the backend for semantic memory + code search.
+/// `backend = "local"` runs a bundled ONNX model (the `local-embeddings` build
+/// feature); `"openai"` calls a configured OpenAI-compatible `/embeddings`
+/// endpoint (e.g. Ollama / llama.cpp); `"grid"` offloads to a peer. Disabled by
+/// default until a consumer (semantic memory) turns it on; when on, defaults to
+/// the bundled local model so it works fully offline.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct EmbeddingConfig {
+    /// Master switch. Off = no embeddings (callers fall back to FTS5 search).
+    pub enabled: bool,
+    /// "local" (bundled ONNX), "openai" (a configured endpoint), or "grid".
+    pub backend: String,
+    /// For `backend = "openai"`: the providers-map key whose base_url/key to use.
+    pub provider: String,
+    /// Embedding model id (e.g. "bge-small-en-v1.5" or "nomic-embed-text").
+    pub model: String,
+    /// Expected vector dimensionality (sanity-checked against the client).
+    pub dim: u32,
+}
+
+impl Default for EmbeddingConfig {
+    fn default() -> Self {
+        EmbeddingConfig {
+            enabled: false,
+            backend: "local".into(),
+            provider: String::new(),
+            model: "bge-small-en-v1.5".into(),
+            dim: 384,
+        }
+    }
+}
+
 /// Project-workspace discovery for the TUI's left sidebar.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(default)]
@@ -547,6 +580,9 @@ pub struct BlumiConfig {
     /// Distributed-grid settings (peer discovery + task hand-off).
     #[serde(default)]
     pub grid: GridConfig,
+    /// Local-embeddings settings (semantic memory + code search backend).
+    #[serde(default)]
+    pub embeddings: EmbeddingConfig,
     /// Project-workspace discovery for the TUI sidebar.
     #[serde(default)]
     pub workspaces: WorkspaceConfig,
@@ -577,6 +613,7 @@ impl Default for BlumiConfig {
             brain: BrainConfig::default(),
             remote: RemoteConfig::default(),
             grid: GridConfig::default(),
+            embeddings: EmbeddingConfig::default(),
             workspaces: WorkspaceConfig::default(),
             git: GitConfig::default(),
             paths: Paths::default(),

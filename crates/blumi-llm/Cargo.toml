@@ -27,5 +27,16 @@ anyhow.workspace = true
 thiserror.workspace = true
 tracing.workspace = true
 
+# Bundled local embedding model (ONNX via ort). Heavy native dep — gated behind
+# a feature so a lean build / restricted environment can opt out. The released
+# binary enables it (zero-config offline embeddings).
+fastembed = { version = "4", optional = true }
+
+# Bundled local embeddings ship by default (zero-config offline). A lean /
+# CI-constrained build can opt out with `--no-default-features`.
+[features]
+default = ["local-embeddings"]
+local-embeddings = ["dep:fastembed"]
+
 [dev-dependencies]
 tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
