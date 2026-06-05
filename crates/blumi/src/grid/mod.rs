@@ -348,6 +348,7 @@ mod tests {
             secret: secret.into(),
             grid_id: id.into(),
             node_name: String::new(),
+            peers: Vec::new(),
         }
     }
 
