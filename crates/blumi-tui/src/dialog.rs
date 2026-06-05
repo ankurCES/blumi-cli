@@ -12,6 +12,8 @@ pub enum Action {
     CycleTheme,
     NewSession,
     ResumeSession(String),
+    /// Attach live to a configured remote/gateway by name (same as `/remote`).
+    AttachRemote(String),
     SetModel(String),
     SetProvider(String),
     // Menu entries that open a focused sub-picker.
@@ -91,13 +93,22 @@ impl Picker {
         p
     }
 
-    /// A picker over recent sessions (+ a "new session" entry on top).
-    pub fn session_picker(sessions: &[(String, String)]) -> Self {
+    /// A picker over recent sessions, with a "new session" entry on top and any
+    /// configured live gateways/remotes listed right below it (hint `"live"`, so
+    /// the view marks them with a blinking dot) for one-tap attach.
+    pub fn session_picker(sessions: &[(String, String)], remotes: &[String]) -> Self {
         let mut items = vec![PickerItem {
             label: "✿ New session".into(),
             hint: "fresh".into(),
             action: Action::NewSession,
         }];
+        for name in remotes {
+            items.push(PickerItem {
+                label: name.clone(),
+                hint: "live".into(),
+                action: Action::AttachRemote(name.clone()),
+            });
+        }
         for (id, title) in sessions {
             let label = if title.trim().is_empty() {
                 "(untitled)".to_string()

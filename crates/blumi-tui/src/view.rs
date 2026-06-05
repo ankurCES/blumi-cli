@@ -286,10 +286,13 @@ fn render_sidebar(model: &mut Model, f: &mut Frame, area: Rect, theme: &Theme) {
                     match entry {
                         crate::model::SessionEntry::Remote(name) => {
                             let label = format!("{} {} (live)", crate::icons::remote(), name);
-                            vec![Span::styled(
-                                format!(" {}", truncate(&label, title_w)),
-                                style,
-                            )]
+                            vec![
+                                live_dot(model.spinner_frame),
+                                Span::styled(
+                                    format!(" {}", truncate(&label, title_w.saturating_sub(2))),
+                                    style,
+                                ),
+                            ]
                         }
                         crate::model::SessionEntry::Stored(_, title) => {
                             let t = if title.trim().is_empty() {
@@ -987,6 +990,18 @@ fn render_usage(model: &Model, f: &mut Frame, area: Rect, theme: &Theme) {
     f.render_widget(Paragraph::new(lines), inner);
 }
 
+/// A "live" status dot that blinks (bright↔dim green) off the animation frame,
+/// marking sessions/gateways you can attach to live.
+fn live_dot(frame: usize) -> Span<'static> {
+    let bright = (frame / 8) % 2 == 0;
+    let c = if bright {
+        Color::Rgb(0x3D, 0xF0, 0x7A)
+    } else {
+        Color::Rgb(0x1C, 0x5E, 0x3A)
+    };
+    Span::styled("●", Style::default().fg(c))
+}
+
 fn render_dialog(model: &mut Model, f: &mut Frame, area: Rect, theme: &Theme) {
     if model.dialog.is_none() {
         return;
@@ -1015,6 +1030,7 @@ fn render_dialog(model: &mut Model, f: &mut Frame, area: Rect, theme: &Theme) {
         Layout::vertical([Constraint::Length(1), Constraint::Min(1)]).areas(inner);
     // Record the list rect so mouse clicks can hit-test rows.
     model.dialog_list_area = Some((list_area.x, list_area.y, list_area.width, list_area.height));
+    let frame = model.spinner_frame;
     let d = model.dialog.as_ref().expect("dialog present");
     let filter_line = Line::from(vec![
         Span::styled("› ", theme.accent()),
@@ -1029,8 +1045,11 @@ fn render_dialog(model: &mut Model, f: &mut Frame, area: Rect, theme: &Theme) {
         .rows()
         .into_iter()
         .map(|(label, hint, selected)| {
+            // Live gateways/remotes are tagged with hint "live" → blinking dot.
+            let live = hint == "live";
             let marker = if selected { "❯ " } else { "  " };
-            let used = 2 + label.chars().count() + hint.chars().count() + 1;
+            let dot_w = if live { 2 } else { 0 };
+            let used = 2 + dot_w + label.chars().count() + hint.chars().count() + 1;
             let pad = total.saturating_sub(used);
             let (mk, lbl, fill, key) = if selected {
                 let base = theme.selection();
@@ -1043,12 +1062,15 @@ fn render_dialog(model: &mut Model, f: &mut Frame, area: Rect, theme: &Theme) {
             } else {
                 (theme.accent(), theme.body(), Style::default(), theme.dim())
             };
-            Line::from(vec![
-                Span::styled(marker, mk),
-                Span::styled(label.to_string(), lbl),
-                Span::styled(" ".repeat(pad), fill),
-                Span::styled(format!("{hint} "), key),
-            ])
+            let mut spans = vec![Span::styled(marker, mk)];
+            if live {
+                spans.push(live_dot(frame));
+                spans.push(Span::styled(" ", fill));
+            }
+            spans.push(Span::styled(label.to_string(), lbl));
+            spans.push(Span::styled(" ".repeat(pad), fill));
+            spans.push(Span::styled(format!("{hint} "), key));
+            Line::from(spans)
         })
         .collect();
     f.render_widget(Paragraph::new(rows), list_area);
@@ -2116,6 +2138,7 @@ mod tests {
         ];
         model.dialog = Some(crate::dialog::Picker::session_picker(
             &model.recent_sessions,
+            &model.remotes,
         ));
         let out = render_to_string(&mut model, 90, 24);
         eprintln!("\n{out}");

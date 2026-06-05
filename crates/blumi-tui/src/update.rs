@@ -193,7 +193,10 @@ async fn handle_term(model: &mut Model, ev: TermEvent, session: &SessionHandle) 
 
             // Ctrl+S opens the session switcher.
             if ctrl && matches!(key.code, KeyCode::Char('s')) {
-                model.dialog = Some(Picker::session_picker(&model.recent_sessions));
+                model.dialog = Some(Picker::session_picker(
+                    &model.recent_sessions,
+                    &model.remotes,
+                ));
                 model.mark_dirty();
                 return;
             }
@@ -963,6 +966,7 @@ async fn perform_action(model: &mut Model, action: Action, session: &SessionHand
         Action::CycleTheme => model.cycle_theme(),
         Action::NewSession => model.request_new_session(),
         Action::ResumeSession(id) => model.request_resume(id),
+        Action::AttachRemote(name) => model.request_remote(name),
         Action::SetModel(m) => {
             model.model_name = m.clone();
             model.model_options.model = m.clone();
@@ -973,7 +977,7 @@ async fn perform_action(model: &mut Model, action: Action, session: &SessionHand
         // `model` while assigning `model.dialog`).
         Action::OpenSessions => {
             let sessions = model.recent_sessions.clone();
-            model.dialog = Some(Picker::session_picker(&sessions));
+            model.dialog = Some(Picker::session_picker(&sessions, &model.remotes));
         }
         Action::OpenModels => {
             let models = model.model_options.models.clone();

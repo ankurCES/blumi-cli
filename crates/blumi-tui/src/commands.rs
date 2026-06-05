@@ -209,6 +209,7 @@ pub async fn run(model: &mut Model, session: &SessionHandle, line: &str) {
             if arg.is_empty() {
                 model.dialog = Some(crate::dialog::Picker::session_picker(
                     &model.recent_sessions,
+                    &model.remotes,
                 ));
             } else {
                 model.request_resume(arg);
@@ -296,6 +297,7 @@ pub async fn run(model: &mut Model, session: &SessionHandle, line: &str) {
         "/sessions" => {
             model.dialog = Some(crate::dialog::Picker::session_picker(
                 &model.recent_sessions,
+                &model.remotes,
             ))
         }
         "/export" => match model.export_transcript() {

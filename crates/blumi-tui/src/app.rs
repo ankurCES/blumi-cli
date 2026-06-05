@@ -219,8 +219,11 @@ async fn run_loop(
 
     // On launch, if there's history, offer the session picker (resume where you
     // left off after a crash/kill, or esc for a fresh one).
-    if !model.recent_sessions.is_empty() {
-        model.dialog = Some(Picker::session_picker(&model.recent_sessions));
+    if !model.recent_sessions.is_empty() || !model.remotes.is_empty() {
+        model.dialog = Some(Picker::session_picker(
+            &model.recent_sessions,
+            &model.remotes,
+        ));
     }
 
     // Tracks the busy→idle edge so we persist (crash recovery) and consider a
