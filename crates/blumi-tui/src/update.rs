@@ -16,6 +16,10 @@ pub async fn update(model: &mut Model, msg: Msg, session: &SessionHandle) {
             if model.motion.is_active() {
                 model.mark_dirty();
             }
+            // The /plans "live" dot blinks — keep redrawing while it's open.
+            if model.plans_view {
+                model.mark_dirty();
+            }
             tick_tool_charms(model);
             if model.busy {
                 // Accumulate active-with-bot time (tick is ~50ms).
@@ -119,6 +123,23 @@ async fn handle_term(model: &mut Model, ev: TermEvent, session: &SessionHandle) 
             }
             if model.grid_view.is_some() {
                 model.grid_view = None;
+                model.mark_dirty();
+                return;
+            }
+
+            // The /plans browser: ↑/↓ (or j/k) select a plan, pgup/pgdn scroll
+            // its content, home/end jump to ends, esc/q closes.
+            if model.plans_view {
+                match key.code {
+                    KeyCode::Esc | KeyCode::Char('q') => model.plans_view = false,
+                    KeyCode::Up | KeyCode::Char('k') => model.plans_move(-1),
+                    KeyCode::Down | KeyCode::Char('j') => model.plans_move(1),
+                    KeyCode::Home | KeyCode::Char('g') => model.plans_move(isize::MIN),
+                    KeyCode::End | KeyCode::Char('G') => model.plans_move(isize::MAX),
+                    KeyCode::PageUp => model.plans_pane.scroll_by(-10),
+                    KeyCode::PageDown => model.plans_pane.scroll_by(10),
+                    _ => {}
+                }
                 model.mark_dirty();
                 return;
             }
@@ -358,6 +379,25 @@ async fn handle_term(model: &mut Model, ev: TermEvent, session: &SessionHandle) 
         }
         TermEvent::Mouse(me) => {
             use crossterm::event::MouseEventKind;
+            // The /plans browser owns the mouse while open: wheel scrolls the
+            // content pane; a left-click on the list selects that plan.
+            if model.plans_view {
+                match me.kind {
+                    MouseEventKind::ScrollUp => model.plans_pane.scroll_by(-3),
+                    MouseEventKind::ScrollDown => model.plans_pane.scroll_by(3),
+                    MouseEventKind::Down(crossterm::event::MouseButton::Left) => {
+                        if let Some((x, y, w, h)) = model.plans_list_area {
+                            if me.column >= x && me.column < x + w && me.row >= y && me.row < y + h
+                            {
+                                model.plans_select((me.row - y) as usize);
+                            }
+                        }
+                    }
+                    _ => {}
+                }
+                model.mark_dirty();
+                return;
+            }
             match me.kind {
                 MouseEventKind::ScrollUp => {
                     scroll_panes(model, me.column, me.row, -1);
@@ -571,6 +611,8 @@ async fn resolve_plan(model: &mut Model, session: &SessionHandle, approve: bool)
     let Some(p) = model.plan_review.take() else {
         return;
     };
+    // Record it in the `/plans` history (approved → live, else rejected).
+    model.record_plan(p.plan.clone(), approve);
     let decision = if approve {
         Decision::Allow
     } else {

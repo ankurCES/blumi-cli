@@ -132,6 +132,9 @@ pub fn render(model: &mut Model, f: &mut Frame) {
     if model.help_modal {
         render_help_modal(model, f, area, &theme);
     }
+    if model.plans_view {
+        render_plans(model, f, area, &theme);
+    }
     // Slash-command popup floats just above the editor.
     if model.slash_active() {
         render_slash_popup(model, f, editor, &theme);
@@ -157,6 +160,8 @@ pub fn render(model: &mut Model, f: &mut Frame) {
         (7, centered_rect(72, 84, area))
     } else if model.help_modal {
         (9, centered_rect(72, 84, area))
+    } else if model.plans_view {
+        (10, centered_rect(82, 82, area))
     } else {
         (0, area)
     };
@@ -915,6 +920,92 @@ fn wrap_words(s: &str, width: usize) -> Vec<String> {
         lines.push(String::new());
     }
     lines
+}
+
+/// The `/plans` browser: a left list of proposed plans (status dots) + a
+/// scrollable right pane with the selected plan. Red = rejected, green =
+/// approved, blinking green = the current ("live") plan. ↑/↓ select, esc closes.
+fn render_plans(model: &mut Model, f: &mut Frame, area: Rect, theme: &Theme) {
+    let popup = centered_rect(82, 82, area);
+    f.render_widget(Clear, popup);
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .border_type(BorderType::Rounded)
+        .border_style(theme.bold_primary())
+        .title(Span::styled(
+            " plans — ↑/↓ select · pgup/pgdn scroll · esc close ",
+            theme.bold_primary(),
+        ));
+    let inner = block.inner(popup);
+    f.render_widget(block, popup);
+
+    if model.plans.is_empty() {
+        model.plans_list_area = None;
+        let lines = vec![
+            Line::from(Span::styled("No plans yet.", theme.body())),
+            Line::from(Span::styled(
+                "Enter plan mode (shift+tab) and ask blumi to propose a plan;",
+                theme.dim(),
+            )),
+            Line::from(Span::styled(
+                "approve or reject it and it will appear here.",
+                theme.dim(),
+            )),
+        ];
+        f.render_widget(Paragraph::new(lines), inner);
+        return;
+    }
+
+    let [left, right] =
+        Layout::horizontal([Constraint::Percentage(34), Constraint::Min(0)]).areas(inner);
+
+    // Left: the plan list with status dots (the live one blinks).
+    let blink_on = (model.spinner_frame / 6) % 2 == 0;
+    let sel = model.plans_sel.min(model.plans.len() - 1);
+    let lw = left.width.saturating_sub(2) as usize; // width after "● "
+    let mut rows: Vec<Line> = Vec::with_capacity(model.plans.len());
+    for (i, p) in model.plans.iter().enumerate() {
+        let dot = match p.status {
+            crate::model::PlanStatus::Rejected => Style::default().fg(Color::Red),
+            crate::model::PlanStatus::Approved => Style::default().fg(Color::Green),
+            crate::model::PlanStatus::Live => Style::default()
+                .fg(if blink_on {
+                    Color::Green
+                } else {
+                    Color::DarkGray
+                })
+                .add_modifier(Modifier::BOLD),
+        };
+        let title = if i == sel {
+            theme.body().add_modifier(Modifier::REVERSED)
+        } else {
+            theme.body()
+        };
+        rows.push(Line::from(vec![
+            Span::styled("● ", dot),
+            Span::styled(format!("{:<lw$}", truncate(&p.title, lw)), title),
+        ]));
+    }
+    model.plans_list_area = Some((left.x, left.y, left.width, left.height));
+    f.render_widget(Paragraph::new(rows), left);
+
+    // Right: the selected plan's content. Own the strings first so they don't
+    // borrow `model` while we record the scroll geometry.
+    let cw = right.width.saturating_sub(1) as usize;
+    let body: Vec<String> = model.plans[sel]
+        .content
+        .lines()
+        .map(|raw| truncate(raw, cw).to_string())
+        .collect();
+    model
+        .plans_pane
+        .record(right.x, right.y, right.width, right.height, body.len());
+    let scroll = model.plans_pane.scroll as u16;
+    let lines: Vec<Line> = body
+        .into_iter()
+        .map(|s| Line::from(Span::styled(s, theme.body())))
+        .collect();
+    f.render_widget(Paragraph::new(lines).scroll((scroll, 0)), right);
 }
 
 /// Format a token count compactly: `1.2k`, `131k`, `42`.
@@ -2040,6 +2131,42 @@ mod tests {
         assert!(text.contains("keys"), "keys section");
         // Many lines (≥ one per command) → genuinely scrollable.
         assert!(lines.len() > 20, "scrollable content");
+    }
+
+    #[test]
+    fn plans_browser_tracks_status_and_renders() {
+        use crate::model::PlanStatus;
+        let mut model = Model::new("m".into(), "/tmp".into());
+        model.record_plan("# Plan A\nstep one".into(), false); // rejected
+        model.record_plan("# Plan B\ndo it".into(), true); // approved → live
+        model.record_plan("# Plan C\nrevise it".into(), true); // approved → live (B demoted)
+        assert_eq!(model.plans.len(), 3);
+        assert_eq!(model.plans[0].status, PlanStatus::Rejected);
+        assert_eq!(
+            model.plans[1].status,
+            PlanStatus::Approved,
+            "previous live demoted"
+        );
+        assert_eq!(
+            model.plans[2].status,
+            PlanStatus::Live,
+            "newest approved is live"
+        );
+
+        model.open_plans_view();
+        assert!(model.plans_view);
+        assert_eq!(model.plans_sel, 2, "opens on the live plan");
+
+        let out = render_to_string(&mut model, 100, 40);
+        assert!(out.contains("plans"), "modal title");
+        assert!(out.contains("Plan C"), "selected plan title/content");
+        assert!(
+            model.plans_list_area.is_some(),
+            "list area recorded for clicks"
+        );
+
+        model.plans_move(-1); // select Plan B
+        assert_eq!(model.plans_sel, 1);
     }
 
     #[test]

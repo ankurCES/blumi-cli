@@ -114,6 +114,24 @@ pub struct PlanReview {
     pub scroll: u16,
 }
 
+/// A plan's resolution, for the `/plans` browser dots.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PlanStatus {
+    /// Rejected (red dot).
+    Rejected,
+    /// Approved, but superseded by a later plan (steady green dot).
+    Approved,
+    /// The current approved plan being worked (blinking green dot).
+    Live,
+}
+
+/// One resolved plan in the `/plans` history browser.
+pub struct PlanRecord {
+    pub title: String,
+    pub content: String,
+    pub status: PlanStatus,
+}
+
 /// Messages that drive `update`.
 pub enum Msg {
     Term(crossterm::event::Event),
@@ -340,6 +358,14 @@ pub struct Model {
     /// The `/help` command-reference modal (shares `modal_pane` for scrolling).
     pub help_modal: bool,
     pub modal_pane: ScrollPane,
+    /// `/plans`: proposed-plan history browser (two-pane: list + content).
+    pub plans: Vec<PlanRecord>,
+    pub plans_view: bool,
+    pub plans_sel: usize,
+    /// Scroll state for the selected plan's content (right pane).
+    pub plans_pane: ScrollPane,
+    /// Left-pane list rect, recorded at render for mouse-click selection.
+    pub plans_list_area: Option<(u16, u16, u16, u16)>,
     /// Rendered memory text when the `/memory` overlay is open.
     pub memory_view: Option<String>,
     /// Rendered usage analytics when the `/usage` overlay is open.
@@ -464,6 +490,11 @@ impl Model {
             dash_modal: false,
             help_modal: false,
             modal_pane: ScrollPane::default(),
+            plans: Vec::new(),
+            plans_view: false,
+            plans_sel: 0,
+            plans_pane: ScrollPane::default(),
+            plans_list_area: None,
             memory_view: None,
             usage_view: None,
             board_view: None,
@@ -783,6 +814,7 @@ impl Model {
         self.board_view = None;
         self.grid_view = None;
         self.help_modal = false;
+        self.plans_view = false;
         self.agents.clear();
         self.loop_active = false;
         self.loop_current = None;
@@ -874,6 +906,66 @@ impl Model {
         self.help_modal = true;
         self.dash_modal = false;
         self.modal_pane.scroll = 0;
+    }
+
+    /// Record a resolved plan in the `/plans` history. The newest approved plan
+    /// is "live" (blinking); approving a new one demotes the previous live.
+    pub fn record_plan(&mut self, content: String, approved: bool) {
+        let title = content
+            .lines()
+            .map(str::trim)
+            .find(|l| !l.is_empty())
+            .unwrap_or("(untitled plan)")
+            .trim_start_matches('#')
+            .trim()
+            .to_string();
+        let status = if approved {
+            for p in self.plans.iter_mut() {
+                if p.status == PlanStatus::Live {
+                    p.status = PlanStatus::Approved;
+                }
+            }
+            PlanStatus::Live
+        } else {
+            PlanStatus::Rejected
+        };
+        self.plans.push(PlanRecord {
+            title,
+            content,
+            status,
+        });
+    }
+
+    /// Open the `/plans` browser, selecting the live plan (else the newest).
+    pub fn open_plans_view(&mut self) {
+        self.plans_view = true;
+        self.plans_sel = self
+            .plans
+            .iter()
+            .rposition(|p| p.status == PlanStatus::Live)
+            .or_else(|| self.plans.len().checked_sub(1))
+            .unwrap_or(0);
+        self.plans_pane.scroll = 0;
+    }
+
+    /// Select plan `idx` (if valid), resetting the content scroll.
+    pub fn plans_select(&mut self, idx: usize) {
+        if idx < self.plans.len() && idx != self.plans_sel {
+            self.plans_sel = idx;
+            self.plans_pane.scroll = 0;
+        }
+    }
+
+    /// Move the plan selection by `delta` (isize::MIN/MAX jump to the ends).
+    pub fn plans_move(&mut self, delta: isize) {
+        if self.plans.is_empty() {
+            return;
+        }
+        let max = self.plans.len() as isize - 1;
+        let next = (self.plans_sel as isize)
+            .saturating_add(delta)
+            .clamp(0, max) as usize;
+        self.plans_select(next);
     }
 
     /// Number of tool calls in the transcript.

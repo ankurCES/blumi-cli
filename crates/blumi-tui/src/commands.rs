@@ -45,6 +45,10 @@ pub const COMMANDS: &[CommandDef] = &[
         desc: "open the full dashboard as a scrollable popup (all metrics)",
     },
     CommandDef {
+        name: "/plans",
+        desc: "browse proposed plans (● live · ✓ approved · ✗ rejected); ↑/↓ select, esc close",
+    },
+    CommandDef {
         name: "/usage",
         desc: "show token usage",
     },
@@ -244,6 +248,7 @@ pub async fn run(model: &mut Model, session: &SessionHandle, line: &str) {
         }
         "/tasks" => model.show_dashboard = !model.show_dashboard,
         "/dashboard" => model.toggle_dash_modal(),
+        "/plans" => model.open_plans_view(),
         "/usage" => model.open_usage(),
         "/board" => model.open_board(),
         "/grid" => model.open_grid(),
