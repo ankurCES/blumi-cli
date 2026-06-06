@@ -138,6 +138,8 @@ pub struct TuiConfig {
     pub auto_continue: u32,
     /// User themes loaded from ~/.blumi/themes/*.toml (appended to the built-ins).
     pub themes: Vec<crate::theme::Theme>,
+    /// The shared SQLite DB (for the `/plans` history, persisted across restarts).
+    pub db_path: PathBuf,
 }
 
 /// Run the interactive TUI, sourcing sessions from `factory`. Restores the
@@ -194,6 +196,15 @@ async fn run_loop(
     model.tasks_path = cfg.tasks_path;
     model.brain_mode = cfg.brain_mode;
     model.auto_continue = cfg.auto_continue;
+    // Plan history (`/plans`): open the shared store, load past plans, and keep
+    // the handle so resolved plans persist + reach the gateway/blugo.
+    if let Ok(store) = blumi_persist::Store::open(&cfg.db_path).await {
+        let store = std::sync::Arc::new(store);
+        if let Ok(stored) = store.list_plans(200).await {
+            model.load_plans(stored);
+        }
+        model.plans_store = Some(store);
+    }
     // Built-in palettes + any user themes from ~/.blumi/themes; re-sync the active
     // theme in case a user theme overrides the default (rose) at index 0.
     model.themes = crate::theme::ThemeRegistry::builtin().with_user(cfg.themes);

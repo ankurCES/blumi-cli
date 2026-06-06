@@ -319,6 +319,7 @@ pub async fn run(config: BlumiConfig) -> anyhow::Result<()> {
             .to_string(),
         auto_continue: config.llm.max_auto_continue,
         themes: blumi_tui::theme::load_user_themes(&config.paths.home.join("themes")),
+        db_path: config.paths.db.clone(),
     };
 
     let factory = Arc::new(TuiSessionFactory { config, store });

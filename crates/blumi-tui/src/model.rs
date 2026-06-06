@@ -366,6 +366,8 @@ pub struct Model {
     pub plans_pane: ScrollPane,
     /// Left-pane list rect, recorded at render for mouse-click selection.
     pub plans_list_area: Option<(u16, u16, u16, u16)>,
+    /// Shared plan store (blumi.db); resolved plans persist + reload on startup.
+    pub plans_store: Option<std::sync::Arc<blumi_persist::Store>>,
     /// Rendered memory text when the `/memory` overlay is open.
     pub memory_view: Option<String>,
     /// Rendered usage analytics when the `/usage` overlay is open.
@@ -495,6 +497,7 @@ impl Model {
             plans_sel: 0,
             plans_pane: ScrollPane::default(),
             plans_list_area: None,
+            plans_store: None,
             memory_view: None,
             usage_view: None,
             board_view: None,
@@ -966,6 +969,22 @@ impl Model {
             .saturating_add(delta)
             .clamp(0, max) as usize;
         self.plans_select(next);
+    }
+
+    /// Replace the in-memory plan list from persisted records (on startup).
+    pub fn load_plans(&mut self, stored: Vec<blumi_persist::StoredPlan>) {
+        self.plans = stored
+            .into_iter()
+            .map(|s| PlanRecord {
+                title: s.title,
+                content: s.content,
+                status: match s.status.as_str() {
+                    "live" => PlanStatus::Live,
+                    "rejected" => PlanStatus::Rejected,
+                    _ => PlanStatus::Approved,
+                },
+            })
+            .collect();
     }
 
     /// Number of tool calls in the transcript.

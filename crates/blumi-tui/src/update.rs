@@ -611,8 +611,14 @@ async fn resolve_plan(model: &mut Model, session: &SessionHandle, approve: bool)
     let Some(p) = model.plan_review.take() else {
         return;
     };
-    // Record it in the `/plans` history (approved → live, else rejected).
+    // Record it in the `/plans` history (approved → live, else rejected) and
+    // persist it to the shared store so it survives restarts + reaches blugo.
     model.record_plan(p.plan.clone(), approve);
+    if let Some(store) = model.plans_store.clone() {
+        if let Some(rec) = model.plans.last() {
+            let _ = store.save_plan(&rec.title, &rec.content, approve).await;
+        }
+    }
     let decision = if approve {
         Decision::Allow
     } else {

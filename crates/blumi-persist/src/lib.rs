@@ -67,6 +67,17 @@ pub struct StoredCheckpoint {
     pub step: u32,
 }
 
+/// A stored proposed-plan (the `/plans` browser).
+#[derive(Debug, Clone)]
+pub struct StoredPlan {
+    pub id: i64,
+    pub title: String,
+    pub content: String,
+    /// `"live"` | `"approved"` | `"rejected"`.
+    pub status: String,
+    pub created_at: String,
+}
+
 /// The persistence store.
 pub struct Store {
     pool: SqlitePool,
@@ -318,6 +329,64 @@ impl Store {
             .await?;
         Ok(())
     }
+
+    // --- Proposed-plan history (the `/plans` browser) ----------------------
+
+    /// Record a resolved plan. When `approved`, any existing `live` plan is
+    /// demoted to `approved` and this one becomes the new `live`; otherwise it's
+    /// stored `rejected`. Returns the new row id.
+    pub async fn save_plan(
+        &self,
+        title: &str,
+        content: &str,
+        approved: bool,
+    ) -> Result<i64, StoreError> {
+        let now = OffsetDateTime::now_utc()
+            .format(&Rfc3339)
+            .unwrap_or_default();
+        let mut tx = self.pool.begin().await?;
+        let status = if approved {
+            sqlx::query("UPDATE plans SET status = 'approved' WHERE status = 'live'")
+                .execute(&mut *tx)
+                .await?;
+            "live"
+        } else {
+            "rejected"
+        };
+        let res = sqlx::query(
+            "INSERT INTO plans (title, content, status, created_at) VALUES (?, ?, ?, ?)",
+        )
+        .bind(title)
+        .bind(content)
+        .bind(status)
+        .bind(&now)
+        .execute(&mut *tx)
+        .await?;
+        tx.commit().await?;
+        Ok(res.last_insert_rowid())
+    }
+
+    /// The most recent `limit` plans, oldest-first (chronological).
+    pub async fn list_plans(&self, limit: i64) -> Result<Vec<StoredPlan>, StoreError> {
+        let rows = sqlx::query(
+            "SELECT id, title, content, status, created_at FROM
+                 (SELECT id, title, content, status, created_at FROM plans ORDER BY id DESC LIMIT ?)
+             ORDER BY id ASC",
+        )
+        .bind(limit)
+        .fetch_all(&self.pool)
+        .await?;
+        Ok(rows
+            .iter()
+            .map(|r| StoredPlan {
+                id: r.get("id"),
+                title: r.get("title"),
+                content: r.get("content"),
+                status: r.get("status"),
+                created_at: r.get("created_at"),
+            })
+            .collect())
+    }
 }
 
 /// Adapts a shared [`Store`] to the core [`blumi_core::CheckpointSink`] trait so
@@ -386,6 +455,21 @@ pub(crate) fn to_fts_query(q: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn plan_history_status_transitions() {
+        let store = Store::open_in_memory().await.unwrap();
+        store.save_plan("Plan A", "step one", false).await.unwrap(); // rejected
+        store.save_plan("Plan B", "do it", true).await.unwrap(); // live
+        store.save_plan("Plan C", "revise", true).await.unwrap(); // live (B → approved)
+        let plans = store.list_plans(10).await.unwrap();
+        assert_eq!(plans.len(), 3);
+        // Oldest-first.
+        assert_eq!(plans[0].title, "Plan A");
+        assert_eq!(plans[0].status, "rejected");
+        assert_eq!(plans[1].status, "approved"); // demoted
+        assert_eq!(plans[2].status, "live"); // newest approved
+    }
 
     #[tokio::test]
     async fn checkpoint_round_trip() {

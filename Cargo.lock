@@ -702,6 +702,7 @@ dependencies = [
  "async-trait",
  "blumi-config",
  "blumi-core",
+ "blumi-persist",
  "blumi-protocol",
  "blumi-task",
  "crossterm",
