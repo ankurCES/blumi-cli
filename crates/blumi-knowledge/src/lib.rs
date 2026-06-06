@@ -3,7 +3,8 @@
 //! Ingests a path into a sibling SQLite DB (`knowledge.db`): each file is split
 //! into [`extract`]ed symbols, indexed in FTS5 (name + snippet) and — when an
 //! embeddings client is available — a brute-force-cosine vector index. Search is
-//! hybrid (vector first, FTS fill). Re-ingest is diff-aware (sha256 per file).
+//! hybrid (FTS first for keyword/symbol precision, vector fill for semantic
+//! recall). Re-ingest is diff-aware (sha256 per file).
 //!
 //! Mirrors `blumi-persist`'s [`Store`](blumi_persist) style; degrades to FTS5
 //! when embeddings are off, and to chunk-only when a language isn't recognized.
@@ -289,7 +290,10 @@ impl KnowledgeStore {
 
     // --- Search / retrieve ----------------------------------------------
 
-    /// Hybrid search: vector (when ready) then FTS fill, up to `k` hits.
+    /// Hybrid search: **FTS first** (keyword + exact-symbol precision — a search
+    /// for `PermissionEngine` lands on that symbol, not an unrelated chunk that
+    /// merely embeds nearby), then **vector fill** (semantic recall for whatever
+    /// the keywords missed), up to `k` hits.
     pub async fn search(&self, query: &str, k: usize) -> Vec<CodeHit> {
         if k == 0 || query.trim().is_empty() {
             return vec![];
@@ -297,23 +301,31 @@ impl KnowledgeStore {
         let mut out: Vec<CodeHit> = Vec::new();
         let mut seen: HashSet<i64> = HashSet::new();
 
-        if let Some(qvec) = self.embed_one(query).await {
-            let mut scored = self.vector_candidates(&qvec).await;
-            scored.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
-            for (hit, _id) in scored.into_iter().take(k) {
-                if seen.insert(hit_id(&hit)) {
-                    out.push(hit);
+        // FTS first.
+        for hit in self.fts_candidates(query, k * 2).await {
+            if seen.insert(hit_id(&hit)) {
+                out.push(hit);
+                if out.len() >= k {
+                    break;
                 }
             }
         }
 
+        // Vector fill for the remaining slots (semantic recall).
         if out.len() < k {
-            for hit in self.fts_candidates(query, k * 2).await {
-                let id = hit_id(&hit);
-                if seen.insert(id) {
-                    out.push(hit);
-                    if out.len() >= k {
-                        break;
+            if let Some(qvec) = self.embed_one(query).await {
+                let mut scored = self.vector_candidates(&qvec).await;
+                scored.sort_by(|a, b| {
+                    b.score
+                        .partial_cmp(&a.score)
+                        .unwrap_or(std::cmp::Ordering::Equal)
+                });
+                for hit in scored {
+                    if seen.insert(hit_id(&hit)) {
+                        out.push(hit);
+                        if out.len() >= k {
+                            break;
+                        }
                     }
                 }
             }
@@ -322,9 +334,10 @@ impl KnowledgeStore {
         out
     }
 
-    async fn vector_candidates(&self, qvec: &[f32]) -> Vec<(CodeHit, i64)> {
+    /// All symbols with a vector, scored by cosine against `qvec` (≥ floor).
+    async fn vector_candidates(&self, qvec: &[f32]) -> Vec<CodeHit> {
         let rows = sqlx::query(
-            "SELECT s.id AS id, f.path AS path, s.name AS name, s.kind AS kind,
+            "SELECT f.path AS path, s.name AS name, s.kind AS kind,
                     s.start_line AS sl, s.end_line AS el, s.snippet AS snippet, v.vec AS vec
              FROM code_vec v
              JOIN code_symbols s ON s.id = v.symbol_id
@@ -336,24 +349,19 @@ impl KnowledgeStore {
         rows.iter()
             .filter_map(|r| {
                 let blob: Vec<u8> = r.get("vec");
-                let v = blob_to_vec(&blob);
-                let score = dot(qvec, &v);
+                let score = dot(qvec, &blob_to_vec(&blob));
                 if score < 0.25 {
                     return None;
                 }
-                let id: i64 = r.get("id");
-                Some((
-                    CodeHit {
-                        path: r.get("path"),
-                        name: r.get("name"),
-                        kind: r.get("kind"),
-                        start_line: r.get("sl"),
-                        end_line: r.get("el"),
-                        snippet: r.get("snippet"),
-                        score,
-                    },
-                    id,
-                ))
+                Some(CodeHit {
+                    path: r.get("path"),
+                    name: r.get("name"),
+                    kind: r.get("kind"),
+                    start_line: r.get("sl"),
+                    end_line: r.get("el"),
+                    snippet: r.get("snippet"),
+                    score,
+                })
             })
             .collect()
     }
@@ -521,6 +529,13 @@ const NOISE_DIRS: &[&str] = &[
     "/vendor/",
 ];
 
+/// Asset / binary / generated extensions that are noise in a code KB (many are
+/// UTF-8 — e.g. SVGs — so the binary read-check alone doesn't exclude them).
+const SKIP_EXT: &[&str] = &[
+    "svg", "png", "jpg", "jpeg", "gif", "webp", "ico", "bmp", "pdf", "woff", "woff2", "ttf", "otf",
+    "eot", "mp3", "mp4", "mov", "wav", "zip", "gz", "tar", "tgz", "wasm", "lock", "map",
+];
+
 fn should_skip(path: &str, cfg: &IngestConfig) -> bool {
     if NOISE_DIRS.iter().any(|d| path.contains(d)) {
         return true;
@@ -532,12 +547,16 @@ fn should_skip(path: &str, cfg: &IngestConfig) -> bool {
     {
         return true;
     }
-    // Lockfiles / minified bundles add noise with little value.
     let lower = path.to_lowercase();
-    lower.ends_with(".lock")
-        || lower.ends_with(".min.js")
-        || lower.ends_with(".map")
-        || lower.ends_with("cargo.lock")
+    if lower.ends_with(".min.js") {
+        return true;
+    }
+    // Asset/binary/generated files add noise with little code value.
+    let ext = std::path::Path::new(&lower)
+        .extension()
+        .and_then(|e| e.to_str())
+        .unwrap_or("");
+    SKIP_EXT.contains(&ext)
 }
 
 fn sha256(s: &str) -> String {
@@ -621,6 +640,37 @@ mod tests {
             .unwrap();
         assert_eq!(stats2.indexed, 0);
         assert_eq!(stats2.skipped, 1);
+    }
+
+    #[tokio::test]
+    async fn skips_assets_and_ranks_symbol_first() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(
+            dir.path().join("perm.rs"),
+            "pub struct PermissionEngine {\n  yolo: bool,\n}\nimpl PermissionEngine {\n  pub fn new() -> Self { Self { yolo: false } }\n}\n",
+        )
+        .unwrap();
+        // A UTF-8 asset that used to pollute results — must be skipped.
+        std::fs::write(
+            dir.path().join("logo.svg"),
+            "<svg><path d=\"M0 0 L9 9\"/></svg>\n",
+        )
+        .unwrap();
+        let ks = store().await; // None embedder → FTS-first path
+        let stats = ks
+            .ingest_path(dir.path(), "t", &IngestConfig::default())
+            .await
+            .unwrap();
+        assert_eq!(stats.indexed, 1, "the .svg asset must be skipped");
+
+        let hits = ks.search("PermissionEngine", 5).await;
+        assert!(!hits.is_empty());
+        assert!(
+            hits[0].name.contains("PermissionEngine"),
+            "exact symbol must rank first, got {:?}",
+            hits[0].name
+        );
+        assert!(hits.iter().all(|h| !h.path.ends_with(".svg")));
     }
 
     #[tokio::test]
