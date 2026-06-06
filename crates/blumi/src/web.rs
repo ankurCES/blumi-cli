@@ -411,6 +411,10 @@ impl Management for WebManagement {
         }
     }
 
+    async fn route_status(&self) -> serde_json::Value {
+        blumi_core::active_router_status().unwrap_or_else(|| serde_json::json!({ "mode": "off" }))
+    }
+
     async fn embed(&self, texts: Vec<String>) -> Option<Vec<Vec<f32>>> {
         match &self.mem {
             Some(mem) => mem.embed_texts(&texts).await,

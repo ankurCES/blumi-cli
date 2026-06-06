@@ -71,7 +71,10 @@ enum Commands {
     Tui,
     /// Run the setup wizard (pick provider, enter key/endpoint, choose model).
     Login,
-    /// Launch the embedded web UI + HTTP/SSE server.
+    /// Localhost dev shortcut for the web UI (loopback, no password).
+    ///
+    /// The same UI is already served by `blumi serve` on the LAN — this is just a
+    /// convenient `serve run --host 127.0.0.1` for local development.
     Web {
         /// Bind address (default 127.0.0.1). A non-loopback host requires a password.
         #[arg(long)]
@@ -79,6 +82,9 @@ enum Commands {
         /// Set/replace the login password (hashed + saved; enables auth).
         #[arg(long)]
         password: Option<String>,
+        /// Port to bind (default 7777, or $BLUMI_WEB_PORT).
+        #[arg(long)]
+        port: Option<u16>,
     },
     /// List, search, and show stored sessions.
     Session {
@@ -491,7 +497,11 @@ async fn main() -> anyhow::Result<()> {
             };
             tui::run(config).await
         }
-        Some(Commands::Web { host, password }) => web::run(config, host, password, None).await,
+        Some(Commands::Web {
+            host,
+            password,
+            port,
+        }) => web::run(config, host, password, port).await,
         Some(Commands::Serve { action }) => serve::run(config, action).await,
         Some(Commands::Session { action }) => match action {
             SessionCmd::List => session::list(config).await,

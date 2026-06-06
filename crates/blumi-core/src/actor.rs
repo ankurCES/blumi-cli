@@ -246,6 +246,11 @@ impl SessionActor {
                     self.runner.set_brain_mode(m);
                 }
             }
+            Command::SetRouterMode { mode } => {
+                if let Some(m) = crate::router::RouterMode::parse(&mode) {
+                    self.runner.set_router_mode(m);
+                }
+            }
             Command::SetPlanMode { on } => {
                 self.runner.set_plan_mode(on);
             }

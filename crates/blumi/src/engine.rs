@@ -391,6 +391,86 @@ pub async fn build_session(
         brain_mode,
     ));
 
+    // Cost-aware routing: resolve a client per tier (reusing the main client +
+    // model when a tier leaves provider/model blank — same fallback as the brain
+    // above), plus a judge (default = reuse brain.*, then main). Always attached
+    // in the configured mode (default off) so `/route` can switch it live.
+    let router_mode = blumi_core::RouterMode::parse(&config.router.mode).unwrap_or_default();
+    let resolve_tier = |t: &blumi_config::TierTarget| -> blumi_core::TierClient {
+        let client: Arc<dyn LlmClient> = if t.provider.is_empty() {
+            llm.clone()
+        } else if let Some(p) = config.providers.get(&t.provider) {
+            build_client(p).unwrap_or_else(|e| {
+                tracing::warn!(
+                    "router tier provider '{}' failed ({e}); reusing main client",
+                    t.provider
+                );
+                llm.clone()
+            })
+        } else {
+            tracing::warn!(
+                "router tier provider '{}' not configured; reusing main client",
+                t.provider
+            );
+            llm.clone()
+        };
+        blumi_core::TierClient {
+            client,
+            provider: if t.provider.is_empty() {
+                config.llm.provider.clone()
+            } else {
+                t.provider.clone()
+            },
+            model: if t.model.is_empty() {
+                model.clone()
+            } else {
+                t.model.clone()
+            },
+        }
+    };
+    let light_tier = resolve_tier(&config.router.light);
+    let heavy_tier = resolve_tier(&config.router.heavy);
+    // Judge for ambiguous turns: router.judge if set, else reuse brain.*, else main.
+    let (judge_provider, judge_model) = {
+        let j = &config.router.judge;
+        if !j.provider.is_empty() || !j.model.is_empty() {
+            (j.provider.clone(), j.model.clone())
+        } else {
+            (config.brain.provider.clone(), config.brain.model.clone())
+        }
+    };
+    let judge_client: Arc<dyn LlmClient> = if judge_provider.is_empty() {
+        llm.clone()
+    } else if let Some(p) = config.providers.get(&judge_provider) {
+        build_client(p).unwrap_or_else(|_| llm.clone())
+    } else {
+        llm.clone()
+    };
+    let judge_model = if judge_model.is_empty() {
+        model.clone()
+    } else {
+        judge_model
+    };
+    let router = Arc::new(blumi_core::Router::new(
+        router_mode,
+        light_tier,
+        heavy_tier,
+        config.router.heuristics.clone(),
+        Some(blumi_core::Judge::new(judge_client, judge_model)),
+        config.router.prefer_grid_light,
+    ));
+    if router_mode != blumi_core::RouterMode::Off {
+        tracing::info!(
+            "routing enabled: mode={} light={} heavy={}",
+            router_mode.label(),
+            config.router.light.model,
+            config.router.heavy.model
+        );
+    }
+    let subagent_tier = blumi_core::Tier::parse_subagent(&config.router.subagent_tier);
+    // Publish for in-process UIs (TUI `/route`, web `/api/route`) to read stats.
+    blumi_core::set_active_router(router.clone());
+
     // Sub-agent delegation: the spawner shares the same provider/registry/executor.
     let spawner = Arc::new(
         AgentSpawner::new(
@@ -403,7 +483,8 @@ pub async fn build_session(
             work_dir.clone(),
             builtin_agents(),
         )
-        .with_max_local_agents(config.llm.max_local_agents),
+        .with_max_local_agents(config.llm.max_local_agents)
+        .with_router(router.clone(), subagent_tier),
     );
 
     let mut runner = AgentTurnRunner::new(
@@ -420,7 +501,8 @@ pub async fn build_session(
     .with_spawner(spawner)
     .with_personas(personas, &active)
     .with_auto_continue(config.llm.max_auto_continue)
-    .with_auto_continue_tokens(config.llm.max_auto_continue_tokens);
+    .with_auto_continue_tokens(config.llm.max_auto_continue_tokens)
+    .with_router(router.clone());
     // Durable execution: checkpoint the turn after each tool step (shares the
     // history DB) so a crash/restart resumes from the last step.
     if let Some(store) = &history_store {

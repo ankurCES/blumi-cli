@@ -12,6 +12,7 @@ use crate::permissions::PermissionEngine;
 use crate::persona::Persona;
 use crate::pipeline::execute_tool_call;
 use crate::registry::ToolRegistry;
+use crate::router::{Routed, Router, RouterMode, Tier, TurnSignals};
 use crate::runner::{TurnContext, TurnRunner};
 use crate::session::SessionState;
 use crate::tool::{ChangeJournal, SubAgentSpawner, ToolContext};
@@ -70,6 +71,10 @@ pub struct AgentTurnRunner {
     /// (today's behaviour). When set, classified failures get a budgeted,
     /// traced recovery nudge and (with memory) episodic learning + recall.
     heal: Option<blumi_config::HealConfig>,
+    /// Cost-aware model routing: classify each turn (heuristic + optional judge)
+    /// and stream from the matching tier's client. `None` = no routing (today's
+    /// behaviour — the turn always runs on the active model).
+    router: Option<Arc<Router>>,
 }
 
 impl AgentTurnRunner {
@@ -105,6 +110,7 @@ impl AgentTurnRunner {
             memory: None,
             recall_k: 5,
             heal: None,
+            router: None,
         }
     }
 
@@ -138,6 +144,14 @@ impl AgentTurnRunner {
     /// learn failure→fix episodes + recall them on similar future failures.
     pub fn with_heal(mut self, heal: blumi_config::HealConfig) -> Self {
         self.heal = Some(heal);
+        self
+    }
+
+    /// Enable cost-aware routing: classify each turn's difficulty (heuristic +
+    /// optional judge) and stream from the matching tier's client. A no-op while
+    /// the router's mode is `Off`.
+    pub fn with_router(mut self, router: Arc<Router>) -> Self {
+        self.router = Some(router);
         self
     }
 
@@ -262,6 +276,23 @@ impl TurnRunner for AgentTurnRunner {
             None
         };
 
+        // Cost-aware routing setup (no-op unless a router is attached + not Off).
+        // The latest user message drives the difficulty signals; the tier is
+        // decided once and held across the turn's iterations (escalate-only).
+        let route_query: String = if self.router.is_some() {
+            let st = state.lock().await;
+            st.messages
+                .iter()
+                .rev()
+                .find(|m| m.role == Role::User)
+                .map(|m| m.text())
+                .unwrap_or_default()
+        } else {
+            String::new()
+        };
+        let mut turn_routed: Option<Routed> = None;
+        let mut announced_tier: Option<Tier> = None;
+
         for iteration in 0..self.max_iterations {
             if ct.is_cancelled() {
                 return DoneReason::Cancelled;
@@ -300,9 +331,52 @@ impl TurnRunner for AgentTurnRunner {
                 options.temperature = t;
             }
 
-            // Stream the model.
-            let mut stream = match self
-                .llm
+            // Cost-aware routing: decide the tier once (iteration 0) and hold it;
+            // deep iterations may escalate Light→Heavy but never demote mid-turn
+            // (a model swap invalidates the provider prompt cache). When routing is
+            // off/absent this is skipped entirely and the turn uses `self.llm`.
+            let route_client: Option<Arc<dyn LlmClient>> = match &self.router {
+                Some(router) if router.mode() != RouterMode::Off => {
+                    if turn_routed.is_none() {
+                        let sig = TurnSignals {
+                            prompt: &route_query,
+                            tool_count: tool_specs.len(),
+                            iteration,
+                            in_subagent: false,
+                        };
+                        turn_routed = Some(router.route(&sig, &ct).await);
+                    } else if router.escalate_at() > 0
+                        && iteration >= router.escalate_at()
+                        && matches!(
+                            turn_routed.as_ref().map(|r| r.decision.tier),
+                            Some(Tier::Light)
+                        )
+                    {
+                        turn_routed = Some(router.client_for(Tier::Heavy));
+                    }
+                    turn_routed.as_ref().map(|r| {
+                        if !r.decision.model.is_empty() {
+                            options.model = r.decision.model.clone();
+                        }
+                        if announced_tier != Some(r.decision.tier) {
+                            announced_tier = Some(r.decision.tier);
+                            ctx.events.emit(Event::Notice {
+                                message: format!(
+                                    "⚖ route · {} ({})",
+                                    r.decision.tier.label(),
+                                    r.decision.reason
+                                ),
+                            });
+                        }
+                        r.client.clone()
+                    })
+                }
+                _ => None,
+            };
+
+            // Stream the model (from the routed tier's client when routing is on).
+            let stream_client: &Arc<dyn LlmClient> = route_client.as_ref().unwrap_or(&self.llm);
+            let mut stream = match stream_client
                 .stream_chat(&window, &tool_specs, &options, ct.child_token())
                 .await
             {
@@ -353,6 +427,11 @@ impl TurnRunner for AgentTurnRunner {
                         return DoneReason::Error;
                     }
                 }
+            }
+
+            // Account the routed tier's usage for the savings dashboard.
+            if let (Some(router), Some(r)) = (&self.router, &turn_routed) {
+                router.stats().record(r.decision.tier, &usage);
             }
 
             ctx.events.emit(Event::AssistantFinished {
@@ -679,6 +758,23 @@ impl TurnRunner for AgentTurnRunner {
 
     fn brain_mode(&self) -> crate::brain::BrainMode {
         self.perms.brain_mode()
+    }
+
+    fn set_router_mode(&self, mode: crate::router::RouterMode) {
+        if let Some(r) = &self.router {
+            r.set_mode(mode);
+        }
+    }
+
+    fn router_mode(&self) -> crate::router::RouterMode {
+        self.router
+            .as_ref()
+            .map(|r| r.mode())
+            .unwrap_or(crate::router::RouterMode::Off)
+    }
+
+    fn router_status(&self) -> Option<serde_json::Value> {
+        self.router.as_ref().map(|r| r.status())
     }
 
     fn set_plan_mode(&self, on: bool) {

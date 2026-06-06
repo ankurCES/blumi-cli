@@ -5,6 +5,7 @@
 //! filesystem [`Paths`] are computed at load time, not read from files.
 
 mod paths;
+pub mod pricing;
 mod provider;
 
 pub use paths::Paths;
@@ -158,6 +159,106 @@ impl Default for BrainConfig {
             mode: "off".into(),
             provider: String::new(),
             model: String::new(),
+        }
+    }
+}
+
+/// A routing tier target: which provider + model a tier uses. Empty fields reuse
+/// the active `llm.*` (so a tier can override just the model, or just the provider).
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct TierTarget {
+    /// Provider name (key into [`BlumiConfig::providers`]). Empty = reuse active.
+    pub provider: String,
+    /// Model id. Empty = reuse the active model.
+    pub model: String,
+}
+
+/// Tunable thresholds for the fast routing heuristic (no LLM call).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct HeuristicConfig {
+    /// Prompt chars at/above which a turn is "heavy" outright.
+    pub heavy_chars: u32,
+    /// Prompt chars at/below which a turn is "light" outright.
+    pub light_chars: u32,
+    /// #tools available at/above which lean heavy (rich toolset ⇒ harder task).
+    pub heavy_tool_count: u32,
+    /// Iteration index at/above which a turn escalates to heavy (deep loops are
+    /// where cheap models stall). 0 disables iteration-based escalation.
+    pub escalate_iteration: u32,
+    /// Substrings that force heavy (matched case-insensitively).
+    pub heavy_keywords: Vec<String>,
+    /// Substrings that force light (matched case-insensitively).
+    pub light_keywords: Vec<String>,
+}
+
+impl Default for HeuristicConfig {
+    fn default() -> Self {
+        let to_vec = |a: &[&str]| a.iter().map(|s| s.to_string()).collect();
+        HeuristicConfig {
+            heavy_chars: 1500,
+            light_chars: 280,
+            heavy_tool_count: 40,
+            escalate_iteration: 6,
+            heavy_keywords: to_vec(&[
+                "refactor",
+                "architect",
+                "debug",
+                "why",
+                "design",
+                "prove",
+                "root cause",
+                "migrate",
+            ]),
+            light_keywords: to_vec(&[
+                "rename",
+                "format",
+                "typo",
+                "list",
+                "what is",
+                "summarize",
+                "translate",
+                "lint",
+            ]),
+        }
+    }
+}
+
+/// Cost-aware model routing. Per turn, a fast heuristic (and, on ambiguous turns,
+/// a local "judge" model) picks a difficulty tier and routes to a light vs
+/// flagship model; delegated sub-agents default to a cheaper tier. Every part
+/// degrades gracefully — `mode = "off"` (the default) = today's behaviour.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct RouterConfig {
+    /// `"off"` | `"heuristic"` | `"hybrid"` | `"judge"`.
+    pub mode: String,
+    /// The light/cheap tier. Empty provider/model = reuse the active `llm.*`.
+    pub light: TierTarget,
+    /// The flagship/heavy tier. Empty provider/model = reuse the active `llm.*`.
+    pub heavy: TierTarget,
+    /// Tier delegated sub-agents default to: `"light"` | `"heavy"` | `"inherit"`.
+    pub subagent_tier: String,
+    /// Fast-path heuristic thresholds.
+    pub heuristics: HeuristicConfig,
+    /// The judge model for ambiguous turns (hybrid/judge modes). Empty
+    /// provider/model = reuse `brain.*`, then the active `llm.*`.
+    pub judge: TierTarget,
+    /// Allow the light tier to target a grid peer's local model (grid synergy).
+    pub prefer_grid_light: bool,
+}
+
+impl Default for RouterConfig {
+    fn default() -> Self {
+        RouterConfig {
+            mode: "off".into(),
+            light: TierTarget::default(),
+            heavy: TierTarget::default(),
+            subagent_tier: "light".into(),
+            heuristics: HeuristicConfig::default(),
+            judge: TierTarget::default(),
+            prefer_grid_light: false,
         }
     }
 }
@@ -712,6 +813,9 @@ pub struct BlumiConfig {
     /// Local-LLM "brain" that reviews tool approvals.
     #[serde(default)]
     pub brain: BrainConfig,
+    /// Cost-aware model routing (heuristic + optional local judge).
+    #[serde(default)]
+    pub router: RouterConfig,
     /// Remote blumi instances the TUI can attach to as tabs.
     #[serde(default)]
     pub remote: RemoteConfig,
@@ -761,6 +865,7 @@ impl Default for BlumiConfig {
             web: WebSettings::default(),
             voice: VoiceSettings::default(),
             brain: BrainConfig::default(),
+            router: RouterConfig::default(),
             remote: RemoteConfig::default(),
             grid: GridConfig::default(),
             embeddings: EmbeddingConfig::default(),

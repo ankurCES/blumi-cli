@@ -459,6 +459,8 @@ pub struct Model {
     pub grid_view: Option<String>,
     /// Rendered self-healing summary when `/heal` is open (recoveries/evolutions).
     pub heal_view: Option<String>,
+    /// Rendered cost-aware routing summary when `/route` is open (tiers + savings).
+    pub route_view: Option<String>,
     /// File-browser popup state when `/open-workspace` is open.
     pub fs_browser: Option<FsBrowser>,
     /// Path to the persistent task board (`<project>/.blumi/tasks.json`).
@@ -589,6 +591,7 @@ impl Model {
             board_view: None,
             grid_view: None,
             heal_view: None,
+            route_view: None,
             fs_browser: None,
             remotes: Vec::new(),
             tabs: vec![("local".to_string(), false)],
@@ -937,6 +940,7 @@ impl Model {
         self.board_view = None;
         self.grid_view = None;
         self.heal_view = None;
+        self.route_view = None;
         self.help_modal = false;
         self.plans_view = false;
         self.agents.clear();

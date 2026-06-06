@@ -316,6 +316,12 @@ pub trait Management: Send + Sync {
         serde_json::json!({ "counts": {}, "recent": [] })
     }
 
+    /// Cost-aware routing status → `{ mode, light, heavy, judge, saved_usd, … }`
+    /// for the routing dashboard. Default: routing off.
+    async fn route_status(&self) -> serde_json::Value {
+        serde_json::json!({ "mode": "off" })
+    }
+
     // --- Self-management ---
 
     /// The whole settings.json as JSON, with every secret redacted (for the
@@ -491,6 +497,7 @@ pub fn router(state: AppState) -> Router {
         .route("/api/memory/search", post(api::memory_search))
         .route("/api/plans", get(api::plans))
         .route("/api/heal", get(api::heal_status))
+        .route("/api/route", get(api::route_status))
         .route("/api/memory/graph", post(api::memory_graph))
         .route(
             "/api/self/config",

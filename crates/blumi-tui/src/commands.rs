@@ -69,6 +69,10 @@ pub const COMMANDS: &[CommandDef] = &[
         desc: "self-healing summary: recoveries, learned fixes, evolutions",
     },
     CommandDef {
+        name: "/route",
+        desc: "cost-aware routing: tiers + $ saved (/route off|heuristic|hybrid|judge)",
+    },
+    CommandDef {
         name: "/loop",
         desc: "start/pause the autonomous task loop (/loop review to toggle gate)",
     },
@@ -205,6 +209,58 @@ pub(crate) async fn toggle_yolo(model: &mut Model, session: &SessionHandle) {
     model.mark_dirty();
 }
 
+/// Format the `/route` overlay text from a `Router::status` value.
+fn format_route(v: &serde_json::Value) -> String {
+    let mode = v.get("mode").and_then(|x| x.as_str()).unwrap_or("off");
+    let f = |o: Option<&serde_json::Value>, k: &str| -> f64 {
+        o.and_then(|x| x.get(k))
+            .and_then(|x| x.as_f64())
+            .unwrap_or(0.0)
+    };
+    let row = |name: &str| -> String {
+        let t = v.get(name);
+        let model = t
+            .and_then(|x| x.get("model"))
+            .and_then(|x| x.as_str())
+            .filter(|s| !s.is_empty())
+            .unwrap_or("(reuse main)");
+        let turns = t
+            .and_then(|x| x.get("turns"))
+            .and_then(|x| x.as_u64())
+            .unwrap_or(0);
+        format!(
+            "  {name:<6} {model:<28} {turns:>4} turns  ${:.3}",
+            f(t, "cost_usd")
+        )
+    };
+    let saved = v.get("saved_usd").and_then(|x| x.as_f64()).unwrap_or(0.0);
+    let actual = v
+        .get("actual_cost_usd")
+        .and_then(|x| x.as_f64())
+        .unwrap_or(0.0);
+    let all_heavy = v
+        .get("all_heavy_cost_usd")
+        .and_then(|x| x.as_f64())
+        .unwrap_or(0.0);
+    let pct = if all_heavy > 0.0 {
+        saved / all_heavy * 100.0
+    } else {
+        0.0
+    };
+    let mut s = format!("mode: {mode}\n\n");
+    s.push_str(&row("light"));
+    s.push('\n');
+    s.push_str(&row("heavy"));
+    s.push('\n');
+    s.push_str(&row("judge"));
+    s.push('\n');
+    s.push_str(&format!(
+        "\nspent ${actual:.3}  ·  all-heavy ${all_heavy:.3}\nsaved ${saved:.3} ({pct:.0}% cheaper)\n"
+    ));
+    s.push_str("\nswitch: /route off | heuristic | hybrid | judge");
+    s
+}
+
 /// Format the `/heal` overlay text from a `Store::heal_summary` value.
 fn format_heal(v: &serde_json::Value) -> String {
     let count = |k: &str| {
@@ -315,6 +371,30 @@ pub async fn run(model: &mut Model, session: &SessionHandle, line: &str) {
                 "self-healing summary needs the local DB".into(),
             )),
         },
+        "/route" => {
+            if arg.is_empty() {
+                match blumi_core::active_router_status() {
+                    Some(v) => model.route_view = Some(format_route(&v)),
+                    None => model.entries.push(Entry::Notice(
+                        "⚖ routing off — switch with /route off|heuristic|hybrid|judge".into(),
+                    )),
+                }
+            } else if let Some(m) = blumi_core::RouterMode::parse(&arg) {
+                let _ = session
+                    .send(Command::SetRouterMode {
+                        mode: m.label().into(),
+                    })
+                    .await;
+                model.entries.push(Entry::Notice(format!(
+                    "⚖ routing {} — cheap vs flagship model per turn",
+                    m.label()
+                )));
+            } else {
+                model.entries.push(Entry::Notice(
+                    "usage: /route off|heuristic|hybrid|judge".into(),
+                ));
+            }
+        }
         "/open-workspace" => model.open_fs_browser(),
         "/loop" => {
             if arg.eq_ignore_ascii_case("review") {

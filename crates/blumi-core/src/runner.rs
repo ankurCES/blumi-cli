@@ -68,6 +68,21 @@ pub trait TurnRunner: Send + Sync {
         crate::brain::BrainMode::Off
     }
 
+    /// Set the cost-aware routing mode at runtime (the `/route` command).
+    /// Default: no-op.
+    fn set_router_mode(&self, _mode: crate::router::RouterMode) {}
+
+    /// The current routing mode. Default: `Off`.
+    fn router_mode(&self) -> crate::router::RouterMode {
+        crate::router::RouterMode::Off
+    }
+
+    /// A JSON snapshot of routing stats (per-tier counts + `$ saved`), or `None`
+    /// when routing isn't attached. Default: `None`.
+    fn router_status(&self) -> Option<serde_json::Value> {
+        None
+    }
+
     /// Enter/leave planning mode (mutating tools blocked). Default: no-op.
     fn set_plan_mode(&self, _on: bool) {}
 

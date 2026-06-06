@@ -21,6 +21,7 @@ mod persona;
 mod pipeline;
 mod recovery;
 mod registry;
+mod router;
 mod runner;
 mod session;
 mod subagent;
@@ -42,6 +43,10 @@ pub use persona::{builtin_personas, Persona};
 pub use pipeline::execute_tool_call;
 pub use recovery::{action_for, RecoveryAction, RecoveryBudget};
 pub use registry::ToolRegistry;
+pub use router::{
+    active_router_mode, active_router_status, set_active_router, Judge, Router, RouterMode,
+    RouterStats, Tier, TierClient,
+};
 pub use runner::{TurnContext, TurnRunner};
 pub use session::{SessionSnapshot, SessionState};
 pub use subagent::{

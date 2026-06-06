@@ -69,8 +69,8 @@ fn pair(config: &BlumiConfig, password: Option<String>) -> anyhow::Result<()> {
         }
     }
     let url = lan_url();
-    println!("\n  Connect blugo to:  {url}");
-    println!("  Log in with the password you just set.");
+    println!("\n  Web UI + blugo:  {url}");
+    println!("  Open it in a browser, or connect blugo — log in with the password you just set.");
     println!("\n  Keep the gateway running in the background with:");
     println!("    blumi serve install");
     Ok(())
@@ -173,7 +173,7 @@ fn install(config: &BlumiConfig, host: Option<String>, port: Option<u16>) -> any
     let _ = run_cmd("launchctl", &["unload", "-w", &p]); // ignore "not loaded"
     run_cmd("launchctl", &["load", "-w", &p])?;
     println!(
-        "✿ installed + started → http://{host}:{port}  (logs: {})",
+        "✿ installed + started → Web UI + blugo at http://{host}:{port}  (logs: {})",
         log.display()
     );
     Ok(())
@@ -226,7 +226,7 @@ fn install(config: &BlumiConfig, host: Option<String>, port: Option<u16>) -> any
     std::fs::write(&unit, body).with_context(|| format!("writing {}", unit.display()))?;
     run_cmd("systemctl", &["--user", "daemon-reload"])?;
     run_cmd("systemctl", &["--user", "enable", "--now", "blumi-serve"])?;
-    println!("✿ installed + started → http://{host}:{port}");
+    println!("✿ installed + started → Web UI + blugo at http://{host}:{port}");
     Ok(())
 }
 
@@ -294,7 +294,7 @@ fn status(config: &BlumiConfig) -> anyhow::Result<()> {
                 }
             );
             if let Some(u) = url {
-                println!("  url: {u}");
+                println!("  web ui + blugo: {u}");
             }
             if let Some(p) = pid {
                 println!("  pid: {p}");

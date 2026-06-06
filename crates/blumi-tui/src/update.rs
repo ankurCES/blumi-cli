@@ -131,6 +131,11 @@ async fn handle_term(model: &mut Model, ev: TermEvent, session: &SessionHandle) 
                 model.mark_dirty();
                 return;
             }
+            if model.route_view.is_some() {
+                model.route_view = None;
+                model.mark_dirty();
+                return;
+            }
 
             // /open-workspace file browser: ↑/↓ move, → descend, ← (or backspace)
             // up a level, space opens the folder as a workspace (keeps browsing),
@@ -818,7 +823,7 @@ async fn handle_core(model: &mut Model, event: Event, session: &SessionHandle) {
             let prompt = if context > 0 { context } else { input };
             model.input_tokens += prompt;
             model.output_tokens += output;
-            model.cost_usd += crate::cost::estimate(&model.model_name, input, output);
+            model.cost_usd += crate::cost::estimate(&model.model_name, input as u64, output as u64);
             model.context_tokens = prompt;
         }
         Event::Compaction {

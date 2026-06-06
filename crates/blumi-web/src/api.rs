@@ -876,6 +876,11 @@ pub async fn heal_status(State(state): State<AppState>) -> Json<Value> {
     Json(state.mgmt().heal_status().await)
 }
 
+/// GET /api/route → cost-aware routing status (tiers + savings).
+pub async fn route_status(State(state): State<AppState>) -> Json<Value> {
+    Json(state.mgmt().route_status().await)
+}
+
 pub async fn memory_graph(
     State(state): State<AppState>,
     Json(b): Json<KbSearchBody>,

@@ -12,6 +12,7 @@ use crate::exec::Executor;
 use crate::llm::{LlmClient, LlmOptions};
 use crate::permissions::PermissionEngine;
 use crate::registry::ToolRegistry;
+use crate::router::{Router, RouterMode, Tier};
 use crate::runner::{TurnContext, TurnRunner};
 use crate::session::SessionState;
 use crate::tool::SubAgentSpawner;
@@ -235,6 +236,10 @@ pub struct AgentSpawner {
     next_agent_id: AtomicU64,
     /// Caps concurrent local sub-agents; excess overflow to the grid or wait.
     sem: Arc<Semaphore>,
+    /// Cost-aware routing: when set (with a sub-agent tier), delegated agents run
+    /// on that tier's (typically cheaper) model. `None` = inherit the parent.
+    router: Option<Arc<Router>>,
+    subagent_tier: Option<Tier>,
 }
 
 impl AgentSpawner {
@@ -261,6 +266,8 @@ impl AgentSpawner {
             agents,
             next_agent_id: AtomicU64::new(0),
             sem: Arc::new(Semaphore::new(DEFAULT_MAX_LOCAL_AGENTS)),
+            router: None,
+            subagent_tier: None,
         }
     }
 
@@ -268,6 +275,15 @@ impl AgentSpawner {
     /// Clamped to at least 1.
     pub fn with_max_local_agents(mut self, n: u32) -> Self {
         self.sem = Arc::new(Semaphore::new((n as usize).max(1)));
+        self
+    }
+
+    /// Enable cost-aware sub-agent demotion: delegated agents run on `default_tier`
+    /// (e.g. the light tier) via `router`. `default_tier = None` keeps the parent's
+    /// model. A no-op while the router's mode is `Off`.
+    pub fn with_router(mut self, router: Arc<Router>, default_tier: Option<Tier>) -> Self {
+        self.router = Some(router);
+        self.subagent_tier = default_tier;
         self
     }
 
@@ -283,8 +299,17 @@ impl AgentSpawner {
     ) -> String {
         // Restricted toolset; never include `delegate` (no nested sub-agents).
         let child_registry = Arc::new(self.registry.subset(&def.allowed_tools, &["delegate"]));
+        // Cost-aware demotion: when routing is on and a sub-agent tier is set, run
+        // the child on that tier's client + model; otherwise inherit the parent's.
+        let (child_llm, child_model) = match (&self.router, self.subagent_tier) {
+            (Some(router), Some(tier)) if router.mode() != RouterMode::Off => {
+                let r = router.client_for(tier);
+                (r.client, r.decision.model)
+            }
+            _ => (self.llm.clone(), self.options.model.clone()),
+        };
         let child = AgentTurnRunner::new(
-            self.llm.clone(),
+            child_llm,
             child_registry,
             self.perms.clone(),
             self.executor.clone(),
@@ -294,10 +319,7 @@ impl AgentSpawner {
             def.system_prompt.clone(),
             self.working_dir.clone(),
         );
-        let state = Arc::new(Mutex::new(SessionState::new(
-            SessionId::new(),
-            self.options.model.clone(),
-        )));
+        let state = Arc::new(Mutex::new(SessionState::new(SessionId::new(), child_model)));
         state
             .lock()
             .await
