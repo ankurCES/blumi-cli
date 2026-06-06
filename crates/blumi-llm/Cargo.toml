@@ -37,6 +37,12 @@ fastembed = { version = "4", optional = true }
 # execution providers (CoreML/CUDA) — fastembed already vendors the runtime
 # binary. Pulled in solely by the gpu-* features; default builds never touch it.
 ort = { version = "=2.0.0-rc.9", optional = true, default-features = false }
+# Pin ort-sys EXACTLY too. `ort = "rc.9"` depends on `ort-sys = "2.0.0-rc.9"` as a
+# RANGE, which (pre-release semver) also matches rc.10/11/12 — and a non-`--locked`
+# resolve floats ort-sys to rc.12, whose `download-binaries` needs a TLS feature +
+# has a broken ureq build (Linux CUDA install failed on exactly this). Pinning it
+# here keeps every resolve on rc.9 even without the lockfile.
+ort-sys = { version = "=2.0.0-rc.9", optional = true, default-features = false }
 
 # The bundled ONNX embedder (fastembed + ort) is a heavy native build that links
 # a large C++ static lib — on a low-RAM box the release link can OOM and freeze
@@ -50,10 +56,10 @@ local-embeddings = ["dep:fastembed"]
 # Apple CoreML/Metal acceleration for the bundled embedder. ~Free on binary size
 # (the EP is compiled into the same downloaded ONNX Runtime); enabled by default
 # on Apple Silicon via the top-level `blumi` crate's target-gated dependency.
-gpu-coreml = ["local-embeddings", "dep:ort", "ort/coreml"]
+gpu-coreml = ["local-embeddings", "dep:ort", "dep:ort-sys", "ort/coreml"]
 # NVIDIA CUDA acceleration — OPT-IN ONLY (large runtime; needs the CUDA toolkit
 # at build time and a matching driver at run time). Build: `cargo build --features gpu-cuda`.
-gpu-cuda = ["local-embeddings", "dep:ort", "ort/cuda"]
+gpu-cuda = ["local-embeddings", "dep:ort", "dep:ort-sys", "ort/cuda"]
 
 [dev-dependencies]
 tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }

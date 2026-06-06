@@ -197,6 +197,10 @@ impl TurnRunner for AgentTurnRunner {
                 .map(|h| h.recovery_budget)
                 .unwrap_or(0),
         );
+        // Recoveries awaiting cross-step confirmation: (tool, episode id). When a
+        // guided tool succeeds on a later iteration we emit a "confirmed" trace
+        // (verified = true) and reinforce the learned fix. Used only when heal.verify.
+        let mut recovery_pending: Vec<(String, Option<i64>)> = Vec::new();
 
         // Snapshot the active persona for this turn: it layers extra
         // instructions onto the system prompt and may override the temperature.
@@ -502,94 +506,140 @@ impl TurnRunner for AgentTurnRunner {
             // at-least-once double-side-effect risk. Pairs with (doesn't duplicate)
             // the doom-loop guard above, which owns identical-repeat loops.
             if let Some(heal) = self.heal.clone() {
-                if heal.enabled && !recovery_budget.exhausted() {
-                    for call in &tool_calls {
-                        let Some(result) = results.get(call.id.as_str()) else {
-                            continue;
-                        };
-                        if result.class.is_success()
-                            || !crate::recovery::is_recoverable(result.class)
-                        {
-                            continue;
-                        }
-                        let idempotent = self
-                            .registry
-                            .get(&call.name)
-                            .map(|t| t.is_read_only())
-                            .unwrap_or(false);
-                        let action = crate::recovery::action_for(result.class, idempotent);
-                        let class_s = crate::recovery::class_str(result.class);
-
-                        // Failure-triggered recall: a known fix for a similar past
-                        // failure (graph-augmented recall over the `agent` namespace).
-                        let mut known_fix: Option<String> = None;
-                        if heal.learn {
-                            if let Some(mem) = &self.memory {
-                                let q = format!("tool {} failure {class_s}", call.name);
-                                let hits = tokio::time::timeout(
-                                    std::time::Duration::from_secs(2),
-                                    mem.recall(&q, 3),
-                                )
-                                .await
-                                .unwrap_or_default();
-                                known_fix = hits
-                                    .into_iter()
-                                    .find(|h| h.text.contains("action="))
-                                    .map(|h| h.text.replace('\n', " "));
+                if heal.enabled {
+                    // Cross-step confirmation: a guided recovery is "verified" once
+                    // the same tool SUCCEEDS on a later iteration — ground truth that
+                    // the fix worked (not just that one was suggested). Emits a
+                    // confirmed trace + reinforces the learned fix's utility. Free,
+                    // no LLM; gated by heal.verify.
+                    if heal.verify && !recovery_pending.is_empty() {
+                        let succeeded: std::collections::HashSet<&str> = tool_calls
+                            .iter()
+                            .filter_map(|c| {
+                                results
+                                    .get(c.id.as_str())
+                                    .filter(|r| r.class.is_success())
+                                    .map(|_| c.name.as_str())
+                            })
+                            .collect();
+                        let mut still = Vec::new();
+                        for (tool, ep) in std::mem::take(&mut recovery_pending) {
+                            if succeeded.contains(tool.as_str()) {
+                                ctx.events.emit(Event::Recovery {
+                                    tool: tool.clone(),
+                                    class: "recovered".to_string(),
+                                    action: "confirm".to_string(),
+                                    outcome: "confirmed".to_string(),
+                                    budget_left: recovery_budget.remaining(),
+                                    verified: Some(true),
+                                });
+                                if let (Some(id), Some(mem)) = (ep, &self.memory) {
+                                    mem.note_used(&[id]).await; // reinforce the fix that worked
+                                }
+                            } else {
+                                still.push((tool, ep));
                             }
                         }
+                        recovery_pending = still;
+                    }
 
-                        if !recovery_budget.spend() {
-                            break;
-                        }
-                        let outcome = if action == crate::recovery::RecoveryAction::Escalate {
-                            "escalated"
-                        } else {
-                            "recovered"
-                        };
-                        ctx.events.emit(Event::Recovery {
-                            tool: call.name.clone(),
-                            class: class_s.to_string(),
-                            action: action.as_str().to_string(),
-                            outcome: outcome.to_string(),
-                            budget_left: recovery_budget.remaining(),
-                            verified: None,
-                        });
+                    // New failures → classified, budgeted recovery.
+                    if !recovery_budget.exhausted() {
+                        for call in &tool_calls {
+                            let Some(result) = results.get(call.id.as_str()) else {
+                                continue;
+                            };
+                            if result.class.is_success()
+                                || !crate::recovery::is_recoverable(result.class)
+                            {
+                                continue;
+                            }
+                            let idempotent = self
+                                .registry
+                                .get(&call.name)
+                                .map(|t| t.is_read_only())
+                                .unwrap_or(false);
+                            let action = crate::recovery::action_for(result.class, idempotent);
+                            let class_s = crate::recovery::class_str(result.class);
 
-                        let mut msg = crate::recovery::guidance(
-                            &call.name,
-                            action,
-                            result.retry_hint.as_deref(),
-                        );
-                        if let Some(fix) = &known_fix {
-                            msg.push_str(
-                                "\n[Known fix for a similar past failure — verify before \
-                                 relying on it]\n",
+                            // Failure-triggered recall: a known fix for a similar
+                            // past failure (graph-augmented recall, `agent` namespace).
+                            let mut known_fix: Option<String> = None;
+                            if heal.learn {
+                                if let Some(mem) = &self.memory {
+                                    let q = format!("tool {} failure {class_s}", call.name);
+                                    let hits = tokio::time::timeout(
+                                        std::time::Duration::from_secs(2),
+                                        mem.recall(&q, 3),
+                                    )
+                                    .await
+                                    .unwrap_or_default();
+                                    known_fix = hits
+                                        .into_iter()
+                                        .find(|h| h.text.contains("action="))
+                                        .map(|h| h.text.replace('\n', " "));
+                                }
+                            }
+
+                            if !recovery_budget.spend() {
+                                break;
+                            }
+                            let outcome = if action == crate::recovery::RecoveryAction::Escalate {
+                                "escalated"
+                            } else {
+                                "recovered"
+                            };
+                            ctx.events.emit(Event::Recovery {
+                                tool: call.name.clone(),
+                                class: class_s.to_string(),
+                                action: action.as_str().to_string(),
+                                outcome: outcome.to_string(),
+                                budget_left: recovery_budget.remaining(),
+                                verified: None,
+                            });
+
+                            let mut msg = crate::recovery::guidance(
+                                &call.name,
+                                action,
+                                result.retry_hint.as_deref(),
                             );
-                            msg.push_str(fix.trim());
-                        }
-                        state.lock().await.messages.push(Message::user(msg));
-
-                        // Learn: record the episode (namespace "agent" so it can
-                        // diffuse across the grid; never "user"). Path/secret
-                        // redaction guards what leaves this node.
-                        if heal.learn {
-                            if let Some(mem) = &self.memory {
-                                let raw = crate::recovery::episode_text(
-                                    &call.name,
-                                    result.class,
-                                    action,
-                                    outcome,
+                            if let Some(fix) = &known_fix {
+                                msg.push_str(
+                                    "\n[Known fix for a similar past failure — verify before \
+                                     relying on it]\n",
                                 );
-                                let text = if heal.redact_paths {
-                                    crate::recovery::redact(&raw)
-                                } else {
-                                    raw
-                                };
-                                mem.remember("agent", "recovery", &text).await;
+                                msg.push_str(fix.trim());
                             }
+                            state.lock().await.messages.push(Message::user(msg));
+
+                            // Learn: record the episode (namespace "agent" so it
+                            // diffuses; never "user"). Path/secret-redacted.
+                            let mut episode_id = None;
+                            if heal.learn {
+                                if let Some(mem) = &self.memory {
+                                    let raw = crate::recovery::episode_text(
+                                        &call.name,
+                                        result.class,
+                                        action,
+                                        outcome,
+                                    );
+                                    let text = if heal.redact_paths {
+                                        crate::recovery::redact(&raw)
+                                    } else {
+                                        raw
+                                    };
+                                    episode_id = mem.remember("agent", "recovery", &text).await;
+                                }
+                            }
+                            // Track this guided recovery for cross-step confirmation.
+                            if heal.verify
+                                && action != crate::recovery::RecoveryAction::Escalate
+                                && !recovery_pending.iter().any(|(t, _)| t == &call.name)
+                            {
+                                recovery_pending.push((call.name.clone(), episode_id));
+                            }
+                            break; // at most one recovery per iteration
                         }
-                        break; // at most one recovery per iteration
                     }
                 }
             }
@@ -895,7 +945,7 @@ mod tests {
     use blumi_protocol::{Command, Envelope, FinishReason, SessionId, ToolCallDelta, ToolResult};
     use futures::stream::BoxStream;
     use std::path::Path;
-    use std::sync::atomic::{AtomicBool, Ordering};
+    use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
     use tokio::sync::broadcast;
 
     /// LLM that returns each queued script in order.
@@ -966,6 +1016,34 @@ mod tests {
                 "bad args",
                 "provide a valid `path` argument",
             ))
+        }
+    }
+
+    /// Fails the first call (InvalidInput), succeeds after — for cross-step
+    /// recovery-confirmation tests.
+    struct FlakyTool(Arc<AtomicUsize>);
+    #[async_trait]
+    impl Tool for FlakyTool {
+        fn name(&self) -> &str {
+            "Flaky"
+        }
+        fn description(&self) -> &str {
+            "fails once then succeeds"
+        }
+        fn input_schema(&self) -> serde_json::Value {
+            serde_json::json!({ "type": "object" })
+        }
+        async fn execute(
+            &self,
+            _input: serde_json::Value,
+            _ctx: &ToolContext,
+            _ct: CancellationToken,
+        ) -> Result<ToolResult, crate::ToolError> {
+            if self.0.fetch_add(1, Ordering::SeqCst) == 0 {
+                Ok(ToolResult::invalid_input("bad args", "fix the path"))
+            } else {
+                Ok(ToolResult::success("ok now"))
+            }
         }
     }
 
@@ -1272,6 +1350,93 @@ mod tests {
                 .iter()
                 .any(|m| m.text().contains("[Self-healing — recovery guidance]")),
             "recovery guidance should be injected for the model's next step"
+        );
+    }
+
+    #[tokio::test]
+    async fn recovery_is_confirmed_across_steps_when_verify_on() {
+        // iter1: call Flaky (fails) → recovery guidance; iter2: call Flaky again
+        // (succeeds) → cross-step confirmation; iter3: finish.
+        let calls = Arc::new(AtomicUsize::new(0));
+        let llm = Arc::new(ScriptedLlm {
+            scripts: std::sync::Mutex::new(
+                vec![
+                    vec![
+                        tool_call_chunk("c1", "Flaky", "{}"),
+                        StreamChunk::Done {
+                            reason: FinishReason::ToolCalls,
+                        },
+                    ],
+                    vec![
+                        // Corrected args (different signature) — as ArgFix guidance
+                        // instructs — so the doom-loop guard doesn't treat it as a
+                        // repeat and the retry actually executes.
+                        tool_call_chunk("c2", "Flaky", "{\"path\":\"ok\"}"),
+                        StreamChunk::Done {
+                            reason: FinishReason::ToolCalls,
+                        },
+                    ],
+                    vec![
+                        StreamChunk::Text {
+                            text: "done".into(),
+                        },
+                        StreamChunk::Done {
+                            reason: FinishReason::Stop,
+                        },
+                    ],
+                ]
+                .into(),
+            ),
+        });
+        let mut reg = ToolRegistry::new();
+        reg.register(Arc::new(FlakyTool(calls)));
+        let perms = Arc::new(PermissionEngine::new(PermissionConfig {
+            yolo: true,
+            ..Default::default()
+        }));
+        let runner = Arc::new(
+            AgentTurnRunner::new(
+                llm,
+                Arc::new(reg),
+                perms,
+                Arc::new(NoopExec),
+                LlmOptions::default(),
+                10,
+                131_072,
+                "you are blumi".into(),
+                PathBuf::from("."),
+            )
+            .with_heal(blumi_config::HealConfig {
+                enabled: true,
+                recovery_budget: 2,
+                verify: true, // cross-step confirmation on
+                learn: false,
+                evolve: blumi_config::HealEvolve::Off,
+                redact_paths: true,
+            }),
+        );
+        let h = spawn_session(SessionId::from("s"), "m", runner);
+        let mut rx = h.subscribe();
+        h.send(Command::UserMessage {
+            text: "go".into(),
+            attachments: vec![],
+            stream_id: None,
+        })
+        .await
+        .unwrap();
+        let events = drain_until_done(&mut rx).await;
+
+        // The retried tool succeeded → a confirmed, verified recovery trace fired.
+        let confirmed = events.iter().any(|e| {
+            matches!(
+                e,
+                Event::Recovery { outcome, verified: Some(true), tool, .. }
+                    if outcome == "confirmed" && tool == "Flaky"
+            )
+        });
+        assert!(
+            confirmed,
+            "a cross-step confirmed recovery should be emitted"
         );
     }
 

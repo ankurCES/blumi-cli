@@ -65,6 +65,10 @@ pub const COMMANDS: &[CommandDef] = &[
         desc: "show the GPU/accelerator + embeddings execution provider",
     },
     CommandDef {
+        name: "/heal",
+        desc: "self-healing summary: recoveries, learned fixes, evolutions",
+    },
+    CommandDef {
         name: "/loop",
         desc: "start/pause the autonomous task loop (/loop review to toggle gate)",
     },
@@ -197,6 +201,40 @@ pub(crate) async fn toggle_yolo(model: &mut Model, session: &SessionHandle) {
     model.mark_dirty();
 }
 
+/// Format the `/heal` overlay text from a `Store::heal_summary` value.
+fn format_heal(v: &serde_json::Value) -> String {
+    let count = |k: &str| {
+        v.get("counts")
+            .and_then(|c| c.get(k))
+            .and_then(|n| n.as_i64())
+            .unwrap_or(0)
+    };
+    let mut s = format!(
+        "recoveries {}   ·   evolved {}   ·   proposed {}   ·   failures {}",
+        count("recovery"),
+        count("evolution"),
+        count("evolution_proposal"),
+        count("failure"),
+    );
+    match v.get("recent").and_then(|r| r.as_array()) {
+        Some(arr) if !arr.is_empty() => {
+            s.push_str("\nRecent");
+            for item in arr {
+                let kind = item.get("kind").and_then(|x| x.as_str()).unwrap_or("");
+                let text = item.get("text").and_then(|x| x.as_str()).unwrap_or("");
+                let mark = match kind {
+                    "evolution" => "✦",
+                    "evolution_proposal" => "•",
+                    _ => "⚕",
+                };
+                s.push_str(&format!("\n  {mark} {text}"));
+            }
+        }
+        _ => s.push_str("\nNo recoveries or evolutions recorded yet."),
+    }
+    s
+}
+
 /// Run a slash command line (e.g. "/model claude-x").
 pub async fn run(model: &mut Model, session: &SessionHandle, line: &str) {
     let line = line.trim().to_string();
@@ -264,6 +302,15 @@ pub async fn run(model: &mut Model, session: &SessionHandle, line: &str) {
             };
             model.entries.push(Entry::Notice(line));
         }
+        "/heal" => match model.plans_store.clone() {
+            Some(store) => {
+                let summary = store.heal_summary(30).await;
+                model.heal_view = Some(format_heal(&summary));
+            }
+            None => model.entries.push(Entry::Notice(
+                "self-healing summary needs the local DB".into(),
+            )),
+        },
         "/loop" => {
             if arg.eq_ignore_ascii_case("review") {
                 model.loop_review = !model.loop_review;

@@ -411,6 +411,13 @@ impl Management for WebManagement {
         }
     }
 
+    async fn embed(&self, texts: Vec<String>) -> Option<Vec<Vec<f32>>> {
+        match &self.mem {
+            Some(mem) => mem.embed_texts(&texts).await,
+            None => None,
+        }
+    }
+
     fn grid_peer_ids(&self) -> Vec<String> {
         match &self.grid {
             // Key by stable host:port, NOT the registry id (which flips between
@@ -1076,6 +1083,14 @@ pub async fn run(
             registry: reg.clone(),
             secret: grid_secret.clone().unwrap_or_default(),
             cursor: std::sync::atomic::AtomicUsize::new(0),
+        }));
+        // Grid-embed offload: when this node's embeddings.backend = "grid", route
+        // embedding to the strongest GPU peer (stronger than this node).
+        blumi_core::set_grid_embed(std::sync::Arc::new(crate::grid::GridEmbedHook {
+            registry: reg.clone(),
+            secret: grid_secret.clone().unwrap_or_default(),
+            self_rank: blumi_llm::detect_accelerator().rank(),
+            cache: std::sync::Mutex::new(None),
         }));
 
         // SEDM background sweep: periodically consolidate near-dupes + evict the

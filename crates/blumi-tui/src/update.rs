@@ -126,6 +126,11 @@ async fn handle_term(model: &mut Model, ev: TermEvent, session: &SessionHandle) 
                 model.mark_dirty();
                 return;
             }
+            if model.heal_view.is_some() {
+                model.heal_view = None;
+                model.mark_dirty();
+                return;
+            }
 
             // The /plans browser: ↑/↓ (or j/k) select a plan, pgup/pgdn scroll
             // its content, home/end jump to ends, esc/q closes.

@@ -79,6 +79,19 @@ impl SemanticMemoryImpl {
     /// path on that — the background warmup loads it and [`backfill_vectors`]
     /// fills in any memories written meanwhile), or it errors. Callers then fall
     /// back to FTS5 / a vector-less insert.
+    /// Embed arbitrary texts with this node's embedder — used by the gateway to
+    /// SERVE grid-embed offload requests from CPU peers (`/api/grid/embed`).
+    /// `None` when no embedder is configured/ready. Vectors are NOT normalized
+    /// here (the caller stores them through the same admission path the local
+    /// embedder uses, which normalizes on write).
+    pub async fn embed_texts(&self, texts: &[String]) -> Option<Vec<Vec<f32>>> {
+        let emb = self.embedder.as_ref()?;
+        if !emb.ready() {
+            return None;
+        }
+        emb.embed(texts).await.ok()
+    }
+
     async fn embed_one(&self, text: &str) -> Option<Vec<f32>> {
         let emb = self.embedder.as_ref()?;
         if !emb.ready() {
@@ -554,45 +567,9 @@ impl SemanticMemoryImpl {
     }
 
     /// A compact summary of self-healing activity for the `/api/heal` view +
-    /// `/heal` overlays: per-kind counts + the most recent recovery/evolution
-    /// episodes (newest first).
+    /// `/heal` overlays. Delegates to [`Store::heal_summary`] (one source of truth).
     pub async fn heal_summary(&self, limit: i64) -> serde_json::Value {
-        use serde_json::json;
-        let kinds = ["recovery", "evolution", "evolution_proposal", "failure"];
-        let mut counts = serde_json::Map::new();
-        for k in kinds {
-            let c: i64 = sqlx::query_scalar(
-                "SELECT COUNT(*) FROM memories
-                 WHERE status='active' AND namespace='agent' AND kind = ?",
-            )
-            .bind(k)
-            .fetch_one(self.pool())
-            .await
-            .unwrap_or(0);
-            counts.insert(k.to_string(), json!(c));
-        }
-        let rows = sqlx::query(
-            "SELECT kind, text, created_at, hits FROM memories
-             WHERE status='active' AND namespace='agent'
-                   AND kind IN ('recovery','evolution','evolution_proposal')
-             ORDER BY created_at DESC LIMIT ?",
-        )
-        .bind(limit)
-        .fetch_all(self.pool())
-        .await
-        .unwrap_or_default();
-        let recent: Vec<serde_json::Value> = rows
-            .iter()
-            .map(|r| {
-                json!({
-                    "kind": r.get::<String, _>("kind"),
-                    "text": r.get::<String, _>("text"),
-                    "at": r.get::<String, _>("created_at"),
-                    "hits": r.get::<i64, _>("hits"),
-                })
-            })
-            .collect();
-        json!({ "counts": counts, "recent": recent })
+        self.store.heal_summary(limit).await
     }
 
     // --- Memory graph (similarity edges over SEDM) ----------------------

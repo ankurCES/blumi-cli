@@ -266,6 +266,12 @@ pub trait Management: Send + Sync {
         serde_json::json!({ "ok": false, "error": "memory disabled" })
     }
 
+    /// Embed texts with this node's local embedder — serves grid-embed offload
+    /// (`POST /api/grid/embed`) from CPU peers. Default: `None` (no embedder).
+    async fn embed(&self, _texts: Vec<String>) -> Option<Vec<Vec<f32>>> {
+        None
+    }
+
     // --- Knowledge base / memory browser (UI) ---
 
     /// Code-KB totals (files/symbols/vectors) + ingest-job state. Default: off.
@@ -476,6 +482,7 @@ pub fn router(state: AppState) -> Router {
         .route("/api/grid/metrics", get(api::grid_metrics))
         .route("/api/grid/delegate", post(api::grid_delegate))
         .route("/api/grid/memory", post(api::grid_memory))
+        .route("/api/grid/embed", post(api::grid_embed))
         .route("/api/knowledge/status", get(api::knowledge_status))
         .route("/api/knowledge/sources", get(api::knowledge_sources))
         .route("/api/knowledge/search", post(api::knowledge_search))

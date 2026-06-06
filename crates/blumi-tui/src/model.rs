@@ -378,6 +378,8 @@ pub struct Model {
     pub board_view: Option<String>,
     /// Rendered grid view (task distribution by runtime) when `/grid` is open.
     pub grid_view: Option<String>,
+    /// Rendered self-healing summary when `/heal` is open (recoveries/evolutions).
+    pub heal_view: Option<String>,
     /// Path to the persistent task board (`<project>/.blumi/tasks.json`).
     pub tasks_path: PathBuf,
     /// Autonomous loop is running (drives the task board turn by turn).
@@ -505,6 +507,7 @@ impl Model {
             usage_view: None,
             board_view: None,
             grid_view: None,
+            heal_view: None,
             remotes: Vec::new(),
             tabs: vec![("local".to_string(), false)],
             active_tab: 0,
@@ -819,6 +822,7 @@ impl Model {
         self.usage_view = None;
         self.board_view = None;
         self.grid_view = None;
+        self.heal_view = None;
         self.help_modal = false;
         self.plans_view = false;
         self.agents.clear();

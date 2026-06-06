@@ -386,6 +386,83 @@ impl blumi_core::GridDispatch for GridDispatchHook {
     }
 }
 
+/// Accelerator strength ranking for peer selection (must match the gateway's).
+fn accel_rank(s: &str) -> u8 {
+    match s {
+        "cuda" => 2,
+        "apple-coreml" => 1,
+        _ => 0,
+    }
+}
+
+/// Grid-embed hook: lets a node offload embedding to the strongest GPU peer
+/// (`embeddings.backend = "grid"`). Picks a peer strictly stronger than this
+/// node, caches the choice briefly, and re-probes on miss/failure.
+pub struct GridEmbedHook {
+    pub registry: Arc<PeerRegistry>,
+    pub secret: String,
+    /// This node's accelerator rank — only offload to a strictly stronger peer.
+    pub self_rank: u8,
+    /// Cached (best peer, chosen-at); re-probed after the TTL.
+    pub cache: std::sync::Mutex<Option<(Peer, std::time::Instant)>>,
+}
+
+/// How long a chosen embed peer is reused before re-probing the grid.
+const EMBED_PEER_TTL: Duration = Duration::from_secs(45);
+
+impl GridEmbedHook {
+    fn cached(&self) -> Option<Peer> {
+        let g = self.cache.lock().ok()?;
+        let (peer, at) = g.as_ref()?;
+        (at.elapsed() < EMBED_PEER_TTL).then(|| peer.clone())
+    }
+
+    fn store(&self, peer: Option<Peer>) {
+        if let Ok(mut g) = self.cache.lock() {
+            *g = peer.map(|p| (p, std::time::Instant::now()));
+        }
+    }
+
+    /// Probe live peers and pick the strongest one strictly stronger than us.
+    async fn pick_peer(&self) -> Option<Peer> {
+        let mut best: Option<(u8, Peer)> = None;
+        for peer in self.registry.live() {
+            let client = client::Client::for_peer(&peer, &self.secret);
+            let Ok(m) = client.node_metrics(Duration::from_secs(2)).await else {
+                continue;
+            };
+            let rank = accel_rank(m.get("accel").and_then(|v| v.as_str()).unwrap_or("cpu"));
+            if rank > self.self_rank && best.as_ref().map(|(r, _)| rank > *r).unwrap_or(true) {
+                best = Some((rank, peer));
+            }
+        }
+        best.map(|(_, p)| p)
+    }
+}
+
+#[async_trait::async_trait]
+impl blumi_core::GridEmbed for GridEmbedHook {
+    async fn embed_remote(&self, texts: &[String]) -> Option<Vec<Vec<f32>>> {
+        let peer = match self.cached() {
+            Some(p) => p,
+            None => {
+                let picked = self.pick_peer().await;
+                self.store(picked.clone());
+                picked?
+            }
+        };
+        let client = client::Client::for_peer(&peer, &self.secret);
+        match client.post_embed(texts, Duration::from_secs(20)).await {
+            Ok(v) => Some(v),
+            Err(e) => {
+                tracing::debug!("grid embed via {} failed: {e}", peer.name);
+                self.store(None); // invalidate → re-probe next time
+                None
+            }
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

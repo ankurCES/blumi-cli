@@ -126,6 +126,9 @@ pub fn render(model: &mut Model, f: &mut Frame) {
     if model.grid_view.is_some() {
         render_grid(model, f, area, &theme);
     }
+    if model.heal_view.is_some() {
+        render_heal(model, f, area, &theme);
+    }
     if model.dash_modal {
         render_dashboard_modal(model, f, area, &theme);
     }
@@ -156,6 +159,8 @@ pub fn render(model: &mut Model, f: &mut Frame) {
         (6, centered_rect(64, 60, area))
     } else if model.grid_view.is_some() {
         (8, centered_rect(64, 60, area))
+    } else if model.heal_view.is_some() {
+        (11, centered_rect(70, 64, area))
     } else if model.dash_modal {
         (7, centered_rect(72, 84, area))
     } else if model.help_modal {
@@ -1169,6 +1174,37 @@ fn render_memory(model: &Model, f: &mut Frame, area: Rect, theme: &Theme) {
             theme.accent() // section headers like "MEMORY.md (agent notes)"
         } else {
             theme.body()
+        };
+        lines.push(Line::from(Span::styled(truncate(raw, width), style)));
+    }
+    f.render_widget(Paragraph::new(lines), inner);
+}
+
+/// The `/heal` overlay: self-healing recovery + evolution summary.
+fn render_heal(model: &Model, f: &mut Frame, area: Rect, theme: &Theme) {
+    let Some(text) = &model.heal_view else {
+        return;
+    };
+    let popup = centered_rect(70, 64, area);
+    f.render_widget(Clear, popup);
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .border_type(BorderType::Rounded)
+        .border_style(Style::default().fg(theme.primary))
+        .title(Span::styled(
+            " self-healing — any key to close ",
+            theme.bold_primary(),
+        ));
+    let inner = block.inner(popup);
+    f.render_widget(block, popup);
+
+    let width = inner.width.saturating_sub(1) as usize;
+    let mut lines: Vec<Line> = Vec::new();
+    for raw in text.lines() {
+        let style = if raw.starts_with("  ") {
+            theme.body()
+        } else {
+            theme.accent() // section headers / count line
         };
         lines.push(Line::from(Span::styled(truncate(raw, width), style)));
     }

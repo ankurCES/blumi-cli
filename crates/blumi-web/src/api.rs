@@ -794,6 +794,38 @@ pub async fn grid_memory(
     .into_response()
 }
 
+#[derive(Deserialize)]
+pub struct GridEmbedBody {
+    pub texts: Vec<String>,
+}
+
+/// Peer-side: embed texts on this node's GPU and return the vectors — serves the
+/// grid-embed offload (`embeddings.backend = "grid"`) from CPU peers.
+/// Authenticated by the shared grid secret, not the human password.
+pub async fn grid_embed(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Json(body): Json<GridEmbedBody>,
+) -> Response {
+    let Some(secret) = state.grid_secret() else {
+        return (StatusCode::NOT_FOUND, "grid disabled").into_response();
+    };
+    let presented = headers
+        .get("x-blumi-grid")
+        .and_then(|h| h.to_str().ok())
+        .unwrap_or("");
+    if !constant_eq(secret.as_bytes(), presented.as_bytes()) {
+        return (StatusCode::UNAUTHORIZED, "grid auth required").into_response();
+    }
+    if body.texts.is_empty() {
+        return Json(json!({ "ok": true, "vectors": [] })).into_response();
+    }
+    match state.mgmt().embed(body.texts).await {
+        Some(vectors) => Json(json!({ "ok": true, "vectors": vectors })).into_response(),
+        None => Json(json!({ "ok": false, "error": "no embedder on this node" })).into_response(),
+    }
+}
+
 // --- Knowledge base / memory browser (UI) ---
 
 pub async fn knowledge_status(State(state): State<AppState>) -> Json<Value> {

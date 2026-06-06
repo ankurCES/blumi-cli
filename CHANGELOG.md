@@ -8,7 +8,27 @@ The Rust workspace and the blugo app share the version number.
 
 ## [Unreleased]
 
-_Nothing yet._
+### Added
+
+- **Grid-embed offload transport** — `embeddings.backend = "grid"` now routes
+  embedding to the strongest GPU peer via a `GridEmbed` hook + secret-authed
+  `POST /api/grid/embed`, with a TTL-cached peer choice and a local fallback
+  (a lean node degrades to FTS5 when no peer is up). Closes the v0.2.0 follow-up.
+- **Cross-step recovery confirmation** — a guided recovery is marked `verified`
+  only when the retried tool actually succeeds on a later step (ground truth, not
+  just "a fix was suggested"); the confirmed fix's utility is reinforced. Toggle
+  with `heal.verify` (the field's meaning is now cross-step confirmation, no LLM).
+- **TUI `/heal` overlay** — a self-healing summary (recovery / evolution / proposal
+  counts + recent items) via a new `Store::heal_summary`, alongside the existing
+  inline `⚕ self-heal` traces and the blugo Heal tab / `/api/heal`.
+
+### Fixed
+
+- **NVIDIA CUDA build on Linux** (`BLUMI_CUDA=1`) — pin `ort-sys` to `=2.0.0-rc.9`
+  and restore `--locked` on the installer's CUDA path. `ort`'s range dependency on
+  `ort-sys` floated to rc.12 on a non-locked resolve, whose `download-binaries`
+  build is broken (TLS-feature / ureq mismatch). Apple CoreML builds were
+  unaffected (already `--locked`).
 
 ## [0.2.0] — 2026-06-06
 

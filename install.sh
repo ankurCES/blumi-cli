@@ -87,7 +87,10 @@ else
   #    win — run a local server like Ollama and point blumi at it; no rebuild.)
   if [ "$os" = "Linux" ] && [ "${BLUMI_CUDA:-0}" = "1" ]; then
     say "${dim}BLUMI_CUDA=1 — building with NVIDIA CUDA acceleration (gpu-cuda)…${off}"
-    if cargo install --git "$REPO_URL" --force --root "$tmp/cargo" --features gpu-cuda "$BIN"; then
+    # --locked is REQUIRED: it keeps ort-sys pinned to rc.9. Without it, Cargo
+    # floats ort-sys to rc.12 (the range matches pre-releases), whose download
+    # build is broken (TLS-feature/ureq mismatch) and fails on Linux.
+    if cargo install --git "$REPO_URL" --locked --force --root "$tmp/cargo" --features gpu-cuda "$BIN"; then
       :
     else
       say "${pink}CUDA build didn't complete${off} — installing a lean (CPU) build instead."

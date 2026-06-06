@@ -142,7 +142,8 @@ pub async fn require_auth(
         // (checked inside the handler), not the human password/token.
         || path == "/api/grid/run"
         || path == "/api/grid/node"
-        || path == "/api/grid/memory";
+        || path == "/api/grid/memory"
+        || path == "/api/grid/embed";
     if exempt {
         return next.run(req).await;
     }

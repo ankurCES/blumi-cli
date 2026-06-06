@@ -110,6 +110,30 @@ pub fn grid_dispatch() -> Option<Arc<dyn GridDispatch>> {
     GRID_DISPATCH.read().ok().and_then(|g| g.clone())
 }
 
+/// Grid-embed hook: offload embedding to the strongest GPU peer. Lives in the
+/// binary (it needs the peer registry + grid secret); blumi-core/llm only call
+/// it. Returns `None` when no suitable peer is available or the remote call
+/// failed, so the caller falls back to its local embedder (or FTS5).
+#[async_trait]
+pub trait GridEmbed: Send + Sync {
+    async fn embed_remote(&self, texts: &[String]) -> Option<Vec<Vec<f32>>>;
+}
+
+static GRID_EMBED: StdRwLock<Option<Arc<dyn GridEmbed>>> = StdRwLock::new(None);
+
+/// Register the process-global grid-embed hook (the gateway sets this at startup
+/// when the grid is enabled).
+pub fn set_grid_embed(hook: Arc<dyn GridEmbed>) {
+    if let Ok(mut g) = GRID_EMBED.write() {
+        *g = Some(hook);
+    }
+}
+
+/// The current grid-embed hook, if one is registered.
+pub fn grid_embed() -> Option<Arc<dyn GridEmbed>> {
+    GRID_EMBED.read().ok().and_then(|g| g.clone())
+}
+
 /// A sub-agent template.
 #[derive(Debug, Clone)]
 pub struct AgentDef {

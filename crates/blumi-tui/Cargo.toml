@@ -12,6 +12,7 @@ blumi-protocol.workspace = true
 blumi-task.workspace = true
 blumi-config.workspace = true
 blumi-persist.workspace = true
+serde_json.workspace = true
 
 ratatui = "0.29"
 crossterm = { version = "0.28", features = ["event-stream"] }

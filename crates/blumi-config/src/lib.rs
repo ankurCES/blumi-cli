@@ -330,7 +330,10 @@ pub struct HealConfig {
     pub enabled: bool,
     /// Max budgeted recovery attempts per turn (0 = no auto-recovery).
     pub recovery_budget: u32,
-    /// Verify a recovered step with the local-LLM brain before continuing.
+    /// Confirm recoveries across steps: when a guided tool succeeds on a later
+    /// iteration, emit a `verified` trace + reinforce the learned fix's utility
+    /// (ground-truth "the fix worked", not just "a fix was suggested"). Free — no
+    /// extra LLM. Off by default to keep the default event stream minimal.
     pub verify: bool,
     /// Write failure→fix episodes to memory + recall them on similar failures.
     pub learn: bool,

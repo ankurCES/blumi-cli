@@ -45,8 +45,9 @@ pub use registry::ToolRegistry;
 pub use runner::{TurnContext, TurnRunner};
 pub use session::{SessionSnapshot, SessionState};
 pub use subagent::{
-    builtin_agents, grid_dispatch, grid_info, set_grid_dispatch, set_grid_info, set_grid_overflow,
-    AgentDef, AgentSpawner, GridDispatch, GridInfo, GridOverflow, DEFAULT_MAX_LOCAL_AGENTS,
+    builtin_agents, grid_dispatch, grid_embed, grid_info, set_grid_dispatch, set_grid_embed,
+    set_grid_info, set_grid_overflow, AgentDef, AgentSpawner, GridDispatch, GridEmbed, GridInfo,
+    GridOverflow, DEFAULT_MAX_LOCAL_AGENTS,
 };
 pub use tool::{
     coerce_tool_input, parse_input, schema_for, ChangeJournal, FileChange, SubAgentSpawner, Tool,

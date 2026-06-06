@@ -8,6 +8,7 @@
 
 pub mod accel;
 mod anthropic;
+mod embeddings_grid;
 mod embeddings_openai;
 mod gemini;
 mod mock;
@@ -20,6 +21,7 @@ mod embeddings_local;
 
 pub use accel::{detect as detect_accelerator, Accelerator};
 pub use anthropic::AnthropicClient;
+pub use embeddings_grid::GridEmbeddingClient;
 pub use embeddings_openai::OpenAiEmbeddingClient;
 pub use gemini::GeminiClient;
 pub use mock::MockLlmClient;
@@ -58,18 +60,21 @@ pub fn build_embeddings_client(
             &cfg.model,
             accel::embeddings_accelerator(&config.acceleration),
         ),
-        // "grid" offloads embedding to a GPU peer. The peer-routed transport is a
-        // follow-up; until then it degrades to the local bundled embedder (which
-        // itself uses the GPU when one is present) rather than disabling memory.
+        // "grid" offloads embedding to the strongest GPU peer via the gateway's
+        // GridEmbed hook, keeping the bundled embedder (if compiled) as a local
+        // fallback. A lean node with no bundled embedder is grid-only and
+        // degrades to FTS5 when no peer is up.
         "grid" => {
-            tracing::info!(
-                "embeddings backend 'grid': peer offload not yet wired; using the local embedder"
-            );
-            build_local_embeddings(
+            let local = build_local_embeddings(
                 &config.paths.models_dir,
                 &cfg.model,
                 accel::embeddings_accelerator(&config.acceleration),
-            )
+            );
+            Some(Arc::new(GridEmbeddingClient::new(
+                local,
+                &cfg.model,
+                cfg.dim as usize,
+            )))
         }
         other => {
             tracing::warn!("unknown embeddings backend '{other}'; embeddings disabled");

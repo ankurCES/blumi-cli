@@ -93,6 +93,41 @@ impl Client {
         Ok(())
     }
 
+    /// Offload embedding to this peer (`POST /api/grid/embed`) and return the
+    /// vectors. Used by the grid embeddings backend so a CPU node can embed on a
+    /// GPU peer. `Err` on auth failure, a non-OK body, or a network/timeout error.
+    pub async fn post_embed(
+        &self,
+        texts: &[String],
+        timeout: Duration,
+    ) -> anyhow::Result<Vec<Vec<f32>>> {
+        let resp = self
+            .http
+            .post(format!("{}/api/grid/embed", self.base))
+            .header("x-blumi-grid", &self.secret)
+            .json(&serde_json::json!({ "texts": texts }))
+            .timeout(timeout)
+            .send()
+            .await?;
+        let status = resp.status();
+        let body: serde_json::Value = resp.json().await.unwrap_or_default();
+        if !status.is_success() {
+            anyhow::bail!("peer returned HTTP {status}");
+        }
+        if body.get("ok").and_then(|v| v.as_bool()) != Some(true) {
+            let err = body
+                .get("error")
+                .and_then(|v| v.as_str())
+                .unwrap_or("peer reported failure");
+            anyhow::bail!("{err}");
+        }
+        let vectors: Vec<Vec<f32>> = body
+            .get("vectors")
+            .and_then(|v| serde_json::from_value(v.clone()).ok())
+            .ok_or_else(|| anyhow::anyhow!("peer returned no vectors"))?;
+        Ok(vectors)
+    }
+
     /// Fetch this peer's live metrics (`GET /api/grid/node`).
     pub async fn node_metrics(&self, timeout: Duration) -> anyhow::Result<serde_json::Value> {
         let resp = self

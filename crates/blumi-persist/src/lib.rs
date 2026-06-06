@@ -387,6 +387,49 @@ impl Store {
             })
             .collect())
     }
+
+    /// Self-healing summary for the `/heal` views (TUI overlay + gateway
+    /// `/api/heal`): per-kind counts + recent recovery/evolution episodes
+    /// (newest first). Pure SQL over the `agent` memory namespace — no embedder
+    /// needed, so the TUI can show it without loading the model.
+    pub async fn heal_summary(&self, limit: i64) -> serde_json::Value {
+        use serde_json::json;
+        let kinds = ["recovery", "evolution", "evolution_proposal", "failure"];
+        let mut counts = serde_json::Map::new();
+        for k in kinds {
+            let c: i64 = sqlx::query_scalar(
+                "SELECT COUNT(*) FROM memories \
+                 WHERE status='active' AND namespace='agent' AND kind = ?",
+            )
+            .bind(k)
+            .fetch_one(&self.pool)
+            .await
+            .unwrap_or(0);
+            counts.insert(k.to_string(), json!(c));
+        }
+        let rows = sqlx::query(
+            "SELECT kind, text, created_at, hits FROM memories \
+             WHERE status='active' AND namespace='agent' \
+                   AND kind IN ('recovery','evolution','evolution_proposal') \
+             ORDER BY created_at DESC LIMIT ?",
+        )
+        .bind(limit)
+        .fetch_all(&self.pool)
+        .await
+        .unwrap_or_default();
+        let recent: Vec<serde_json::Value> = rows
+            .iter()
+            .map(|r| {
+                json!({
+                    "kind": r.get::<String, _>("kind"),
+                    "text": r.get::<String, _>("text"),
+                    "at": r.get::<String, _>("created_at"),
+                    "hits": r.get::<i64, _>("hits"),
+                })
+            })
+            .collect();
+        json!({ "counts": counts, "recent": recent })
+    }
 }
 
 /// Adapts a shared [`Store`] to the core [`blumi_core::CheckpointSink`] trait so
