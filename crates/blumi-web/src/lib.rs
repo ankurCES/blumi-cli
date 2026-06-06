@@ -266,6 +266,33 @@ pub trait Management: Send + Sync {
         serde_json::json!({ "ok": false, "error": "memory disabled" })
     }
 
+    // --- Knowledge base / memory browser (UI) ---
+
+    /// Code-KB totals (files/symbols/vectors) + ingest-job state. Default: off.
+    async fn knowledge_status(&self) -> serde_json::Value {
+        serde_json::json!({ "enabled": false })
+    }
+    /// Indexed sources `[{ source, files, symbols }]`. Default: empty.
+    async fn knowledge_sources(&self) -> serde_json::Value {
+        serde_json::json!({ "sources": [] })
+    }
+    /// Hybrid code search → `{ hits: [{ path, name, kind, start_line, snippet }] }`.
+    async fn knowledge_search(&self, _query: &str, _limit: u32) -> serde_json::Value {
+        serde_json::json!({ "hits": [] })
+    }
+    /// Start a background ingest of `path`. Default: disabled.
+    async fn knowledge_ingest(&self, _path: &str) -> serde_json::Value {
+        serde_json::json!({ "ok": false, "error": "knowledge disabled" })
+    }
+    /// Remove an indexed source by label. Default: disabled.
+    async fn knowledge_remove(&self, _source: &str) -> serde_json::Value {
+        serde_json::json!({ "ok": false, "error": "knowledge disabled" })
+    }
+    /// Semantic search over long-term memory → `{ hits: [{ namespace, text }] }`.
+    async fn memory_search(&self, _query: &str, _limit: u32) -> serde_json::Value {
+        serde_json::json!({ "hits": [] })
+    }
+
     // --- Self-management ---
 
     /// The whole settings.json as JSON, with every secret redacted (for the
@@ -426,6 +453,12 @@ pub fn router(state: AppState) -> Router {
         .route("/api/grid/metrics", get(api::grid_metrics))
         .route("/api/grid/delegate", post(api::grid_delegate))
         .route("/api/grid/memory", post(api::grid_memory))
+        .route("/api/knowledge/status", get(api::knowledge_status))
+        .route("/api/knowledge/sources", get(api::knowledge_sources))
+        .route("/api/knowledge/search", post(api::knowledge_search))
+        .route("/api/knowledge/ingest", post(api::knowledge_ingest))
+        .route("/api/knowledge/remove", post(api::knowledge_remove))
+        .route("/api/memory/search", post(api::memory_search))
         .route(
             "/api/self/config",
             get(api::self_config_get).post(api::self_config_set),

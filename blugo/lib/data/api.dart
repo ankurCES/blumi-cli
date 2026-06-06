@@ -259,6 +259,33 @@ class ApiClient {
           {String target = 'all'}) =>
       _postJson('/api/grid/delegate', {'prompt': prompt, 'target': target});
 
+  // --- Knowledge base / memory (UI) ---
+
+  /// Code-KB totals + ingest-job state: `{ enabled, files, symbols, vectors,
+  /// sources, ingesting, message }`.
+  Future<Map<String, dynamic>> knowledgeStatus() =>
+      _getJson('/api/knowledge/status');
+
+  /// Indexed sources: `{ sources: [{ source, files, symbols }] }`.
+  Future<Map<String, dynamic>> knowledgeSources() =>
+      _getJson('/api/knowledge/sources');
+
+  /// Hybrid code search: `{ hits: [{ path, name, kind, start_line, snippet }] }`.
+  Future<Map<String, dynamic>> knowledgeSearch(String query, {int limit = 10}) =>
+      _postJson('/api/knowledge/search', {'query': query, 'limit': limit});
+
+  /// Start a background ingest of `path`. Poll [knowledgeStatus] for progress.
+  Future<Map<String, dynamic>> knowledgeIngest(String path) =>
+      _postJson('/api/knowledge/ingest', {'path': path});
+
+  /// Remove an indexed source by its label.
+  Future<Map<String, dynamic>> knowledgeRemove(String source) =>
+      _postJson('/api/knowledge/remove', {'source': source});
+
+  /// Semantic search over long-term memory: `{ hits: [{ namespace, text }] }`.
+  Future<Map<String, dynamic>> memorySearch(String query, {int limit = 10}) =>
+      _postJson('/api/memory/search', {'query': query, 'limit': limit});
+
   // --- Self-management ---
 
   /// Reload the agent in place (apply config/skill changes).

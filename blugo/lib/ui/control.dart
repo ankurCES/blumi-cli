@@ -33,7 +33,7 @@ class _ControlCenter extends StatelessWidget {
   Widget build(BuildContext context) {
     final cs = Theme.of(context).colorScheme;
     return DefaultTabController(
-      length: 7,
+      length: 8,
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
@@ -58,6 +58,7 @@ class _ControlCenter extends StatelessWidget {
               Tab(text: 'Usage'),
               Tab(text: 'Skills'),
               Tab(text: 'Memory'),
+              Tab(text: 'Code'),
             ],
           ),
           Expanded(
@@ -69,6 +70,7 @@ class _ControlCenter extends StatelessWidget {
               _UsageTab(app, scroll),
               _SkillsTab(app, scroll),
               _MemoryTab(app, scroll),
+              _KnowledgeTab(app, scroll),
             ]),
           ),
         ],
@@ -1354,6 +1356,286 @@ class _GridTabState extends State<_GridTab>
                 fontFamily: 'monospace',
                 fontSize: 12.5,
                 color: ok ? cs.onSurface : cs.error),
+          ),
+        ]),
+      ),
+    );
+  }
+}
+
+// --- Code knowledge base ---------------------------------------------------
+
+class _KnowledgeTab extends StatefulWidget {
+  final AppController app;
+  final ScrollController scroll;
+  const _KnowledgeTab(this.app, this.scroll);
+  @override
+  State<_KnowledgeTab> createState() => _KnowledgeTabState();
+}
+
+class _KnowledgeTabState extends State<_KnowledgeTab>
+    with AutomaticKeepAliveClientMixin {
+  @override
+  bool get wantKeepAlive => true;
+
+  ApiClient get _api => widget.app.session!.api;
+  final _path = TextEditingController();
+  final _query = TextEditingController();
+  Map<String, dynamic> _status = {};
+  List<Map<String, dynamic>> _sources = [];
+  List<Map<String, dynamic>> _hits = [];
+  bool _busy = false;
+  bool _searching = false;
+  String? _error;
+
+  @override
+  void initState() {
+    super.initState();
+    _refresh();
+  }
+
+  @override
+  void dispose() {
+    _path.dispose();
+    _query.dispose();
+    super.dispose();
+  }
+
+  Future<void> _refresh() async {
+    try {
+      final st = await _api.knowledgeStatus();
+      final src = await _api.knowledgeSources();
+      if (!mounted) return;
+      setState(() {
+        _status = st;
+        _sources =
+            ((src['sources'] as List?) ?? []).cast<Map<String, dynamic>>();
+      });
+    } catch (_) {}
+  }
+
+  Future<void> _ingest() async {
+    final p = _path.text.trim();
+    if (p.isEmpty || _busy) return;
+    FocusScope.of(context).unfocus();
+    setState(() {
+      _busy = true;
+      _error = null;
+    });
+    try {
+      final r = await _api.knowledgeIngest(p);
+      if (r['ok'] != true) {
+        setState(() => _error = r['error']?.toString() ?? 'ingest failed');
+        return;
+      }
+      await _pollIngest();
+    } catch (e) {
+      if (mounted) setState(() => _error = '$e');
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  /// Poll status until the background ingest finishes (bounded).
+  Future<void> _pollIngest() async {
+    for (var i = 0; i < 600; i++) {
+      await Future.delayed(const Duration(seconds: 2));
+      if (!mounted) return;
+      try {
+        final st = await _api.knowledgeStatus();
+        if (!mounted) return;
+        setState(() => _status = st);
+        if (st['ingesting'] != true) {
+          await _refresh();
+          return;
+        }
+      } catch (_) {
+        return;
+      }
+    }
+  }
+
+  Future<void> _search() async {
+    final q = _query.text.trim();
+    if (q.isEmpty || _searching) return;
+    FocusScope.of(context).unfocus();
+    setState(() {
+      _searching = true;
+      _error = null;
+      _hits = [];
+    });
+    try {
+      final r = await _api.knowledgeSearch(q, limit: 12);
+      if (!mounted) return;
+      setState(() =>
+          _hits = ((r['hits'] as List?) ?? []).cast<Map<String, dynamic>>());
+    } catch (e) {
+      if (mounted) setState(() => _error = '$e');
+    } finally {
+      if (mounted) setState(() => _searching = false);
+    }
+  }
+
+  Future<void> _remove(String source) async {
+    try {
+      await _api.knowledgeRemove(source);
+      await _refresh();
+    } catch (_) {}
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    super.build(context);
+    final cs = Theme.of(context).colorScheme;
+    final enabled = _status['enabled'] == true;
+    final ingesting = _status['ingesting'] == true;
+    return ListView(
+      controller: widget.scroll,
+      padding: const EdgeInsets.all(16),
+      children: [
+        if (!enabled)
+          Text('Code knowledge base is disabled (set knowledge.enabled).',
+              style: TextStyle(color: cs.onSurface.withValues(alpha: 0.6)))
+        else ...[
+          Row(children: [
+            _label('Knowledge base', cs),
+            const Spacer(),
+            IconButton(
+              tooltip: 'Refresh',
+              visualDensity: VisualDensity.compact,
+              icon: const Icon(Icons.refresh, size: 18),
+              onPressed: _refresh,
+            ),
+          ]),
+          Text(
+            '${_status['files'] ?? 0} files · ${_status['symbols'] ?? 0} symbols · ${_status['vectors'] ?? 0} vectors',
+            style: TextStyle(color: cs.onSurface.withValues(alpha: 0.7)),
+          ),
+          const SizedBox(height: 14),
+          _label('Index a repo (path on the gateway machine)', cs),
+          const SizedBox(height: 4),
+          TextField(
+            controller: _path,
+            decoration: InputDecoration(
+              hintText: '/Users/you/code/my-repo',
+              border: const OutlineInputBorder(),
+              isDense: true,
+              filled: true,
+              fillColor: cs.surfaceContainerHighest.withValues(alpha: 0.3),
+            ),
+          ),
+          const SizedBox(height: 8),
+          SizedBox(
+            width: double.infinity,
+            child: FilledButton.icon(
+              onPressed: (_busy || ingesting) ? null : _ingest,
+              icon: (_busy || ingesting)
+                  ? const SizedBox(
+                      width: 16,
+                      height: 16,
+                      child: CircularProgressIndicator(strokeWidth: 2))
+                  : const Icon(Icons.account_tree, size: 18),
+              label: Text((_busy || ingesting) ? 'Indexing…' : 'Index'),
+            ),
+          ),
+          if ((_status['message']?.toString() ?? '').isNotEmpty)
+            Padding(
+              padding: const EdgeInsets.only(top: 6),
+              child: Text(_status['message'].toString(),
+                  style: TextStyle(
+                      fontSize: 12,
+                      color: cs.onSurface.withValues(alpha: 0.6))),
+            ),
+          if (_sources.isNotEmpty) ...[
+            const SizedBox(height: 12),
+            _label('Sources (${_sources.length})', cs),
+            for (final s in _sources)
+              Padding(
+                padding: const EdgeInsets.symmetric(vertical: 2),
+                child: Row(children: [
+                  Expanded(
+                    child: Text('${s['source']}',
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(fontSize: 12.5)),
+                  ),
+                  Text('${s['symbols']}',
+                      style: TextStyle(
+                          fontSize: 11,
+                          color: cs.onSurface.withValues(alpha: 0.55))),
+                  IconButton(
+                    tooltip: 'Remove',
+                    visualDensity: VisualDensity.compact,
+                    icon: const Icon(Icons.delete_outline, size: 16),
+                    onPressed: () => _remove('${s['source']}'),
+                  ),
+                ]),
+              ),
+          ],
+          const SizedBox(height: 18),
+          _label('Search code', cs),
+          const SizedBox(height: 4),
+          TextField(
+            controller: _query,
+            onSubmitted: (_) => _search(),
+            decoration: InputDecoration(
+              hintText: 'e.g. where is the permission engine created',
+              border: const OutlineInputBorder(),
+              isDense: true,
+              filled: true,
+              fillColor: cs.surfaceContainerHighest.withValues(alpha: 0.3),
+              suffixIcon: IconButton(
+                icon: _searching
+                    ? const SizedBox(
+                        width: 16,
+                        height: 16,
+                        child: CircularProgressIndicator(strokeWidth: 2))
+                    : const Icon(Icons.search),
+                onPressed: _searching ? null : _search,
+              ),
+            ),
+          ),
+          if (_error != null) ...[
+            const SizedBox(height: 10),
+            Text(_error!, style: TextStyle(color: cs.error)),
+          ],
+          if (_hits.isNotEmpty) ...[
+            const SizedBox(height: 14),
+            _label('Results (${_hits.length})', cs),
+            for (final h in _hits) _hitCard(h, cs),
+          ],
+        ],
+      ],
+    );
+  }
+
+  Widget _hitCard(Map<String, dynamic> h, ColorScheme cs) {
+    final path = '${h['path'] ?? ''}';
+    final parts = path.split('/');
+    final short = parts.length > 2 ? '…/${parts.sublist(parts.length - 2).join('/')}' : path;
+    return Card(
+      margin: const EdgeInsets.only(bottom: 8),
+      child: Padding(
+        padding: const EdgeInsets.all(10),
+        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Row(children: [
+            Icon(Icons.code, size: 15, color: cs.primary),
+            const SizedBox(width: 6),
+            Expanded(
+              child: Text('${h['name'] ?? ''}',
+                  style: const TextStyle(fontWeight: FontWeight.bold)),
+            ),
+            Text('${h['kind'] ?? ''}',
+                style: TextStyle(
+                    fontSize: 11, color: cs.onSurface.withValues(alpha: 0.55))),
+          ]),
+          Text('$short:${h['start_line'] ?? 0}',
+              style: TextStyle(
+                  fontSize: 11, color: cs.onSurface.withValues(alpha: 0.55))),
+          const SizedBox(height: 6),
+          SelectableText(
+            '${h['snippet'] ?? ''}',
+            maxLines: 8,
+            style: const TextStyle(fontFamily: 'monospace', fontSize: 12),
           ),
         ]),
       ),

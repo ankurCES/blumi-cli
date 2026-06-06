@@ -110,6 +110,17 @@ struct WebManagement {
     grid: Option<crate::grid::GridShared>,
     /// Semantic memory store for diffusion ingest (`None` = memory disabled).
     mem: Option<Arc<blumi_persist::SemanticMemoryImpl>>,
+    /// Code knowledge base for the UI (`None` = knowledge disabled).
+    knowledge: Option<Arc<blumi_knowledge::KnowledgeStore>>,
+    /// Tracks a background `knowledge ingest` so the UI can show progress.
+    knowledge_job: Arc<tokio::sync::Mutex<KnowledgeJob>>,
+}
+
+/// State of the most recent (or running) background knowledge ingest.
+#[derive(Default)]
+struct KnowledgeJob {
+    running: bool,
+    message: String,
 }
 
 impl WebManagement {
@@ -255,6 +266,112 @@ impl Management for WebManagement {
             }
             None => serde_json::json!({ "ok": false, "error": "memory disabled" }),
         }
+    }
+
+    async fn knowledge_status(&self) -> serde_json::Value {
+        let Some(ks) = &self.knowledge else {
+            return serde_json::json!({ "enabled": false });
+        };
+        let st = ks.status().await;
+        let job = self.knowledge_job.lock().await;
+        serde_json::json!({
+            "enabled": true,
+            "files": st.files,
+            "symbols": st.symbols,
+            "vectors": st.vectors,
+            "sources": st.sources.len(),
+            "ingesting": job.running,
+            "message": job.message,
+        })
+    }
+
+    async fn knowledge_sources(&self) -> serde_json::Value {
+        match &self.knowledge {
+            Some(ks) => serde_json::json!({ "sources": ks.sources().await }),
+            None => serde_json::json!({ "sources": [] }),
+        }
+    }
+
+    async fn knowledge_search(&self, query: &str, limit: u32) -> serde_json::Value {
+        match &self.knowledge {
+            Some(ks) => {
+                let hits = ks.search(query, limit.clamp(1, 30) as usize).await;
+                serde_json::json!({ "hits": hits })
+            }
+            None => serde_json::json!({ "hits": [] }),
+        }
+    }
+
+    async fn knowledge_ingest(&self, path: &str) -> serde_json::Value {
+        let Some(ks) = &self.knowledge else {
+            return serde_json::json!({ "ok": false, "error": "knowledge disabled" });
+        };
+        let root = match std::fs::canonicalize(path) {
+            Ok(p) => p,
+            Err(e) => return serde_json::json!({ "ok": false, "error": e.to_string() }),
+        };
+        if self.knowledge_job.lock().await.running {
+            return serde_json::json!({ "ok": false, "error": "an ingest is already running" });
+        }
+        let ks = ks.clone();
+        let job = self.knowledge_job.clone();
+        let config = self.config.clone();
+        let cfg = blumi_knowledge::IngestConfig {
+            max_file_kb: config.knowledge.max_file_kb,
+            exclude: config.knowledge.exclude.clone(),
+        };
+        tokio::spawn(async move {
+            {
+                let mut j = job.lock().await;
+                j.running = true;
+                j.message = format!("indexing {}…", root.display());
+            }
+            // Warm the embedder so the ingest builds vectors (one-time load).
+            if let Some(emb) = crate::engine::shared_embedder(&config) {
+                let _ = emb.embed(&["warmup".to_string()]).await;
+            }
+            let source = root.to_string_lossy().to_string();
+            let msg = match ks.ingest_path(&root, &source, &cfg).await {
+                Ok(s) => format!(
+                    "indexed {} files · {} symbols ({} skipped)",
+                    s.indexed, s.symbols, s.skipped
+                ),
+                Err(e) => format!("error: {e}"),
+            };
+            let mut j = job.lock().await;
+            j.running = false;
+            j.message = msg;
+        });
+        serde_json::json!({ "ok": true, "started": true })
+    }
+
+    async fn knowledge_remove(&self, source: &str) -> serde_json::Value {
+        match &self.knowledge {
+            Some(ks) => serde_json::json!({ "ok": true, "removed": ks.remove(source).await }),
+            None => serde_json::json!({ "ok": false, "error": "knowledge disabled" }),
+        }
+    }
+
+    async fn memory_search(&self, query: &str, limit: u32) -> serde_json::Value {
+        let Some(mem) = &self.mem else {
+            return serde_json::json!({ "hits": [] });
+        };
+        let hits = blumi_core::SemanticMemory::query(
+            mem.as_ref(),
+            None,
+            query,
+            limit.clamp(1, 30) as usize,
+        )
+        .await;
+        let arr: Vec<serde_json::Value> = hits
+            .iter()
+            .map(|h| {
+                serde_json::json!({
+                    "id": h.id, "namespace": h.namespace, "text": h.text, "score": h.score
+                })
+            })
+            .collect();
+        serde_json::json!({ "hits": arr })
     }
 
     fn grid_peer_ids(&self) -> Vec<String> {
@@ -782,6 +899,25 @@ pub async fn run(
         None
     };
 
+    // Code knowledge base for the UI (status / search / ingest / remove) — the
+    // same knowledge.db the agent tools + CLI use; shares the embeddings model.
+    let knowledge: Option<Arc<blumi_knowledge::KnowledgeStore>> = if config.knowledge.enabled {
+        match blumi_knowledge::KnowledgeStore::open(
+            &config.paths.knowledge_db,
+            crate::engine::shared_embedder(&config),
+        )
+        .await
+        {
+            Ok(ks) => Some(Arc::new(ks)),
+            Err(e) => {
+                tracing::warn!("knowledge base unavailable: {e}");
+                None
+            }
+        }
+    } else {
+        None
+    };
+
     let personas = crate::engine::resolve_personas(&config)
         .into_iter()
         .map(|p| (p.name, p.description))
@@ -840,6 +976,8 @@ pub async fn run(
         store: store.clone(),
         grid: grid_shared,
         mem: mem.clone(),
+        knowledge,
+        knowledge_job: Arc::new(tokio::sync::Mutex::new(KnowledgeJob::default())),
     });
 
     let provider = Arc::new(WebSessionProvider { config, store });

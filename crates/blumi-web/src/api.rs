@@ -794,6 +794,71 @@ pub async fn grid_memory(
     .into_response()
 }
 
+// --- Knowledge base / memory browser (UI) ---
+
+pub async fn knowledge_status(State(state): State<AppState>) -> Json<Value> {
+    Json(state.mgmt().knowledge_status().await)
+}
+
+pub async fn knowledge_sources(State(state): State<AppState>) -> Json<Value> {
+    Json(state.mgmt().knowledge_sources().await)
+}
+
+#[derive(Deserialize)]
+pub struct KbSearchBody {
+    pub query: String,
+    #[serde(default)]
+    pub limit: Option<u32>,
+}
+
+pub async fn knowledge_search(
+    State(state): State<AppState>,
+    Json(b): Json<KbSearchBody>,
+) -> Json<Value> {
+    Json(
+        state
+            .mgmt()
+            .knowledge_search(&b.query, b.limit.unwrap_or(10))
+            .await,
+    )
+}
+
+pub async fn memory_search(
+    State(state): State<AppState>,
+    Json(b): Json<KbSearchBody>,
+) -> Json<Value> {
+    Json(
+        state
+            .mgmt()
+            .memory_search(&b.query, b.limit.unwrap_or(10))
+            .await,
+    )
+}
+
+#[derive(Deserialize)]
+pub struct KbIngestBody {
+    pub path: String,
+}
+
+pub async fn knowledge_ingest(
+    State(state): State<AppState>,
+    Json(b): Json<KbIngestBody>,
+) -> Json<Value> {
+    Json(state.mgmt().knowledge_ingest(&b.path).await)
+}
+
+#[derive(Deserialize)]
+pub struct KbRemoveBody {
+    pub source: String,
+}
+
+pub async fn knowledge_remove(
+    State(state): State<AppState>,
+    Json(b): Json<KbRemoveBody>,
+) -> Json<Value> {
+    Json(state.mgmt().knowledge_remove(&b.source).await)
+}
+
 /// This node's live metrics: uptime, model, token usage, task counts (with a
 /// local-vs-remote-owner split), and loop state. Shared by `/api/grid/node`
 /// (peer-facing) and `/api/grid/metrics` (the orchestrator's "self").
