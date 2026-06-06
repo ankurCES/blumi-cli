@@ -110,3 +110,45 @@ pub async fn remove(config: &BlumiConfig, source: String) -> anyhow::Result<()> 
     }
     Ok(())
 }
+
+pub async fn neighbors(config: &BlumiConfig, symbol: String) -> anyhow::Result<()> {
+    let ks = open(config).await?;
+    let hits = ks.neighbors(&symbol, 30).await;
+    if hits.is_empty() {
+        println!("No graph neighbors for '{symbol}'. (Ingest a repo first.)");
+        return Ok(());
+    }
+    println!("{} neighbor(s) of '{symbol}':", hits.len());
+    for h in &hits {
+        println!("  • {}:{} [{}] {}", h.path, h.start_line, h.kind, h.name);
+    }
+    Ok(())
+}
+
+pub async fn path(config: &BlumiConfig, from: String, to: String) -> anyhow::Result<()> {
+    let ks = open(config).await?;
+    let p = ks.shortest_path(&from, &to, 8).await;
+    if p.is_empty() {
+        println!("No reference path from '{from}' to '{to}' (within 8 hops).");
+    } else {
+        println!("{}", p.join(" → "));
+    }
+    Ok(())
+}
+
+pub async fn hubs(config: &BlumiConfig) -> anyhow::Result<()> {
+    let ks = open(config).await?;
+    let hits = ks.hubs(20).await;
+    if hits.is_empty() {
+        println!("No graph yet. Ingest a repo with `blumi knowledge ingest <path>`.");
+        return Ok(());
+    }
+    println!("Most-connected symbols:");
+    for h in &hits {
+        println!(
+            "  • {} ({} links)  {}:{}",
+            h.name, h.score as i64, h.path, h.start_line
+        );
+    }
+    Ok(())
+}

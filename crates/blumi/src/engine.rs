@@ -192,8 +192,13 @@ pub async fn build_session(
                     ks.clone(),
                 ))));
                 registry.register(Arc::new(blumi_core::Typed(blumi_tools::CodeRetrieve::new(
-                    ks,
+                    ks.clone(),
                 ))));
+                // Graph memory: cheap structural retrieval over the code graph.
+                registry.register(Arc::new(blumi_core::Typed(
+                    blumi_tools::CodeNeighbors::new(ks.clone()),
+                )));
+                registry.register(Arc::new(blumi_core::Typed(blumi_tools::CodePath::new(ks))));
             }
             Err(e) => tracing::warn!("code knowledge base unavailable: {e}"),
         }

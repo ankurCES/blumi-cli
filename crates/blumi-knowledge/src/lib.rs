@@ -241,6 +241,8 @@ impl KnowledgeStore {
             stats.indexed += 1;
             stats.symbols += symbols.len();
         }
+        // Rebuild the symbol reference graph over the (updated) index.
+        let _ = self.build_graph().await;
         Ok(stats)
     }
 
@@ -503,6 +505,195 @@ impl KnowledgeStore {
         normalize(&mut v);
         Some(v)
     }
+
+    // --- Reference graph (neighbors / shortest_path / hubs) --------------
+
+    /// Rebuild the symbol reference graph: an edge src→dst means src's body
+    /// mentions dst's name. Full rebuild (cheap at native-lite scale).
+    pub async fn build_graph(&self) -> Result<usize, KnowledgeError> {
+        let rows = sqlx::query("SELECT id, name, snippet FROM code_symbols")
+            .fetch_all(&self.pool)
+            .await?;
+        let mut by_name: std::collections::HashMap<String, Vec<i64>> =
+            std::collections::HashMap::new();
+        let mut syms: Vec<(i64, String, String)> = Vec::with_capacity(rows.len());
+        for r in &rows {
+            let id: i64 = r.get("id");
+            let name: String = r.get("name");
+            let snippet: String = r.get("snippet");
+            if name.len() >= 3 {
+                by_name.entry(name.clone()).or_default().push(id);
+            }
+            syms.push((id, name, snippet));
+        }
+        let mut tx = self.pool.begin().await?;
+        sqlx::query("DELETE FROM code_edges")
+            .execute(&mut *tx)
+            .await?;
+        let mut count = 0usize;
+        for (id, name, snippet) in &syms {
+            let mut seen: HashSet<i64> = HashSet::new();
+            for tok in identifiers(snippet) {
+                if tok == name || tok.len() < 4 || is_stop_ident(tok) {
+                    continue;
+                }
+                if let Some(dsts) = by_name.get(tok) {
+                    // Skip over-common names (defined in many places) — they're
+                    // "god nodes" that add noise, not signal.
+                    if dsts.len() > 8 {
+                        continue;
+                    }
+                    for &dst in dsts {
+                        if dst != *id && seen.insert(dst) {
+                            sqlx::query(
+                                "INSERT OR IGNORE INTO code_edges (src, dst) VALUES (?, ?)",
+                            )
+                            .bind(id)
+                            .bind(dst)
+                            .execute(&mut *tx)
+                            .await?;
+                            count += 1;
+                        }
+                    }
+                }
+            }
+        }
+        tx.commit().await?;
+        Ok(count)
+    }
+
+    /// Symbols directly connected to any symbol named `name` (both directions).
+    pub async fn neighbors(&self, name: &str, limit: usize) -> Vec<CodeHit> {
+        let rows = sqlx::query(
+            "SELECT DISTINCT f.path AS path, s.name AS name, s.kind AS kind,
+                    s.start_line AS sl, s.end_line AS el, s.snippet AS snippet
+             FROM code_symbols s JOIN code_files f ON f.id = s.file_id
+             WHERE s.id IN (
+                 SELECT e.dst FROM code_edges e JOIN code_symbols a ON a.id = e.src WHERE a.name = ?1
+                 UNION
+                 SELECT e.src FROM code_edges e JOIN code_symbols b ON b.id = e.dst WHERE b.name = ?1
+             )
+             ORDER BY s.name LIMIT ?2",
+        )
+        .bind(name)
+        .bind(limit as i64)
+        .fetch_all(&self.pool)
+        .await
+        .unwrap_or_default();
+        rows.iter()
+            .map(|r| CodeHit {
+                path: r.get("path"),
+                name: r.get("name"),
+                kind: r.get("kind"),
+                start_line: r.get("sl"),
+                end_line: r.get("el"),
+                snippet: r.get("snippet"),
+                score: 0.0,
+            })
+            .collect()
+    }
+
+    /// Most-connected symbols ("god nodes"), by total degree (score = degree).
+    pub async fn hubs(&self, limit: usize) -> Vec<CodeHit> {
+        let rows = sqlx::query(
+            "SELECT f.path AS path, s.name AS name, s.kind AS kind,
+                    s.start_line AS sl, s.end_line AS el, s.snippet AS snippet, d.deg AS deg
+             FROM (SELECT id, COUNT(*) AS deg FROM
+                       (SELECT src AS id FROM code_edges UNION ALL SELECT dst FROM code_edges)
+                   GROUP BY id) d
+             JOIN code_symbols s ON s.id = d.id
+             JOIN code_files f ON f.id = s.file_id
+             ORDER BY d.deg DESC LIMIT ?",
+        )
+        .bind(limit as i64)
+        .fetch_all(&self.pool)
+        .await
+        .unwrap_or_default();
+        rows.iter()
+            .map(|r| CodeHit {
+                path: r.get("path"),
+                name: r.get("name"),
+                kind: r.get("kind"),
+                start_line: r.get("sl"),
+                end_line: r.get("el"),
+                snippet: r.get("snippet"),
+                score: r.get::<i64, _>("deg") as f32,
+            })
+            .collect()
+    }
+
+    /// Shortest reference path between a symbol named `from` and one named `to`,
+    /// as a list of symbol names (empty if unreachable within `max_depth`).
+    pub async fn shortest_path(&self, from: &str, to: &str, max_depth: usize) -> Vec<String> {
+        use std::collections::{HashMap, VecDeque};
+        let names = sqlx::query("SELECT id, name FROM code_symbols")
+            .fetch_all(&self.pool)
+            .await
+            .unwrap_or_default();
+        let mut name_of: HashMap<i64, String> = HashMap::new();
+        let mut ids_of: HashMap<String, Vec<i64>> = HashMap::new();
+        for r in &names {
+            let id: i64 = r.get("id");
+            let nm: String = r.get("name");
+            ids_of.entry(nm.clone()).or_default().push(id);
+            name_of.insert(id, nm);
+        }
+        let goals: HashSet<i64> = ids_of
+            .get(to)
+            .cloned()
+            .unwrap_or_default()
+            .into_iter()
+            .collect();
+        if goals.is_empty() || !ids_of.contains_key(from) {
+            return vec![];
+        }
+        let edges = sqlx::query("SELECT src, dst FROM code_edges")
+            .fetch_all(&self.pool)
+            .await
+            .unwrap_or_default();
+        let mut adj: HashMap<i64, Vec<i64>> = HashMap::new();
+        for r in &edges {
+            let s: i64 = r.get("src");
+            let d: i64 = r.get("dst");
+            adj.entry(s).or_default().push(d);
+            adj.entry(d).or_default().push(s);
+        }
+        let mut visited: HashSet<i64> = HashSet::new();
+        let mut prev: HashMap<i64, i64> = HashMap::new();
+        let mut q: VecDeque<(i64, usize)> = VecDeque::new();
+        for &id in ids_of.get(from).map(|v| v.as_slice()).unwrap_or(&[]) {
+            visited.insert(id);
+            q.push_back((id, 0));
+        }
+        let mut found: Option<i64> = None;
+        while let Some((id, depth)) = q.pop_front() {
+            if depth > 0 && goals.contains(&id) {
+                found = Some(id);
+                break;
+            }
+            if depth >= max_depth {
+                continue;
+            }
+            if let Some(ns) = adj.get(&id) {
+                for &n in ns {
+                    if visited.insert(n) {
+                        prev.insert(n, id);
+                        q.push_back((n, depth + 1));
+                    }
+                }
+            }
+        }
+        let Some(mut cur) = found else {
+            return vec![];
+        };
+        let mut path = vec![name_of.get(&cur).cloned().unwrap_or_default()];
+        while let Some(&p) = prev.get(&cur) {
+            path.push(name_of.get(&p).cloned().unwrap_or_default());
+            cur = p;
+        }
+        path.reverse();
+        path
+    }
 }
 
 // --- helpers --------------------------------------------------------------
@@ -606,6 +797,87 @@ fn to_fts_query(q: &str) -> String {
         .join(" ")
 }
 
+/// Identifier-like tokens (alphanumeric + `_`, length ≥ 3) for graph edges.
+fn identifiers(s: &str) -> impl Iterator<Item = &str> {
+    s.split(|c: char| !(c.is_alphanumeric() || c == '_'))
+        .filter(|t| t.len() >= 3)
+}
+
+/// Ubiquitous lowercase identifiers (trait methods, enum variants, common
+/// fields) that would otherwise become noisy graph "god nodes". CamelCase type
+/// names are unaffected (the match is exact + lowercase).
+fn is_stop_ident(t: &str) -> bool {
+    matches!(
+        t,
+        "name"
+            | "new"
+            | "from"
+            | "into"
+            | "user"
+            | "self"
+            | "kind"
+            | "text"
+            | "path"
+            | "none"
+            | "some"
+            | "value"
+            | "error"
+            | "result"
+            | "default"
+            | "clone"
+            | "format"
+            | "with"
+            | "iter"
+            | "into_iter"
+            | "unwrap"
+            | "async"
+            | "await"
+            | "send"
+            | "recv"
+            | "spawn"
+            | "string"
+            | "options"
+            | "config"
+            | "data"
+            | "item"
+            | "items"
+            | "args"
+            | "input"
+            | "output"
+            | "label"
+            | "title"
+            | "status"
+            | "message"
+            | "content"
+            | "model"
+            | "query"
+            | "create"
+            | "build"
+            | "open"
+            | "save"
+            | "load"
+            | "search"
+            | "parse"
+            | "write"
+            | "read"
+            | "render"
+            | "update"
+            | "handle"
+            | "resolve"
+            | "fetch"
+            | "store"
+            | "list"
+            | "apply"
+            | "init"
+            | "start"
+            | "stop"
+            | "run"
+            | "next"
+            | "push"
+            | "insert"
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -671,6 +943,29 @@ mod tests {
             hits[0].name
         );
         assert!(hits.iter().all(|h| !h.path.ends_with(".svg")));
+    }
+
+    #[tokio::test]
+    async fn graph_neighbors_and_path() {
+        let dir = tempfile::tempdir().unwrap();
+        // `caller` references `helper`; `helper` references `leaf`.
+        std::fs::write(
+            dir.path().join("g.rs"),
+            "fn leaf() -> u32 {\n    1\n}\n\nfn helper() -> u32 {\n    leaf() + 1\n}\n\nfn caller() -> u32 {\n    helper() + 2\n}\n",
+        )
+        .unwrap();
+        let ks = store().await;
+        ks.ingest_path(dir.path(), "g", &IngestConfig::default())
+            .await
+            .unwrap();
+        // caller ↔ helper is a direct edge.
+        let nbrs = ks.neighbors("caller", 10).await;
+        assert!(nbrs.iter().any(|h| h.name == "helper"), "caller → helper");
+        // caller → helper → leaf is a 2-hop path.
+        let path = ks.shortest_path("caller", "leaf", 6).await;
+        assert_eq!(path, vec!["caller", "helper", "leaf"]);
+        // hubs returns something connected.
+        assert!(!ks.hubs(5).await.is_empty(), "graph has hubs");
     }
 
     #[tokio::test]

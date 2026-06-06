@@ -202,6 +202,12 @@ enum KnowledgeCmd {
     Status,
     /// Remove an indexed source by its label (see `list`).
     Remove { source: String },
+    /// Graph: list a symbol's reference neighbors.
+    Neighbors { symbol: String },
+    /// Graph: shortest reference path between two symbols.
+    Path { from: String, to: String },
+    /// Graph: the most-connected symbols ("god nodes").
+    Hubs,
 }
 
 #[derive(Subcommand)]
@@ -529,6 +535,9 @@ async fn main() -> anyhow::Result<()> {
             KnowledgeCmd::Search { query } => knowledge::search(&config, query.join(" ")).await,
             KnowledgeCmd::Status => knowledge::status(&config).await,
             KnowledgeCmd::Remove { source } => knowledge::remove(&config, source).await,
+            KnowledgeCmd::Neighbors { symbol } => knowledge::neighbors(&config, symbol).await,
+            KnowledgeCmd::Path { from, to } => knowledge::path(&config, from, to).await,
+            KnowledgeCmd::Hubs => knowledge::hubs(&config).await,
         },
         Some(Commands::Loop {
             max,
