@@ -74,12 +74,25 @@ pub async fn run(config: BlumiConfig, opts: LoopOptions) -> anyhow::Result<()> {
         } else {
             format!("{}\n\n{}", task.title, task.detail)
         };
+        let before = session.snapshot().await;
         if let Some(c) = run_turn(&session, &prompt, opts.yolo).await? {
             cost = c; // providers that report cost give a cumulative figure
         }
 
         // Advance the task (re-load so we don't clobber concurrent edits).
         let mut board = TaskBoard::load(&path);
+        // Attribute this turn's token delta to the task (per-task cost telemetry).
+        let after = session.snapshot().await;
+        board.record_cost(
+            &task.id,
+            &after.model,
+            after
+                .total_input_tokens
+                .saturating_sub(before.total_input_tokens) as u64,
+            after
+                .total_output_tokens
+                .saturating_sub(before.total_output_tokens) as u64,
+        );
         let next = if opts.review {
             TaskState::Review
         } else {

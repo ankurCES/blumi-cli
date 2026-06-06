@@ -72,6 +72,16 @@ pub struct Task {
     /// unassigned. Backward-compatible: absent in older boards.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub owner: Option<String>,
+    /// Tokens billed to this task across every turn it ran (0 until run).
+    /// Backward-compatible: absent in older boards.
+    #[serde(default)]
+    pub input_tokens: u64,
+    #[serde(default)]
+    pub output_tokens: u64,
+    /// Estimated USD cost from the model's list price; `None` for unpriced/local
+    /// models or a task that hasn't run (or ran on a remote peer in v1).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cost_usd: Option<f64>,
 }
 
 /// Counts by state, for progress summaries.
@@ -137,6 +147,9 @@ impl TaskBoard {
             created_at: ts.clone(),
             updated_at: ts,
             owner: None,
+            input_tokens: 0,
+            output_tokens: 0,
+            cost_usd: None,
         });
         id
     }
@@ -181,6 +194,28 @@ impl TaskBoard {
             .format(&Rfc3339)
             .unwrap_or_default();
         Some(self.tasks[i].title.clone())
+    }
+
+    /// Accumulate a token delta on a task and recompute its USD estimate from
+    /// `model`'s list price (`None` for unpriced/local models). A task may run
+    /// across several turns; deltas accumulate. Returns the task title.
+    pub fn record_cost(
+        &mut self,
+        id_or_pos: &str,
+        model: &str,
+        input: u64,
+        output: u64,
+    ) -> Option<String> {
+        let i = self.index_of(id_or_pos)?;
+        let t = &mut self.tasks[i];
+        t.input_tokens += input;
+        t.output_tokens += output;
+        t.cost_usd = blumi_config::pricing::is_priced(model)
+            .then(|| blumi_config::pricing::estimate(model, t.input_tokens, t.output_tokens));
+        t.updated_at = OffsetDateTime::now_utc()
+            .format(&Rfc3339)
+            .unwrap_or_default();
+        Some(t.title.clone())
     }
 
     /// Remove a task; returns whether anything was removed.
@@ -273,6 +308,48 @@ mod tests {
         assert!(b.is_empty());
         assert_eq!(TaskState::parse("start"), Some(TaskState::Doing));
         assert_eq!(TaskState::parse("nope"), None);
+    }
+
+    #[test]
+    fn record_cost_accumulates_and_prices() {
+        let mut b = TaskBoard::default();
+        let id = b.add("run", "", 1, now());
+        // 1M in + 1M out of sonnet = $3 + $15 = $18.
+        b.record_cost(&id, "claude-sonnet-4-5", 1_000_000, 1_000_000);
+        let t = &b.tasks()[0];
+        assert_eq!(t.input_tokens, 1_000_000);
+        assert!((t.cost_usd.unwrap() - 18.0).abs() < 1e-9);
+        // A second turn accumulates tokens + cost.
+        b.record_cost(&id, "claude-sonnet-4-5", 1_000_000, 0);
+        let t = &b.tasks()[0];
+        assert_eq!(t.input_tokens, 2_000_000);
+        assert!((t.cost_usd.unwrap() - 21.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn record_cost_unpriced_model_is_none() {
+        let mut b = TaskBoard::default();
+        let id = b.add("run", "", 1, now());
+        b.record_cost(&id, "some-local-llama", 1_000_000, 1_000_000);
+        let t = &b.tasks()[0];
+        assert_eq!(t.output_tokens, 1_000_000); // tokens still tracked
+        assert!(t.cost_usd.is_none()); // but no misleading $
+    }
+
+    #[test]
+    fn old_board_json_without_cost_fields_loads() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("tasks.json");
+        // An older board JSON with no token/cost fields.
+        std::fs::write(
+            &path,
+            r#"{"tasks":[{"id":"t1","title":"old","priority":1,"state":"todo","created_at":"x","updated_at":"x"}]}"#,
+        )
+        .unwrap();
+        let b = TaskBoard::load(&path);
+        assert_eq!(b.tasks().len(), 1);
+        assert_eq!(b.tasks()[0].input_tokens, 0);
+        assert!(b.tasks()[0].cost_usd.is_none());
     }
 
     #[test]

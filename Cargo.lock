@@ -668,6 +668,7 @@ dependencies = [
 name = "blumi-task"
 version = "0.2.0"
 dependencies = [
+ "blumi-config",
  "serde",
  "serde_json",
  "tempfile",

@@ -1146,6 +1146,10 @@ impl Model {
         if remote_n > 0 {
             s.push_str(&format!(" · {} remote {remote_n}", crate::icons::remote()));
         }
+        let total_cost: f64 = board.tasks().iter().filter_map(|t| t.cost_usd).sum();
+        if total_cost > 0.0 {
+            s.push_str(&format!(" · ${total_cost:.2}"));
+        }
         if board.is_empty() {
             s.push_str("\n\nno tasks yet — add with `blumi task add`, then `blumi loop`");
         } else {
@@ -1155,12 +1159,21 @@ impl Model {
                     Some(host) => format!("  {} {host}", crate::icons::remote()),
                     None => String::new(),
                 };
+                // Per-task cost: $ when priced, else raw tokens once it has run.
+                let cost = match t.cost_usd {
+                    Some(c) if c > 0.0 => format!("  ${c:.3}"),
+                    _ if t.input_tokens + t.output_tokens > 0 => {
+                        format!("  ↑{} ↓{}", t.input_tokens, t.output_tokens)
+                    }
+                    _ => String::new(),
+                };
                 s.push_str(&format!(
-                    "\n{:>2}. {} P{}  {}{}",
+                    "\n{:>2}. {} P{}  {}{}{}",
                     i + 1,
                     t.state.icon(),
                     t.priority,
                     t.title,
+                    cost,
                     owner
                 ));
             }
