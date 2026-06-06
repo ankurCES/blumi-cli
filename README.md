@@ -10,9 +10,14 @@
 </p>
 
 <p align="center">
+  <a href="https://github.com/ankurCES/blumi-cli/stargazers"><img src="https://img.shields.io/github/stars/ankurCES/blumi-cli?style=flat&logo=github&label=star&color=7c5cff" alt="Star blumi on GitHub"></a>
   <a href="https://github.com/ankurCES/blumi-cli/actions/workflows/ci.yml"><img src="https://github.com/ankurCES/blumi-cli/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
   <a href="https://github.com/ankurCES/blumi-cli/wiki"><img src="https://img.shields.io/badge/docs-wiki-7c5cff" alt="Wiki"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-Apache--2.0-blue" alt="License: Apache-2.0"></a>
+</p>
+
+<p align="center">
+  <strong>⭐ If blumi puts your idle compute to work, <a href="https://github.com/ankurCES/blumi-cli">give it a star</a> — it helps others find it.</strong>
 </p>
 
 `blumi` is a single Rust binary whose UI-agnostic core emits one typed event stream, so every
@@ -353,3 +358,26 @@ nudging. See the [Wiki](https://github.com/ankurCES/blumi-cli/wiki) for the full
 
 Licensed under the **[Apache License 2.0](LICENSE)** © 2026 ankurCES — see [`LICENSE`](LICENSE)
 and [`NOTICE`](NOTICE). Permissive, with an explicit patent grant. Contributions welcome.
+
+---
+
+## ⭐ Star us
+
+blumi is built so the machines you already own — an old laptop, a spare desktop, even your phone —
+add up to one private AI grid. If that's useful to you, **[star the repo](https://github.com/ankurCES/blumi-cli/stargazers)**:
+it's the simplest way to support the project and help others discover it. Got a question or an idea?
+Open an [issue or discussion](https://github.com/ankurCES/blumi-cli/issues) — contributions welcome.
+
+### Star history
+
+<p align="center">
+  <a href="https://star-history.com/#ankurCES/blumi-cli&Date">
+    <picture>
+      <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/svg?repos=ankurCES/blumi-cli&type=Date&theme=dark" />
+      <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/svg?repos=ankurCES/blumi-cli&type=Date" />
+      <img alt="blumi star history" src="https://api.star-history.com/svg?repos=ankurCES/blumi-cli&type=Date" width="640" />
+    </picture>
+  </a>
+</p>
+
+<p align="center"><sub>If you made it this far — <a href="https://github.com/ankurCES/blumi-cli">⭐ star blumi</a> 🌸</sub></p>
