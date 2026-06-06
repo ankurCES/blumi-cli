@@ -129,6 +129,9 @@ pub fn render(model: &mut Model, f: &mut Frame) {
     if model.dash_modal {
         render_dashboard_modal(model, f, area, &theme);
     }
+    if model.help_modal {
+        render_help_modal(model, f, area, &theme);
+    }
     // Slash-command popup floats just above the editor.
     if model.slash_active() {
         render_slash_popup(model, f, editor, &theme);
@@ -152,6 +155,8 @@ pub fn render(model: &mut Model, f: &mut Frame) {
         (8, centered_rect(64, 60, area))
     } else if model.dash_modal {
         (7, centered_rect(72, 84, area))
+    } else if model.help_modal {
+        (9, centered_rect(72, 84, area))
     } else {
         (0, area)
     };
@@ -779,6 +784,137 @@ fn render_dashboard_modal(model: &mut Model, f: &mut Frame, area: Rect, theme: &
         Paragraph::new(lines).scroll((model.modal_pane.scroll as u16, 0)),
         inner,
     );
+}
+
+/// The `/help` modal: a scrollable command reference (command · what it does ·
+/// how to use it), then the global key bindings. Replaces the old one-line dump.
+fn render_help_modal(model: &mut Model, f: &mut Frame, area: Rect, theme: &Theme) {
+    let popup = centered_rect(72, 84, area);
+    f.render_widget(Clear, popup);
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .border_type(BorderType::Rounded)
+        .border_style(theme.bold_primary())
+        .title(Span::styled(
+            " commands — esc close · ↑/↓ pgup/pgdn scroll ",
+            theme.bold_primary(),
+        ));
+    let inner = block.inner(popup);
+    f.render_widget(block, popup);
+    let w = inner.width.saturating_sub(1) as usize;
+    let lines = help_modal_lines(theme, w);
+    model
+        .modal_pane
+        .record(inner.x, inner.y, inner.width, inner.height, lines.len());
+    f.render_widget(
+        Paragraph::new(lines).scroll((model.modal_pane.scroll as u16, 0)),
+        inner,
+    );
+}
+
+/// Build the `/help` body: every slash command with its (wrapped) description,
+/// then the global key bindings.
+fn help_modal_lines(theme: &Theme, w: usize) -> Vec<Line<'static>> {
+    let namecol = 16usize;
+    let descw = w.saturating_sub(namecol + 1).max(16);
+    let mut out: Vec<Line> = Vec::new();
+
+    out.push(Line::from(Span::styled(
+        "slash commands".to_string(),
+        theme.accent().add_modifier(Modifier::BOLD),
+    )));
+    out.push(Line::from(""));
+    for c in crate::commands::COMMANDS {
+        help_row(
+            &mut out,
+            c.name.to_string(),
+            c.desc,
+            theme.bold_primary(),
+            theme,
+            namecol,
+            descw,
+        );
+    }
+
+    out.push(Line::from(""));
+    out.push(Line::from(Span::styled(
+        "keys".to_string(),
+        theme.accent().add_modifier(Modifier::BOLD),
+    )));
+    for (k, v) in [
+        ("ctrl+p", "open the command palette"),
+        ("tab", "cycle focus between panes"),
+        ("ctrl+b", "toggle the explorer rail"),
+        ("ctrl+j", "toggle the agent rail"),
+        ("ctrl+y", "toggle YOLO (auto-approve tools)"),
+        (
+            "esc",
+            "enter nav mode (j/k scroll · gg/G top/bottom · i back to insert)",
+        ),
+        ("shift/alt+enter", "newline in the composer"),
+        ("pgup/pgdn", "scroll the transcript"),
+    ] {
+        help_row(
+            &mut out,
+            k.to_string(),
+            v,
+            theme.accent(),
+            theme,
+            namecol,
+            descw,
+        );
+    }
+    out
+}
+
+/// One `name … description` row (wrapped to width) for the help modal.
+fn help_row(
+    out: &mut Vec<Line<'static>>,
+    name: String,
+    desc: &str,
+    name_style: Style,
+    theme: &Theme,
+    namecol: usize,
+    descw: usize,
+) {
+    let parts = wrap_words(desc, descw);
+    out.push(Line::from(vec![
+        Span::styled(format!("{name:<namecol$}"), name_style),
+        Span::styled(parts.first().cloned().unwrap_or_default(), theme.body()),
+    ]));
+    for cont in parts.iter().skip(1) {
+        out.push(Line::from(vec![
+            Span::raw(" ".repeat(namecol)),
+            Span::styled(cont.clone(), theme.dim()),
+        ]));
+    }
+}
+
+/// Word-wrap `s` to `width` columns by whitespace (best-effort).
+fn wrap_words(s: &str, width: usize) -> Vec<String> {
+    if width == 0 {
+        return vec![s.to_string()];
+    }
+    let mut lines = Vec::new();
+    let mut cur = String::new();
+    for word in s.split_whitespace() {
+        if cur.is_empty() {
+            cur = word.to_string();
+        } else if cur.chars().count() + 1 + word.chars().count() <= width {
+            cur.push(' ');
+            cur.push_str(word);
+        } else {
+            lines.push(std::mem::take(&mut cur));
+            cur = word.to_string();
+        }
+    }
+    if !cur.is_empty() {
+        lines.push(cur);
+    }
+    if lines.is_empty() {
+        lines.push(String::new());
+    }
+    lines
 }
 
 /// Format a token count compactly: `1.2k`, `131k`, `42`.
@@ -1883,6 +2019,27 @@ mod tests {
         assert!(out.contains("local-first"), "landing tagline");
         assert!(out.contains("quick commands"), "command table heading");
         assert!(out.contains("/help"), "command table entry");
+    }
+
+    #[test]
+    fn help_modal_lists_commands_and_keys() {
+        let mut model = Model::new("m".into(), "/tmp".into());
+        model.open_help_modal();
+        assert!(model.help_modal, "/help opens its modal");
+        assert!(!model.dash_modal, "and closes the dashboard modal");
+        // Inspect the modal body directly (viewport-independent).
+        let lines = help_modal_lines(&model.theme, 70);
+        let text: String = lines
+            .iter()
+            .flat_map(|l| l.spans.iter().map(|s| s.content.to_string()))
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(text.contains("slash commands"), "section header");
+        assert!(text.contains("/grid"), "a command name");
+        assert!(text.contains("scroll the transcript"), "a key-binding desc");
+        assert!(text.contains("keys"), "keys section");
+        // Many lines (≥ one per command) → genuinely scrollable.
+        assert!(lines.len() > 20, "scrollable content");
     }
 
     #[test]

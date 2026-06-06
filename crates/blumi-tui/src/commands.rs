@@ -42,11 +42,7 @@ pub const COMMANDS: &[CommandDef] = &[
     },
     CommandDef {
         name: "/dashboard",
-        desc: "open the full dashboard as a popup (all metrics)",
-    },
-    CommandDef {
-        name: "/dashboard",
-        desc: "toggle the run dashboard",
+        desc: "open the full dashboard as a scrollable popup (all metrics)",
     },
     CommandDef {
         name: "/usage",
@@ -202,7 +198,7 @@ pub async fn run(model: &mut Model, session: &SessionHandle, line: &str) {
     model.clear_input();
 
     match cmd {
-        "/help" => model.entries.push(Entry::Notice(help_text())),
+        "/help" => model.open_help_modal(),
         "/clear" => model.clear_transcript(),
         "/new" => model.request_new_session(),
         "/resume" => {
@@ -640,19 +636,6 @@ pub async fn run(model: &mut Model, session: &SessionHandle, line: &str) {
             "unknown command '{other}' (try /help)"
         ))),
     }
-}
-
-fn help_text() -> String {
-    let mut s = String::from("commands:");
-    for c in COMMANDS {
-        s.push_str(&format!("\n  {} — {}", c.name, c.desc));
-    }
-    s.push_str(
-        "\nkeys: ctrl+p palette · tab focus · ctrl+b explorer · ctrl+j agent rail · \
-         esc → nav mode (j/k scroll · gg/G top/bottom · i back to insert) · \
-         shift/alt+enter newline · pgup/pgdn scroll",
-    );
-    s
 }
 
 fn status_text(model: &Model) -> String {

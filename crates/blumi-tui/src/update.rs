@@ -123,10 +123,13 @@ async fn handle_term(model: &mut Model, ev: TermEvent, session: &SessionHandle) 
                 return;
             }
 
-            // The /dashboard modal: a scrollable overlay; esc/q closes.
-            if model.dash_modal {
+            // The /dashboard + /help modals: scrollable overlays; esc/q closes.
+            if model.dash_modal || model.help_modal {
                 match key.code {
-                    KeyCode::Esc | KeyCode::Char('q') => model.dash_modal = false,
+                    KeyCode::Esc | KeyCode::Char('q') => {
+                        model.dash_modal = false;
+                        model.help_modal = false;
+                    }
                     KeyCode::Up | KeyCode::Char('k') => model.modal_pane.scroll_by(-1),
                     KeyCode::Down | KeyCode::Char('j') => model.modal_pane.scroll_by(1),
                     KeyCode::PageUp => model.modal_pane.scroll_by(-10),

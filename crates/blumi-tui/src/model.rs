@@ -337,6 +337,8 @@ pub struct Model {
     pub dash_panel: DashPanel,
     /// The `/dashboard` full-screen modal: open flag + its own scroll pane.
     pub dash_modal: bool,
+    /// The `/help` command-reference modal (shares `modal_pane` for scrolling).
+    pub help_modal: bool,
     pub modal_pane: ScrollPane,
     /// Rendered memory text when the `/memory` overlay is open.
     pub memory_view: Option<String>,
@@ -460,6 +462,7 @@ impl Model {
             tasks_pane: ScrollPane::default(),
             dash_panel: DashPanel::Agents,
             dash_modal: false,
+            help_modal: false,
             modal_pane: ScrollPane::default(),
             memory_view: None,
             usage_view: None,
@@ -779,6 +782,7 @@ impl Model {
         self.usage_view = None;
         self.board_view = None;
         self.grid_view = None;
+        self.help_modal = false;
         self.agents.clear();
         self.loop_active = false;
         self.loop_current = None;
@@ -860,8 +864,16 @@ impl Model {
     pub fn toggle_dash_modal(&mut self) {
         self.dash_modal = !self.dash_modal;
         if self.dash_modal {
+            self.help_modal = false;
             self.modal_pane.scroll = 0;
         }
+    }
+
+    /// Open the `/help` command-reference modal (scrollable; shares modal_pane).
+    pub fn open_help_modal(&mut self) {
+        self.help_modal = true;
+        self.dash_modal = false;
+        self.modal_pane.scroll = 0;
     }
 
     /// Number of tool calls in the transcript.
