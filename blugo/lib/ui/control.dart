@@ -762,11 +762,41 @@ class _SettingsTabState extends State<_SettingsTab> {
                         child: Column(
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
-                            Text(
-                              name,
-                              style: const TextStyle(
-                                fontWeight: FontWeight.w600,
-                              ),
+                            Row(
+                              children: [
+                                Flexible(
+                                  child: Text(
+                                    name,
+                                    overflow: TextOverflow.ellipsis,
+                                    style: const TextStyle(
+                                      fontWeight: FontWeight.w600,
+                                    ),
+                                  ),
+                                ),
+                                if (online &&
+                                    (m['accel']?.toString().isNotEmpty ??
+                                        false)) ...[
+                                  const SizedBox(width: 6),
+                                  Container(
+                                    padding: const EdgeInsets.symmetric(
+                                      horizontal: 6,
+                                      vertical: 1,
+                                    ),
+                                    decoration: BoxDecoration(
+                                      color: cs.primary.withValues(alpha: 0.15),
+                                      borderRadius: BorderRadius.circular(6),
+                                    ),
+                                    child: Text(
+                                      m['accel'].toString(),
+                                      style: TextStyle(
+                                        fontSize: 10,
+                                        color: cs.primary,
+                                        fontWeight: FontWeight.w600,
+                                      ),
+                                    ),
+                                  ),
+                                ],
+                              ],
                             ),
                             if (online)
                               Text(
@@ -1075,6 +1105,7 @@ class _StatusTabState extends State<_StatusTab> {
                 ),
                 _row('model', st['model']?.toString() ?? s.modelName, cs),
                 _row('version', st['version']?.toString() ?? '—', cs),
+                _row('accelerator', st['accel']?.toString() ?? 'cpu', cs),
                 const SizedBox(height: 14),
                 _label('context', cs),
                 ClipRRect(

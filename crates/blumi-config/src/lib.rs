@@ -243,6 +243,31 @@ impl Default for EmbeddingConfig {
     }
 }
 
+/// GPU / accelerator settings. When a GPU is detected, the bundled ONNX embedder
+/// runs on it — Apple CoreML/Metal on Apple Silicon (default builds), NVIDIA CUDA
+/// with the opt-in `gpu-cuda` build — and falls back to CPU automatically (ort
+/// appends a CPU provider). `mode = "auto"` picks the best available; force a
+/// specific path with `"cpu"`, `"apple"`, or `"cuda"`. A requested provider that
+/// wasn't compiled in degrades to CPU with a warning.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct AccelerationConfig {
+    /// "auto" (detect), "cpu", "apple" (CoreML/Metal), or "cuda".
+    pub mode: String,
+    /// Override the execution provider for the bundled embedder specifically.
+    /// "auto" follows `mode`; otherwise "cpu" / "apple" / "cuda".
+    pub embeddings_accel: String,
+}
+
+impl Default for AccelerationConfig {
+    fn default() -> Self {
+        AccelerationConfig {
+            mode: "auto".into(),
+            embeddings_accel: "auto".into(),
+        }
+    }
+}
+
 /// Semantic long-term memory (the LangGraph "Store" + SEDM governance). Layered
 /// on the embeddings backend above; when embeddings are disabled it degrades to
 /// FTS5 keyword recall. Disable `enabled` to fall back to file-only MEMORY.md.
@@ -644,6 +669,9 @@ pub struct BlumiConfig {
     /// Local-embeddings settings (semantic memory + code search backend).
     #[serde(default)]
     pub embeddings: EmbeddingConfig,
+    /// GPU / accelerator settings (embedder execution provider; auto-detect).
+    #[serde(default)]
+    pub acceleration: AccelerationConfig,
     /// Semantic long-term memory (vector Store + RAG + SEDM governance).
     #[serde(default)]
     pub memory: MemoryConfig,
@@ -681,6 +709,7 @@ impl Default for BlumiConfig {
             remote: RemoteConfig::default(),
             grid: GridConfig::default(),
             embeddings: EmbeddingConfig::default(),
+            acceleration: AccelerationConfig::default(),
             memory: MemoryConfig::default(),
             knowledge: KnowledgeConfig::default(),
             workspaces: WorkspaceConfig::default(),

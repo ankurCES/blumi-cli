@@ -53,5 +53,20 @@ mdns-sd = "0.20"
 whoami = "1"
 flume = "0.11"
 
+# Apple-first GPU acceleration: on Apple Silicon, turn on the bundled embedder's
+# CoreML/Metal execution provider by default (≈zero extra binary size — the EP is
+# baked into the same ONNX Runtime fastembed already downloads). Cargo unifies
+# these features with the base `blumi-llm` dep above. Non-Apple targets stay CPU
+# unless built with `--features gpu-cuda` (or `gpu-coreml`).
+[target.'cfg(all(target_os = "macos", target_arch = "aarch64"))'.dependencies]
+blumi-llm = { workspace = true, features = ["gpu-coreml"] }
+
+[features]
+# Opt-in NVIDIA CUDA acceleration (heavy; needs CUDA toolkit + driver):
+#   cargo build --release --features gpu-cuda
+gpu-cuda = ["blumi-llm/gpu-cuda"]
+# Explicit Apple CoreML opt-in (already the default on Apple Silicon).
+gpu-coreml = ["blumi-llm/gpu-coreml"]
+
 [dev-dependencies]
 tempfile = "3"

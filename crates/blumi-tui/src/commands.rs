@@ -61,6 +61,10 @@ pub const COMMANDS: &[CommandDef] = &[
         desc: "show the grid: task distribution across local + remote peers",
     },
     CommandDef {
+        name: "/accel",
+        desc: "show the GPU/accelerator + embeddings execution provider",
+    },
+    CommandDef {
         name: "/loop",
         desc: "start/pause the autonomous task loop (/loop review to toggle gate)",
     },
@@ -252,6 +256,14 @@ pub async fn run(model: &mut Model, session: &SessionHandle, line: &str) {
         "/usage" => model.open_usage(),
         "/board" => model.open_board(),
         "/grid" => model.open_grid(),
+        "/accel" => {
+            let line = if model.accel.is_empty() {
+                "accelerator: (unknown) — run `blumi accel doctor`".to_string()
+            } else {
+                model.accel.clone()
+            };
+            model.entries.push(Entry::Notice(line));
+        }
         "/loop" => {
             if arg.eq_ignore_ascii_case("review") {
                 model.loop_review = !model.loop_review;

@@ -907,6 +907,7 @@ async fn node_metrics(state: &AppState) -> Value {
         "tasks_total": total,
         "tasks_remote": remote,        // handed OUT to peers
         "tasks_local": total - remote,
+        "accel": state.mgmt().accel(),  // compute accelerator (GPU routing)
         "loop": loop_state,
     })
 }
@@ -942,6 +943,14 @@ pub async fn grid_metrics_value(state: &AppState) -> Value {
     let mut out_tok = me["tokens"]["output"].as_u64().unwrap_or(0);
     let mut tasks_total = me["tasks_total"].as_u64().unwrap_or(0);
     let mut online = 1u64; // self
+                           // Accelerator census across self + online peers (for GPU-aware routing).
+    let mut accel_counts: std::collections::BTreeMap<String, u64> =
+        std::collections::BTreeMap::new();
+    let self_accel = me["accel"].as_str().unwrap_or("cpu").to_string();
+    *accel_counts.entry(self_accel.clone()).or_insert(0) += 1;
+    let mut strongest_rank = accel_rank(&self_accel);
+    let mut strongest_accel = self_accel;
+    let mut strongest_node = "self".to_string();
     if let Some(ps) = peers.as_array() {
         for p in ps {
             if p["online"].as_bool() == Some(true) {
@@ -950,6 +959,17 @@ pub async fn grid_metrics_value(state: &AppState) -> Value {
                 in_tok += m["tokens"]["input"].as_u64().unwrap_or(0);
                 out_tok += m["tokens"]["output"].as_u64().unwrap_or(0);
                 tasks_total += m["tasks_total"].as_u64().unwrap_or(0);
+                let pa = m["accel"].as_str().unwrap_or("cpu").to_string();
+                *accel_counts.entry(pa.clone()).or_insert(0) += 1;
+                if accel_rank(&pa) > strongest_rank {
+                    strongest_rank = accel_rank(&pa);
+                    strongest_accel = pa;
+                    strongest_node = p["id"]
+                        .as_str()
+                        .or_else(|| p["name"].as_str())
+                        .unwrap_or("peer")
+                        .to_string();
+                }
             }
         }
     }
@@ -960,8 +980,20 @@ pub async fn grid_metrics_value(state: &AppState) -> Value {
             "nodes_online": online,
             "tokens": { "input": in_tok, "output": out_tok },
             "tasks_total": tasks_total,
+            "accelerators": accel_counts,
+            "strongest_accel": strongest_accel,
+            "strongest_node": strongest_node,
         },
     })
+}
+
+/// Rank accelerator strings for "strongest node" selection: cuda > apple > cpu.
+fn accel_rank(s: &str) -> u8 {
+    match s {
+        "cuda" => 2,
+        "apple-coreml" => 1,
+        _ => 0,
+    }
 }
 
 /// Constant-time byte compare (length is allowed to leak, contents are not).
@@ -1114,6 +1146,7 @@ pub async fn status(State(state): State<AppState>) -> Json<Value> {
         "version": state.config.version,
         "working_dir": state.config.working_dir,
         "context_size": state.config.context_size,
+        "accel": state.mgmt().accel(),
         "usage": state.mgmt().usage().await,
     }))
 }

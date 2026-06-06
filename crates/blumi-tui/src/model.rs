@@ -285,6 +285,8 @@ pub struct Model {
     pub yolo: bool,
     /// Brain approval mode label ("off"/"advisory"/"auto"). Set by `/brain`.
     pub brain_mode: String,
+    /// Pre-rendered accelerator + embeddings line for `/accel` (set by the host).
+    pub accel: String,
     /// When the session started (for uptime).
     pub started: Instant,
     /// Milliseconds spent actively working with the bot (busy time).
@@ -455,6 +457,7 @@ impl Model {
             turn_count: 0,
             yolo: false,
             brain_mode: "off".into(),
+            accel: String::new(),
             started: Instant::now(),
             active_ms: 0,
             context_tokens: 0,

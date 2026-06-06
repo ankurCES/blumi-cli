@@ -140,6 +140,9 @@ pub struct TuiConfig {
     pub themes: Vec<crate::theme::Theme>,
     /// The shared SQLite DB (for the `/plans` history, persisted across restarts).
     pub db_path: PathBuf,
+    /// Pre-rendered accelerator + embeddings line for the `/accel` command (the
+    /// host detects it via blumi-llm, which the TUI crate doesn't depend on).
+    pub accel: String,
 }
 
 /// Run the interactive TUI, sourcing sessions from `factory`. Restores the
@@ -195,6 +198,7 @@ async fn run_loop(
     model.cron_jobs = cfg.cron_jobs;
     model.tasks_path = cfg.tasks_path;
     model.brain_mode = cfg.brain_mode;
+    model.accel = cfg.accel;
     model.auto_continue = cfg.auto_continue;
     // Plan history (`/plans`): open the shared store, load past plans, and keep
     // the handle so resolved plans persist + reach the gateway/blugo.

@@ -1,5 +1,6 @@
 //! blumi — the CLI entry point.
 
+mod accel;
 mod branding;
 mod cron;
 mod discovery;
@@ -120,6 +121,11 @@ enum Commands {
         #[command(subcommand)]
         action: McpCmd,
     },
+    /// Inspect GPU/accelerator detection + local-GPU-server setup hints.
+    Accel {
+        #[command(subcommand)]
+        action: AccelCmd,
+    },
     /// Code knowledge base: index repos for code_search / code_retrieve.
     Knowledge {
         #[command(subcommand)]
@@ -226,6 +232,16 @@ enum McpCmd {
     Disable { name: String },
     /// Remove a configured server.
     Remove { name: String },
+}
+
+#[derive(Subcommand)]
+enum AccelCmd {
+    /// Print the detected accelerator on one line (apple-coreml | cuda | cpu).
+    Detect,
+    /// Detection + the bundled embedder's active execution provider + backends.
+    Status,
+    /// Full report with copy-paste setup hints for local GPU servers.
+    Doctor,
 }
 
 #[derive(Subcommand)]
@@ -529,6 +545,7 @@ async fn main() -> anyhow::Result<()> {
             }
         },
         Some(Commands::Mcp { action }) => mcp::run(action, &config),
+        Some(Commands::Accel { action }) => accel::run(action, &config),
         Some(Commands::Knowledge { action }) => match action {
             KnowledgeCmd::Ingest { path } => knowledge::ingest(&config, path).await,
             KnowledgeCmd::List => knowledge::list(&config).await,

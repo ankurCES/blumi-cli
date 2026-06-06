@@ -6,6 +6,7 @@
 //! offline node simply degrades to FTS5 (the first `embed` errors, callers
 //! fall back). Once loaded it stays resident and runs fully offline.
 
+use crate::Accelerator;
 use async_trait::async_trait;
 use blumi_core::{EmbeddingClient, LlmError};
 use std::path::PathBuf;
@@ -18,13 +19,17 @@ pub struct LocalEmbeddingClient {
     model_id: String,
     cache_dir: PathBuf,
     dim: usize,
+    /// Execution provider the ONNX session runs on (Apple CoreML / CUDA / CPU).
+    /// ort silently falls back to CPU if the GPU provider can't register.
+    accel: Accelerator,
 }
 
 impl LocalEmbeddingClient {
     /// Prepare the client WITHOUT loading the model. `dim` is derived from the
     /// model id up front (so the vector store can size itself); the actual model
     /// download/load is deferred to the first [`embed`](Self::embed) call.
-    pub fn new(model_id: &str, cache_dir: PathBuf) -> Result<Self, LlmError> {
+    /// `accel` selects the ONNX execution provider for the session.
+    pub fn new(model_id: &str, cache_dir: PathBuf, accel: Accelerator) -> Result<Self, LlmError> {
         // All bundled models are 384-dim; kept as a match so adding a model that
         // isn't forces a conscious dim update.
         let dim = match model_id {
@@ -36,7 +41,13 @@ impl LocalEmbeddingClient {
             model_id: model_id.to_string(),
             cache_dir,
             dim,
+            accel,
         })
+    }
+
+    /// The execution provider this client is configured to use.
+    pub fn accelerator(&self) -> Accelerator {
+        self.accel
     }
 
     /// Get the model, loading it (downloading on first ever use) if needed.
@@ -45,17 +56,27 @@ impl LocalEmbeddingClient {
             .get_or_try_init(|| async {
                 let model_id = self.model_id.clone();
                 let cache_dir = self.cache_dir.clone();
+                let accel = self.accel;
                 tokio::task::spawn_blocking(move || {
                     use fastembed::{EmbeddingModel, InitOptions, TextEmbedding};
                     let model = match model_id.as_str() {
                         "all-MiniLM-L6-v2" | "all-minilm-l6-v2" => EmbeddingModel::AllMiniLML6V2,
                         _ => EmbeddingModel::BGESmallENV15,
                     };
+                    // ort appends a CPU provider and silently falls back, so an
+                    // unavailable GPU degrades to CPU rather than failing the load.
                     let opts = InitOptions::new(model)
                         .with_cache_dir(cache_dir)
-                        .with_show_download_progress(false);
+                        .with_show_download_progress(false)
+                        .with_execution_providers(crate::accel::execution_providers(accel));
                     TextEmbedding::try_new(opts)
-                        .map(|e| Arc::new(Mutex::new(e)))
+                        .map(|e| {
+                            tracing::info!(
+                                accel = %accel, model = %model_id,
+                                "bundled embedder loaded"
+                            );
+                            Arc::new(Mutex::new(e))
+                        })
                         .map_err(|e| LlmError::Other(anyhow::anyhow!("load embedding model: {e}")))
                 })
                 .await
@@ -112,7 +133,9 @@ mod tests {
     #[ignore]
     async fn embeds_locally() {
         let dir = std::env::temp_dir().join("blumi-embed-test");
-        let client = LocalEmbeddingClient::new("bge-small-en-v1.5", dir).unwrap();
+        // detect() exercises the real GPU EP on capable builds; CPU otherwise.
+        let client =
+            LocalEmbeddingClient::new("bge-small-en-v1.5", dir, crate::accel::detect()).unwrap();
         assert_eq!(client.dim(), 384);
         let v = client
             .embed(&["hello world".to_string(), "rust ownership".to_string()])

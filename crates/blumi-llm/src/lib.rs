@@ -6,6 +6,7 @@
 //! [`build_embeddings_client`] builds the embeddings backend (a bundled local
 //! ONNX model, an OpenAI-compatible endpoint, or — later — a grid peer).
 
+pub mod accel;
 mod anthropic;
 mod embeddings_openai;
 mod gemini;
@@ -17,6 +18,7 @@ mod retry;
 #[cfg(feature = "local-embeddings")]
 mod embeddings_local;
 
+pub use accel::{detect as detect_accelerator, Accelerator};
 pub use anthropic::AnthropicClient;
 pub use embeddings_openai::OpenAiEmbeddingClient;
 pub use gemini::GeminiClient;
@@ -51,8 +53,24 @@ pub fn build_embeddings_client(
                 cfg.dim as usize,
             )))
         }
-        "local" => build_local_embeddings(&config.paths.models_dir, &cfg.model),
-        // "grid" (offload embedding to a peer) is wired in a later phase.
+        "local" => build_local_embeddings(
+            &config.paths.models_dir,
+            &cfg.model,
+            accel::embeddings_accelerator(&config.acceleration),
+        ),
+        // "grid" offloads embedding to a GPU peer. The peer-routed transport is a
+        // follow-up; until then it degrades to the local bundled embedder (which
+        // itself uses the GPU when one is present) rather than disabling memory.
+        "grid" => {
+            tracing::info!(
+                "embeddings backend 'grid': peer offload not yet wired; using the local embedder"
+            );
+            build_local_embeddings(
+                &config.paths.models_dir,
+                &cfg.model,
+                accel::embeddings_accelerator(&config.acceleration),
+            )
+        }
         other => {
             tracing::warn!("unknown embeddings backend '{other}'; embeddings disabled");
             None
@@ -64,8 +82,9 @@ pub fn build_embeddings_client(
 fn build_local_embeddings(
     cache_dir: &std::path::Path,
     model: &str,
+    accel: Accelerator,
 ) -> Option<Arc<dyn blumi_core::EmbeddingClient>> {
-    match LocalEmbeddingClient::new(model, cache_dir.to_path_buf()) {
+    match LocalEmbeddingClient::new(model, cache_dir.to_path_buf(), accel) {
         Ok(c) => Some(Arc::new(c)),
         Err(e) => {
             tracing::warn!("local embeddings unavailable: {e}");
@@ -78,6 +97,7 @@ fn build_local_embeddings(
 fn build_local_embeddings(
     _cache_dir: &std::path::Path,
     _model: &str,
+    _accel: Accelerator,
 ) -> Option<Arc<dyn blumi_core::EmbeddingClient>> {
     tracing::warn!(
         "embeddings backend 'local' requested but the `local-embeddings` feature was not \

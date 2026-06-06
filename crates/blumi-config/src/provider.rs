@@ -73,6 +73,18 @@ pub fn default_providers() -> BTreeMap<String, ProviderConfig> {
             "ollama".into(),
             P::openai_compat("http://localhost:11434/v1", None),
         ),
+        // Local GPU servers (OpenAI-compatible). Point `llm`/`brain.provider` or
+        // `embeddings.provider` here to run inference/embeddings on the GPU via an
+        // external server. `local-mlx`: an Apple MLX server (e.g. `mlx_lm.server`
+        // / mlx-embeddings); `local-cuda`: a CUDA server (vLLM / llama.cpp / TGI).
+        (
+            "local-mlx".into(),
+            P::openai_compat("http://localhost:8080/v1", None),
+        ),
+        (
+            "local-cuda".into(),
+            P::openai_compat("http://localhost:8000/v1", None),
+        ),
         // Hosted, OpenAI-compatible.
         (
             "openai".into(),

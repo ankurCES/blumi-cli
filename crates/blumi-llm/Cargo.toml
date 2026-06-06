@@ -32,11 +32,24 @@ tracing.workspace = true
 # binary enables it (zero-config offline embeddings).
 fastembed = { version = "4", optional = true }
 
+# Direct handle on ort, pinned to the EXACT version fastembed uses so Cargo
+# unifies them into a single ONNX Runtime build. We only need it to switch on GPU
+# execution providers (CoreML/CUDA) — fastembed already vendors the runtime
+# binary. Pulled in solely by the gpu-* features; default builds never touch it.
+ort = { version = "=2.0.0-rc.9", optional = true, default-features = false }
+
 # Bundled local embeddings ship by default (zero-config offline). A lean /
 # CI-constrained build can opt out with `--no-default-features`.
 [features]
 default = ["local-embeddings"]
 local-embeddings = ["dep:fastembed"]
+# Apple CoreML/Metal acceleration for the bundled embedder. ~Free on binary size
+# (the EP is compiled into the same downloaded ONNX Runtime); enabled by default
+# on Apple Silicon via the top-level `blumi` crate's target-gated dependency.
+gpu-coreml = ["local-embeddings", "dep:ort", "ort/coreml"]
+# NVIDIA CUDA acceleration — OPT-IN ONLY (large runtime; needs the CUDA toolkit
+# at build time and a matching driver at run time). Build: `cargo build --features gpu-cuda`.
+gpu-cuda = ["local-embeddings", "dep:ort", "ort/cuda"]
 
 [dev-dependencies]
 tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }

@@ -300,6 +300,26 @@ pub async fn run(config: BlumiConfig) -> anyhow::Result<()> {
         .map(|j| (j.name.clone(), j.schedule.clone()))
         .collect();
 
+    let accel_line = {
+        let acc = blumi_llm::detect_accelerator();
+        let eb = &config.embeddings;
+        let emb = if !eb.enabled {
+            "disabled".to_string()
+        } else if eb.backend == "local" || eb.backend == "grid" {
+            format!(
+                "bundled ONNX on {}",
+                blumi_llm::accel::embeddings_accelerator(&config.acceleration).as_str()
+            )
+        } else {
+            format!("{} ({})", eb.backend, eb.provider)
+        };
+        format!(
+            "accelerator: {} ({}) · embeddings: {emb}",
+            acc.as_str(),
+            acc.label()
+        )
+    };
+
     let cfg = blumi_tui::TuiConfig {
         model_name: config.llm.model.clone(),
         working_dir: config.paths.working_dir.display().to_string(),
@@ -320,6 +340,7 @@ pub async fn run(config: BlumiConfig) -> anyhow::Result<()> {
         auto_continue: config.llm.max_auto_continue,
         themes: blumi_tui::theme::load_user_themes(&config.paths.home.join("themes")),
         db_path: config.paths.db.clone(),
+        accel: accel_line,
     };
 
     let factory = Arc::new(TuiSessionFactory { config, store });

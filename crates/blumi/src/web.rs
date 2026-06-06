@@ -621,6 +621,10 @@ impl Management for WebManagement {
         }
     }
 
+    fn accel(&self) -> &'static str {
+        blumi_llm::detect_accelerator().as_str()
+    }
+
     fn restart(&self) -> serde_json::Value {
         let mgr = crate::serve::detect_manager();
         if mgr == crate::serve::ServiceManager::None {

@@ -565,6 +565,7 @@ dependencies = [
  "eventsource-stream",
  "fastembed",
  "futures",
+ "ort",
  "reqwest",
  "serde",
  "serde_json",

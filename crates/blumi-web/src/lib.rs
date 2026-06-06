@@ -340,6 +340,12 @@ pub trait Management: Send + Sync {
     fn restart(&self) -> serde_json::Value {
         serde_json::json!({ "ok": false, "mode": "unsupported" })
     }
+    /// This node's detected compute accelerator ("apple-coreml" | "cuda" | "cpu"),
+    /// surfaced in `/api/status` + grid metrics so the fleet can route GPU work.
+    /// Default "cpu"; the binary overrides it with real detection (`blumi-llm`).
+    fn accel(&self) -> &'static str {
+        "cpu"
+    }
 }
 
 /// Autonomous-loop state, surfaced over `/api/loop/status`.
