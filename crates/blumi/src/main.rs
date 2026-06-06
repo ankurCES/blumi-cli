@@ -6,6 +6,7 @@ mod discovery;
 mod engine;
 mod gateway;
 mod grid;
+mod knowledge;
 mod loop_run;
 mod mcp;
 mod onboarding;
@@ -119,6 +120,11 @@ enum Commands {
         #[command(subcommand)]
         action: McpCmd,
     },
+    /// Code knowledge base: index repos for code_search / code_retrieve.
+    Knowledge {
+        #[command(subcommand)]
+        action: KnowledgeCmd,
+    },
     /// Autonomously work the task board: select → run → advance, repeat.
     Loop {
         /// Stop after at most N iterations.
@@ -175,6 +181,27 @@ enum SkillsCmd {
     List,
     /// Re-materialize the bundled skills into ~/.blumi/skills (restore/refresh).
     Sync,
+}
+
+#[derive(Subcommand)]
+enum KnowledgeCmd {
+    /// Index a file or directory into the code knowledge base.
+    Ingest {
+        /// Path to a repo/dir/file to index (default: current directory).
+        #[arg(default_value = ".")]
+        path: String,
+    },
+    /// List indexed sources (with file + symbol counts).
+    List,
+    /// Search the indexed code (hybrid embeddings + full-text).
+    Search {
+        /// The query (natural language or keywords).
+        query: Vec<String>,
+    },
+    /// Show knowledge-base totals (files / symbols / vectors).
+    Status,
+    /// Remove an indexed source by its label (see `list`).
+    Remove { source: String },
 }
 
 #[derive(Subcommand)]
@@ -496,6 +523,13 @@ async fn main() -> anyhow::Result<()> {
             }
         },
         Some(Commands::Mcp { action }) => mcp::run(action, &config),
+        Some(Commands::Knowledge { action }) => match action {
+            KnowledgeCmd::Ingest { path } => knowledge::ingest(&config, path).await,
+            KnowledgeCmd::List => knowledge::list(&config).await,
+            KnowledgeCmd::Search { query } => knowledge::search(&config, query.join(" ")).await,
+            KnowledgeCmd::Status => knowledge::status(&config).await,
+            KnowledgeCmd::Remove { source } => knowledge::remove(&config, source).await,
+        },
         Some(Commands::Loop {
             max,
             budget,

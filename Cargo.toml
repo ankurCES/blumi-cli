@@ -20,6 +20,7 @@ blumi-exec = { path = "crates/blumi-exec" }
 blumi-mcp = { path = "crates/blumi-mcp" }
 blumi-lsp = { path = "crates/blumi-lsp" }
 blumi-persist = { path = "crates/blumi-persist" }
+blumi-knowledge = { path = "crates/blumi-knowledge" }
 blumi-skills = { path = "crates/blumi-skills" }
 blumi-cron = { path = "crates/blumi-cron" }
 blumi-playbook = { path = "crates/blumi-playbook" }

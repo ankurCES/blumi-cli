@@ -19,6 +19,8 @@ pub struct Paths {
     /// Cache for bundled/downloaded models (e.g. the local embedder),
     /// `<home>/models`.
     pub models_dir: PathBuf,
+    /// Code knowledge base, `<home>/knowledge.db` (wipeable independently).
+    pub knowledge_db: PathBuf,
     /// The project / working directory the agent operates in.
     pub working_dir: PathBuf,
 }
@@ -37,6 +39,7 @@ impl Paths {
             memory_dir: home.join("memory"),
             sessions: home.join("sessions"),
             models_dir: home.join("models"),
+            knowledge_db: home.join("knowledge.db"),
             working_dir: working_dir.as_ref().to_path_buf(),
             home,
         }

@@ -176,6 +176,29 @@ pub async fn build_session(
         registry.register(Arc::new(blumi_core::Typed(tool)));
     }
 
+    // Code knowledge base (native-lite): code_search + code_retrieve over an
+    // indexed repo (knowledge.db). Shares the process-global embeddings model;
+    // FTS5 fallback when embeddings are off. Skipped if it can't open.
+    if config.knowledge.enabled {
+        match blumi_knowledge::KnowledgeStore::open(
+            &config.paths.knowledge_db,
+            crate::engine::shared_embedder(config),
+        )
+        .await
+        {
+            Ok(ks) => {
+                let ks = Arc::new(ks);
+                registry.register(Arc::new(blumi_core::Typed(blumi_tools::CodeSearch::new(
+                    ks.clone(),
+                ))));
+                registry.register(Arc::new(blumi_core::Typed(blumi_tools::CodeRetrieve::new(
+                    ks,
+                ))));
+            }
+            Err(e) => tracing::warn!("code knowledge base unavailable: {e}"),
+        }
+    }
+
     // Code intelligence: register the `Lsp` tool if any language servers are
     // configured (language-agnostic, keyed by file extension).
     if !config.lsp_servers.is_empty() {

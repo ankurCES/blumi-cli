@@ -279,6 +279,30 @@ impl Default for MemoryConfig {
     }
 }
 
+/// Native-lite code knowledge base. When enabled, `blumi knowledge ingest` and
+/// the `code_search` / `code_retrieve` tools index repos into `knowledge.db`
+/// (FTS5 + embeddings when available). Disable to drop the code-KB tools.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct KnowledgeConfig {
+    /// Master switch for the code-KB tools + CLI.
+    pub enabled: bool,
+    /// Skip files larger than this (KiB) during ingest. 0 = no cap.
+    pub max_file_kb: u64,
+    /// Extra path substrings to exclude (beyond .gitignore + default noise dirs).
+    pub exclude: Vec<String>,
+}
+
+impl Default for KnowledgeConfig {
+    fn default() -> Self {
+        KnowledgeConfig {
+            enabled: true,
+            max_file_kb: 256,
+            exclude: Vec::new(),
+        }
+    }
+}
+
 /// Project-workspace discovery for the TUI's left sidebar.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(default)]
@@ -623,6 +647,9 @@ pub struct BlumiConfig {
     /// Semantic long-term memory (vector Store + RAG + SEDM governance).
     #[serde(default)]
     pub memory: MemoryConfig,
+    /// Native-lite code knowledge base (code_search / code_retrieve + CLI).
+    #[serde(default)]
+    pub knowledge: KnowledgeConfig,
     /// Project-workspace discovery for the TUI sidebar.
     #[serde(default)]
     pub workspaces: WorkspaceConfig,
@@ -655,6 +682,7 @@ impl Default for BlumiConfig {
             grid: GridConfig::default(),
             embeddings: EmbeddingConfig::default(),
             memory: MemoryConfig::default(),
+            knowledge: KnowledgeConfig::default(),
             workspaces: WorkspaceConfig::default(),
             git: GitConfig::default(),
             paths: Paths::default(),

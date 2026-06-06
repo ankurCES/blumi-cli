@@ -4,6 +4,8 @@
 //! become a `Tool`. [`register_builtin_tools`] installs the default set into a
 //! registry; the generic execution pipeline lives in `blumi-core`.
 
+mod code_retrieve;
+mod code_search;
 mod delegate;
 mod dir;
 mod files;
@@ -14,6 +16,8 @@ mod session_search;
 mod shell;
 mod todo;
 
+pub use code_retrieve::CodeRetrieve;
+pub use code_search::CodeSearch;
 pub use delegate::Delegate;
 pub use dir::ListDirectory;
 pub use files::{FileEdit, FileRead, FileWrite};

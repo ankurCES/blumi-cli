@@ -1,6 +1,6 @@
 [package]
-name = "blumi-tools"
-description = "Built-in tools for the blumi agent."
+name = "blumi-knowledge"
+description = "Native-lite code understanding: symbol extraction + hybrid FTS5/vector code search."
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -8,25 +8,19 @@ license.workspace = true
 
 [dependencies]
 blumi-core.workspace = true
-blumi-protocol.workspace = true
-blumi-persist.workspace = true
-blumi-knowledge.workspace = true
 
+sqlx = { workspace = true, features = ["sqlite"] }
 tokio = { workspace = true }
-tokio-util.workspace = true
-async-trait.workspace = true
-
 serde.workspace = true
 serde_json.workspace = true
-schemars.workspace = true
-
+time.workspace = true
 anyhow.workspace = true
+thiserror.workspace = true
 tracing.workspace = true
 regex.workspace = true
-glob.workspace = true
-similar.workspace = true
+sha2.workspace = true
+ignore = "0.4"
 
 [dev-dependencies]
 tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
-blumi-exec.workspace = true
 tempfile = "3"
