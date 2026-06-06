@@ -52,6 +52,15 @@ yours sits idle. → jump to **[Grid (distributed)](#grid-distributed)**.
   and watch every machine answer (right). No model tool-calling required.</em>
 </p>
 
+### 🧠 Private memory that compounds — and code it understands
+
+blumi remembers across sessions with a **bundled local embedding model** (no API, nothing leaves
+your machines): each turn it recalls what's relevant and folds it into context. With **SEDM**
+governance those memories are deduped on write, utility-scored, consolidated, and **diffused across
+the grid** — what one machine learns, the others pick up — while your private `user` notes never
+leave the node. It also indexes your repos into a local **code knowledge base**, so the agent can
+`code_search` *where* something lives before it edits. → **[Memory and code intelligence](#memory-and-code-intelligence)**.
+
 ---
 
 # Part 1 — blumi CLI
@@ -199,18 +208,65 @@ multicast is unavailable. Restart each gateway after editing —
   <em>The same job executing live on two peers — macOS / Apple Silicon (left) and Linux / x86_64 (right).</em>
 </p>
 
+## Memory and code intelligence
+
+Long-running, distributed agentic work needs memory that survives crashes, learns over time, and
+travels across machines — plus a way to actually understand a codebase. blumi ships all of it
+**local-first**: a bundled embedding model means **no API key, and nothing leaves your machines**.
+
+**Durable execution.** Every tool step in a turn is checkpointed to SQLite, so a crash or a gateway
+restart **resumes mid-turn** instead of replaying it — the backbone for long autonomous runs.
+
+**Semantic long-term memory (RAG).** A vector store over the bundled local model (`bge-small`, 384‑dim)
+recalls the memories relevant to each request and injects them as background context — cache-safe, so
+the cached system prompt stays byte-identical. It degrades to keyword (FTS5) search when embeddings are
+off. The agent reads/writes it with the `memory` tool (`add` / `query`).
+
+**SEDM — self-evolving, distributed memory** (inspired by the [SEDM paper](https://arxiv.org/abs/2509.09498)):
+
+- **write-admission** — a near-duplicate write *merges* (and bumps utility) instead of piling up;
+- **utility + consolidation/eviction** — memories that get used rise; near-dupe clusters fold into the
+  best member; the weakest are pruned past a per-namespace cap;
+- **cross-peer diffusion** — high-value, *non-personal* memories **spread across the grid**: what one
+  machine learns, the others pick up (re-admitted through each peer's own dedup gate and origin-tagged,
+  so they never loop). Your private `user` namespace **never leaves the node**.
+
+**Native code knowledge base.** Index a repo into a local `knowledge.db` and search it by meaning or
+keyword (hybrid vector + FTS5), with gitignore-aware, diff-aware (re-)indexing:
+
+```bash
+blumi knowledge ingest ~/code/my-repo      # index incrementally (only changed files)
+blumi knowledge search "where is auth handled"
+blumi knowledge status                      # files · symbols · vectors
+```
+
+The agent gets `code_search` / `code_retrieve` to locate code before editing; from the phone, the
+blugo **Code** tab indexes a repo and searches it with file:line + snippet results.
+
+Everything is **on by default** (first use downloads the ~130 MB model once, then runs fully offline);
+turn any of it off in `settings.json`:
+
+```json
+"embeddings": { "enabled": true, "backend": "local", "model": "bge-small-en-v1.5" },
+"memory":     { "enabled": true, "diffuse": true, "dedup_threshold": 0.92 },
+"knowledge":  { "enabled": true, "max_file_kb": 256 }
+```
+
+Full guide: **[Memory & Knowledge](https://github.com/ankurCES/blumi-cli/wiki/Memory-and-Knowledge)**.
+
 ## Workspace layout
 
 ```
 crates/
   blumi-protocol   wire contract: Command / Event / Message / ToolResult (pure serde)
   blumi-core       the brain: traits + session actor (agent loop) + context mgmt + permissions
-  blumi-llm        provider clients (OpenAI-compatible, Anthropic, Gemini, …)
-  blumi-tools      built-in tools + JSON-Schema validation + execution pipeline
+  blumi-llm        provider clients (OpenAI-compatible, Anthropic, Gemini, …) + local embeddings
+  blumi-tools      built-in tools (incl. code_search/code_retrieve) + JSON-Schema + pipeline
   blumi-exec       execution backends (Local; Docker/SSH feature-gated)
   blumi-mcp        MCP client (rmcp) + tool adapters
   blumi-lsp        generic LSP client (feature-gated)
-  blumi-persist    SQLite (sqlx): sessions, messages, checkpoints, FTS5 search
+  blumi-persist    SQLite (sqlx): sessions, messages, checkpoints, semantic memory + FTS5
+  blumi-knowledge  code knowledge base: symbol extraction + hybrid vector/FTS5 search
   blumi-skills     SKILL.md skills + dual memory (MEMORY/USER) + self-management tools
   blumi-cron       scheduler → headless sessions → delivery
   blumi-gateway    messaging gateways + voice (feature-gated)
