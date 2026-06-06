@@ -129,6 +129,9 @@ pub fn render(model: &mut Model, f: &mut Frame) {
     if model.heal_view.is_some() {
         render_heal(model, f, area, &theme);
     }
+    if model.fs_browser.is_some() {
+        render_fs_browser(model, f, area, &theme);
+    }
     if model.dash_modal {
         render_dashboard_modal(model, f, area, &theme);
     }
@@ -161,6 +164,8 @@ pub fn render(model: &mut Model, f: &mut Frame) {
         (8, centered_rect(64, 60, area))
     } else if model.heal_view.is_some() {
         (11, centered_rect(70, 64, area))
+    } else if model.fs_browser.is_some() {
+        (12, centered_rect(70, 70, area))
     } else if model.dash_modal {
         (7, centered_rect(72, 84, area))
     } else if model.help_modal {
@@ -1209,6 +1214,67 @@ fn render_heal(model: &Model, f: &mut Frame, area: Rect, theme: &Theme) {
         lines.push(Line::from(Span::styled(truncate(raw, width), style)));
     }
     f.render_widget(Paragraph::new(lines), inner);
+}
+
+/// The `/open-workspace` file browser: the current directory + its sub-folders,
+/// navigable with the arrows; space/enter open the highlighted folder as a workspace.
+fn render_fs_browser(model: &Model, f: &mut Frame, area: Rect, theme: &Theme) {
+    let Some(b) = &model.fs_browser else {
+        return;
+    };
+    let popup = centered_rect(70, 70, area);
+    f.render_widget(Clear, popup);
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .border_type(BorderType::Rounded)
+        .border_style(Style::default().fg(theme.primary))
+        .title(Span::styled(
+            " open workspace — ↑↓ move · → enter · ← up · space/↵ open · esc ",
+            theme.bold_primary(),
+        ));
+    let inner = block.inner(popup);
+    f.render_widget(block, popup);
+
+    let [head, list_area] =
+        Layout::vertical([Constraint::Length(1), Constraint::Min(0)]).areas(inner);
+    let width = inner.width.saturating_sub(1) as usize;
+    f.render_widget(
+        Paragraph::new(Line::from(Span::styled(
+            truncate(&b.cwd.display().to_string(), width),
+            theme.accent(),
+        ))),
+        head,
+    );
+
+    let height = list_area.height.max(1) as usize;
+    let scroll = b.sel.saturating_sub(height.saturating_sub(1));
+    let mut lines: Vec<Line> = Vec::new();
+    if b.entries.is_empty() {
+        lines.push(Line::from(Span::styled(
+            "(no sub-folders here — ← to go up)",
+            theme.body(),
+        )));
+    } else {
+        for (i, name) in b.entries.iter().enumerate().skip(scroll).take(height) {
+            let selected = i == b.sel;
+            let marker = if selected { "▶ " } else { "  " };
+            let repo = if b.cwd.join(name).join(".git").is_dir() {
+                " ◳"
+            } else {
+                ""
+            };
+            let style = if selected {
+                theme.bold_primary()
+            } else {
+                theme.body()
+            };
+            lines.push(Line::from(Span::styled(
+                truncate(&format!("{marker}{name}{repo}"), width),
+                style,
+            )));
+        }
+    }
+    f.render_widget(Paragraph::new(lines), list_area);
 }
 
 /// The `/usage` analytics overlay.

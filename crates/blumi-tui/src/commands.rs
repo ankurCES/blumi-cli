@@ -85,6 +85,10 @@ pub const COMMANDS: &[CommandDef] = &[
         desc: "switch session (ctrl+s)",
     },
     CommandDef {
+        name: "/open-workspace",
+        desc: "browse folders to open a workspace (↑↓ move · → enter · space/↵ open)",
+    },
+    CommandDef {
         name: "/export",
         desc: "save transcript to a file",
     },
@@ -311,6 +315,7 @@ pub async fn run(model: &mut Model, session: &SessionHandle, line: &str) {
                 "self-healing summary needs the local DB".into(),
             )),
         },
+        "/open-workspace" => model.open_fs_browser(),
         "/loop" => {
             if arg.eq_ignore_ascii_case("review") {
                 model.loop_review = !model.loop_review;

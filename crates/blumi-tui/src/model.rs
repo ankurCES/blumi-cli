@@ -59,6 +59,85 @@ pub struct Workspace {
     pub pinned: bool,
 }
 
+/// File-browser popup state for `/open-workspace`: navigate directories and open
+/// one (or several) as workspaces. Lists only sub-directories of `cwd`.
+#[derive(Debug, Clone)]
+pub struct FsBrowser {
+    /// Directory currently being listed.
+    pub cwd: PathBuf,
+    /// Sub-directory names of `cwd` (full path = `cwd.join(name)`).
+    pub entries: Vec<String>,
+    /// Highlighted entry index.
+    pub sel: usize,
+}
+
+impl FsBrowser {
+    /// Open the browser at `start` (falls back to `/` if unreadable).
+    pub fn open(start: PathBuf) -> Self {
+        let mut b = FsBrowser {
+            cwd: start,
+            entries: Vec::new(),
+            sel: 0,
+        };
+        b.reload();
+        b
+    }
+
+    /// Refresh `entries` = sorted, non-hidden sub-directories of `cwd`.
+    pub fn reload(&mut self) {
+        let mut dirs: Vec<String> = std::fs::read_dir(&self.cwd)
+            .map(|rd| {
+                rd.flatten()
+                    .filter(|e| e.path().is_dir())
+                    .filter_map(|e| e.file_name().into_string().ok())
+                    .filter(|n| !n.starts_with('.')) // hide dotdirs (.git, .cache, …)
+                    .collect()
+            })
+            .unwrap_or_default();
+        dirs.sort_by_key(|s| s.to_lowercase());
+        self.entries = dirs;
+        self.sel = 0;
+    }
+
+    /// Full path of the highlighted entry, if any.
+    pub fn selected_path(&self) -> Option<PathBuf> {
+        self.entries.get(self.sel).map(|n| self.cwd.join(n))
+    }
+
+    /// Move the cursor by `delta`, wrapping.
+    pub fn move_sel(&mut self, delta: isize) {
+        let n = self.entries.len();
+        if n == 0 {
+            return;
+        }
+        self.sel = (self.sel as isize + delta).rem_euclid(n as isize) as usize;
+    }
+
+    /// Descend into the highlighted directory.
+    pub fn enter_dir(&mut self) {
+        if let Some(p) = self.selected_path() {
+            if p.is_dir() {
+                self.cwd = p;
+                self.reload();
+            }
+        }
+    }
+
+    /// Go up to the parent directory, re-highlighting the folder we came from.
+    pub fn up_dir(&mut self) {
+        let prev = self.cwd.clone();
+        if let Some(parent) = self.cwd.parent() {
+            self.cwd = parent.to_path_buf();
+            self.reload();
+            if let Some(name) = prev.file_name().and_then(|s| s.to_str()) {
+                if let Some(i) = self.entries.iter().position(|e| e == name) {
+                    self.sel = i;
+                }
+            }
+        }
+    }
+}
+
 /// Lifecycle status of a delegated team member.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AgentStatus {
@@ -380,6 +459,8 @@ pub struct Model {
     pub grid_view: Option<String>,
     /// Rendered self-healing summary when `/heal` is open (recoveries/evolutions).
     pub heal_view: Option<String>,
+    /// File-browser popup state when `/open-workspace` is open.
+    pub fs_browser: Option<FsBrowser>,
     /// Path to the persistent task board (`<project>/.blumi/tasks.json`).
     pub tasks_path: PathBuf,
     /// Autonomous loop is running (drives the task board turn by turn).
@@ -508,6 +589,7 @@ impl Model {
             board_view: None,
             grid_view: None,
             heal_view: None,
+            fs_browser: None,
             remotes: Vec::new(),
             tabs: vec![("local".to_string(), false)],
             active_tab: 0,
@@ -754,6 +836,38 @@ impl Model {
     /// Request switching to an already-open tab by index.
     pub fn request_tab(&mut self, index: usize) {
         self.session_request = Some(SessionRequest::SwitchTab(index));
+    }
+
+    /// Open the `/open-workspace` file browser, starting at the parent of the
+    /// current working directory (so sibling projects show up first).
+    pub fn open_fs_browser(&mut self) {
+        let here = PathBuf::from(&self.working_dir);
+        let start = here.parent().map(|p| p.to_path_buf()).unwrap_or(here);
+        self.fs_browser = Some(FsBrowser::open(start));
+    }
+
+    /// Add a directory to the workspace pane (deduped) so it shows immediately.
+    pub fn add_workspace(&mut self, path: &str) {
+        let path = path.trim_end_matches('/').to_string();
+        if path.is_empty() || self.workspaces.iter().any(|w| w.path == path) {
+            return;
+        }
+        let name = std::path::Path::new(&path)
+            .file_name()
+            .map(|s| s.to_string_lossy().to_string())
+            .unwrap_or_else(|| path.clone());
+        self.workspaces.push(Workspace {
+            name,
+            path,
+            pinned: false,
+        });
+    }
+
+    /// Open `path` as a workspace: show it in the pane now + ask the app loop to
+    /// open/switch to it (which also persists it to recents).
+    pub fn open_workspace_path(&mut self, path: &str) {
+        self.add_workspace(path);
+        self.session_request = Some(SessionRequest::OpenWorkspace(path.to_string()));
     }
 
     /// Switch to the next open tab (wraps). No-op if only the local tab is open.
@@ -1247,5 +1361,48 @@ mod tests {
             Some(("openai".to_string(), Some("sk".to_string())))
         );
         assert!(m.take_provider_request().is_none());
+    }
+
+    #[test]
+    fn fs_browser_lists_descends_and_ascends() {
+        use std::fs;
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path();
+        fs::create_dir(root.join("beta")).unwrap();
+        fs::create_dir(root.join("alpha")).unwrap();
+        fs::create_dir(root.join(".hidden")).unwrap();
+        fs::create_dir(root.join("alpha").join("sub")).unwrap();
+
+        let mut b = FsBrowser::open(root.to_path_buf());
+        // sorted, dotdirs hidden
+        assert_eq!(b.entries, vec!["alpha".to_string(), "beta".to_string()]);
+        assert_eq!(b.selected_path(), Some(root.join("alpha")));
+
+        // wrap-around movement
+        b.move_sel(-1);
+        assert_eq!(b.selected_path(), Some(root.join("beta")));
+
+        // descend into alpha
+        b.sel = 0;
+        b.enter_dir();
+        assert_eq!(b.cwd, root.join("alpha"));
+        assert_eq!(b.entries, vec!["sub".to_string()]);
+
+        // ascend → back to root, re-highlighting the folder we came from
+        b.up_dir();
+        assert_eq!(b.cwd, root.to_path_buf());
+        assert_eq!(b.selected_path(), Some(root.join("alpha")));
+    }
+
+    #[test]
+    fn add_workspace_dedups_and_appends_to_pane() {
+        let mut m = Model::new("m".into(), "/tmp/proj".into());
+        let before = m.workspaces.len();
+        m.add_workspace("/a/b/foo");
+        m.add_workspace("/a/b/foo/"); // trailing slash → same path
+        m.add_workspace("/a/b/bar");
+        assert_eq!(m.workspaces.len(), before + 2);
+        let foo = m.workspaces.iter().find(|w| w.path == "/a/b/foo").unwrap();
+        assert_eq!(foo.name, "foo");
     }
 }

@@ -132,6 +132,49 @@ async fn handle_term(model: &mut Model, ev: TermEvent, session: &SessionHandle) 
                 return;
             }
 
+            // /open-workspace file browser: ↑/↓ move, → descend, ← (or backspace)
+            // up a level, space opens the folder as a workspace (keeps browsing),
+            // enter opens + closes, esc cancels.
+            if model.fs_browser.is_some() {
+                match key.code {
+                    KeyCode::Esc | KeyCode::Char('q') => model.fs_browser = None,
+                    KeyCode::Up | KeyCode::Char('k') => {
+                        if let Some(b) = &mut model.fs_browser {
+                            b.move_sel(-1);
+                        }
+                    }
+                    KeyCode::Down | KeyCode::Char('j') => {
+                        if let Some(b) = &mut model.fs_browser {
+                            b.move_sel(1);
+                        }
+                    }
+                    KeyCode::Right | KeyCode::Char('l') => {
+                        if let Some(b) = &mut model.fs_browser {
+                            b.enter_dir();
+                        }
+                    }
+                    KeyCode::Left | KeyCode::Char('h') | KeyCode::Backspace => {
+                        if let Some(b) = &mut model.fs_browser {
+                            b.up_dir();
+                        }
+                    }
+                    KeyCode::Char(' ') => {
+                        if let Some(p) = model.fs_browser.as_ref().and_then(|b| b.selected_path()) {
+                            model.open_workspace_path(&p.display().to_string());
+                        }
+                    }
+                    KeyCode::Enter => {
+                        if let Some(p) = model.fs_browser.as_ref().and_then(|b| b.selected_path()) {
+                            model.open_workspace_path(&p.display().to_string());
+                        }
+                        model.fs_browser = None;
+                    }
+                    _ => {}
+                }
+                model.mark_dirty();
+                return;
+            }
+
             // The /plans browser: ↑/↓ (or j/k) select a plan, pgup/pgdn scroll
             // its content, home/end jump to ends, esc/q closes.
             if model.plans_view {

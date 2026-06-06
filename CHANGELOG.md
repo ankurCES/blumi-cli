@@ -10,6 +10,12 @@ The Rust workspace and the blugo app share the version number.
 
 ### Added
 
+- **TUI `/open-workspace`** — a file-browser popup to open any folder as a
+  workspace: `↑/↓` move, `→` enter a folder, `←`/backspace go up, **space** opens
+  the highlighted folder as a workspace (keep browsing), **enter** opens + closes,
+  `esc` cancels. Git repos are flagged; opened folders appear in the left
+  workspace pane immediately and are persisted to recents.
+
 - **Grid-embed offload transport** — `embeddings.backend = "grid"` now routes
   embedding to the strongest GPU peer via a `GridEmbed` hook + secret-authed
   `POST /api/grid/embed`, with a TTL-cached peer choice and a local fallback
