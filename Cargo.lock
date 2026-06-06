@@ -613,6 +613,7 @@ dependencies = [
  "async-trait",
  "blumi-core",
  "blumi-protocol",
+ "serde",
  "serde_json",
  "sqlx",
  "tempfile",

@@ -504,6 +504,8 @@ impl SemanticMemoryImpl {
             merged += self.consolidate(&ns).await;
             evicted += self.evict(&ns, cap).await;
         }
+        // Rebuild the similarity graph (enrichment for graph recall + the view).
+        let _ = self.build_memory_graph(0.55, 6).await;
         (merged, evicted)
     }
 
@@ -534,13 +536,215 @@ impl SemanticMemoryImpl {
             })
             .collect()
     }
+
+    // --- Memory graph (similarity edges over SEDM) ----------------------
+
+    /// Rebuild the memory similarity graph: link each memory to its top-`top_k`
+    /// neighbors with cosine ≥ `threshold`. Pure enrichment — never touches the
+    /// memories themselves. Powers graph-augmented recall + the graph view.
+    pub async fn build_memory_graph(&self, threshold: f32, top_k: usize) -> usize {
+        let vecs = self.active_vectors(None).await;
+        let n = vecs.len();
+        let mut edges: std::collections::HashMap<(i64, i64), f32> =
+            std::collections::HashMap::new();
+        for i in 0..n {
+            let (id_i, _, _, vi) = &vecs[i];
+            let mut sims: Vec<(i64, f32)> = Vec::new();
+            for (j, (id_j, _, _, vj)) in vecs.iter().enumerate() {
+                if i == j {
+                    continue;
+                }
+                let s = dot(vi, vj);
+                if s >= threshold {
+                    sims.push((*id_j, s));
+                }
+            }
+            sims.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+            sims.truncate(top_k);
+            for (id_j, s) in sims {
+                let (a, b) = if *id_i < id_j {
+                    (*id_i, id_j)
+                } else {
+                    (id_j, *id_i)
+                };
+                let e = edges.entry((a, b)).or_insert(0.0);
+                if s > *e {
+                    *e = s;
+                }
+            }
+        }
+        let Ok(mut tx) = self.pool().begin().await else {
+            return 0;
+        };
+        let _ = sqlx::query("DELETE FROM memory_edges")
+            .execute(&mut *tx)
+            .await;
+        for ((a, b), w) in &edges {
+            let _ = sqlx::query(
+                "INSERT OR REPLACE INTO memory_edges (src, dst, weight) VALUES (?, ?, ?)",
+            )
+            .bind(a)
+            .bind(b)
+            .bind(*w as f64)
+            .execute(&mut *tx)
+            .await;
+        }
+        let _ = tx.commit().await;
+        edges.len()
+    }
+
+    /// Neighbor memory ids (+ weight) of any of `ids`, strongest first.
+    async fn neighbor_ids(&self, ids: &[i64], limit: usize) -> Vec<(i64, f32)> {
+        if ids.is_empty() {
+            return vec![];
+        }
+        // ids are i64 from our own DB → safe to inline.
+        let inlist = ids
+            .iter()
+            .map(|i| i.to_string())
+            .collect::<Vec<_>>()
+            .join(",");
+        let q = format!(
+            "SELECT nid, weight FROM (
+                 SELECT dst AS nid, weight FROM memory_edges WHERE src IN ({inlist})
+                 UNION
+                 SELECT src AS nid, weight FROM memory_edges WHERE dst IN ({inlist})
+             ) ORDER BY weight DESC LIMIT {limit}"
+        );
+        let rows = sqlx::query(&q)
+            .fetch_all(self.pool())
+            .await
+            .unwrap_or_default();
+        let seed: std::collections::HashSet<i64> = ids.iter().copied().collect();
+        rows.iter()
+            .map(|r| (r.get::<i64, _>("nid"), r.get::<f64, _>("weight") as f32))
+            .filter(|(id, _)| !seed.contains(id))
+            .collect()
+    }
+
+    async fn node_info(&self, id: i64) -> Option<(String, String)> {
+        sqlx::query("SELECT namespace AS ns, text FROM memories WHERE id = ? AND status = 'active'")
+            .bind(id)
+            .fetch_optional(self.pool())
+            .await
+            .ok()
+            .flatten()
+            .map(|r| (r.get::<String, _>("ns"), r.get::<String, _>("text")))
+    }
+
+    /// A query-centred subgraph for the memory-graph view: the top-`k` memories
+    /// for `query` (seeds) + their neighbors, plus the edges among them.
+    pub async fn memory_graph(&self, query: &str, k: usize) -> MemoryGraph {
+        let seeds = self.search_inner(None, query, k, 0.0).await;
+        if seeds.is_empty() {
+            return MemoryGraph::default();
+        }
+        let seed_ids: Vec<i64> = seeds.iter().map(|s| s.id).collect();
+        let nbrs = self.neighbor_ids(&seed_ids, k * 3).await;
+
+        let mut nodes: Vec<MemNode> = seeds
+            .iter()
+            .map(|s| MemNode {
+                id: s.id,
+                namespace: s.namespace.clone(),
+                text: s.text.clone(),
+                score: s.score,
+                seed: true,
+            })
+            .collect();
+        let mut have: std::collections::HashSet<i64> = seed_ids.iter().copied().collect();
+        for (nid, w) in &nbrs {
+            if !have.insert(*nid) {
+                continue;
+            }
+            if let Some((ns, text)) = self.node_info(*nid).await {
+                nodes.push(MemNode {
+                    id: *nid,
+                    namespace: ns,
+                    text,
+                    score: *w,
+                    seed: false,
+                });
+            }
+        }
+        let inlist = have
+            .iter()
+            .map(|i| i.to_string())
+            .collect::<Vec<_>>()
+            .join(",");
+        let eq = format!(
+            "SELECT src, dst, weight FROM memory_edges
+             WHERE src IN ({inlist}) AND dst IN ({inlist})"
+        );
+        let edges = sqlx::query(&eq)
+            .fetch_all(self.pool())
+            .await
+            .unwrap_or_default()
+            .iter()
+            .map(|r| MemEdge {
+                src: r.get("src"),
+                dst: r.get("dst"),
+                weight: r.get::<f64, _>("weight") as f32,
+            })
+            .collect();
+        MemoryGraph { nodes, edges }
+    }
+}
+
+/// A node in a memory-graph view (a memory; `seed` = matched the query directly).
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct MemNode {
+    pub id: i64,
+    pub namespace: String,
+    pub text: String,
+    pub score: f32,
+    pub seed: bool,
+}
+
+/// A weighted similarity edge between two memories.
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct MemEdge {
+    pub src: i64,
+    pub dst: i64,
+    pub weight: f32,
+}
+
+/// A query-centred memory subgraph (graph-augmented recall + the D3 view).
+#[derive(Debug, Clone, Default, serde::Serialize)]
+pub struct MemoryGraph {
+    pub nodes: Vec<MemNode>,
+    pub edges: Vec<MemEdge>,
 }
 
 #[async_trait]
 impl SemanticMemory for SemanticMemoryImpl {
     async fn recall(&self, query: &str, k: usize) -> Vec<RecalledMemory> {
-        self.search_inner(None, query, k, self.params.recall_floor)
-            .await
+        let mut hits = self
+            .search_inner(None, query, k, self.params.recall_floor)
+            .await;
+        // Graph-augmented: pull in strongly-connected neighbors of the top hits
+        // for richer, coherent context. Bounded + strong-links-only, and a no-op
+        // when the memory graph hasn't been built yet (so recall never regresses).
+        if !hits.is_empty() {
+            let seed_ids: Vec<i64> = hits.iter().map(|h| h.id).collect();
+            let mut have: std::collections::HashSet<i64> = seed_ids.iter().copied().collect();
+            for (nid, w) in self.neighbor_ids(&seed_ids, k).await {
+                if w < 0.6 || hits.len() >= k * 2 {
+                    break; // strongest-first → stop at the first weak/over-cap one
+                }
+                if have.insert(nid) {
+                    if let Some((ns, text)) = self.node_info(nid).await {
+                        hits.push(RecalledMemory {
+                            id: nid,
+                            namespace: ns,
+                            text,
+                            score: w,
+                        });
+                    }
+                }
+            }
+        }
+        hits
     }
 
     async fn note_used(&self, ids: &[i64]) {
@@ -665,6 +869,33 @@ mod tests {
             "expected the rust memory first, got {:?}",
             hits[0].text
         );
+    }
+
+    #[tokio::test]
+    async fn memory_graph_links_similar() {
+        let mem = store_with(Some(Arc::new(MockEmbedder))).await;
+        mem.remember("agent", "note", "rust ownership")
+            .await
+            .unwrap();
+        let bridge = mem
+            .remember("agent", "note", "rust and python together")
+            .await
+            .unwrap();
+        mem.remember("agent", "note", "python lists").await.unwrap();
+        mem.remember("agent", "note", "cooking a cake")
+            .await
+            .unwrap();
+
+        // Distinct-but-similar memories link; the isolated cake doesn't.
+        let edges = mem.build_memory_graph(0.55, 6).await;
+        assert!(edges >= 2, "expected similarity edges, got {edges}");
+        let nbrs = mem.neighbor_ids(&[bridge], 10).await;
+        assert!(nbrs.len() >= 2, "bridge should connect ≥2 memories");
+
+        // A query subgraph has seed nodes.
+        let g = mem.memory_graph("rust", 3).await;
+        assert!(!g.nodes.is_empty(), "graph has nodes");
+        assert!(g.nodes.iter().any(|n| n.seed), "has a seed node");
     }
 
     #[tokio::test]
