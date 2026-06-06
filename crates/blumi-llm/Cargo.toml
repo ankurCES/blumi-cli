@@ -38,10 +38,14 @@ fastembed = { version = "4", optional = true }
 # binary. Pulled in solely by the gpu-* features; default builds never touch it.
 ort = { version = "=2.0.0-rc.9", optional = true, default-features = false }
 
-# Bundled local embeddings ship by default (zero-config offline). A lean /
-# CI-constrained build can opt out with `--no-default-features`.
+# The bundled ONNX embedder (fastembed + ort) is a heavy native build that links
+# a large C++ static lib — on a low-RAM box the release link can OOM and freeze
+# the machine. So it is NOT in `default`; the top-level `blumi` crate turns it on
+# only where it pays off: Apple Silicon (via `gpu-coreml`, which implies it).
+# Linux/other targets build lean (FTS5 fallback) and can opt in explicitly with
+# `--features local-embeddings` (CPU) or `--features gpu-cuda` (NVIDIA).
 [features]
-default = ["local-embeddings"]
+default = []
 local-embeddings = ["dep:fastembed"]
 # Apple CoreML/Metal acceleration for the bundled embedder. ~Free on binary size
 # (the EP is compiled into the same downloaded ONNX Runtime); enabled by default

@@ -53,15 +53,20 @@ mdns-sd = "0.20"
 whoami = "1"
 flume = "0.11"
 
-# Apple-first GPU acceleration: on Apple Silicon, turn on the bundled embedder's
-# CoreML/Metal execution provider by default (≈zero extra binary size — the EP is
-# baked into the same ONNX Runtime fastembed already downloads). Cargo unifies
-# these features with the base `blumi-llm` dep above. Non-Apple targets stay CPU
-# unless built with `--features gpu-cuda` (or `gpu-coreml`).
+# Apple-first: on Apple Silicon, turn on the bundled ONNX embedder + its
+# CoreML/Metal execution provider by default (`gpu-coreml` implies
+# `local-embeddings`; ≈zero extra binary size — the EP is baked into the ONNX
+# Runtime fastembed already downloads). This is also where the embedder is gated
+# ON at all: every OTHER target (Linux/Windows/macOS-x86) builds WITHOUT the heavy
+# fastembed/ort native dep (which can OOM a low-RAM box at release-link time) and
+# falls back to FTS5. Cargo unifies these features with the base `blumi-llm` dep.
 [target.'cfg(all(target_os = "macos", target_arch = "aarch64"))'.dependencies]
 blumi-llm = { workspace = true, features = ["gpu-coreml"] }
 
 [features]
+# Opt-in CPU bundled embedder on non-Apple targets (heavy native build):
+#   cargo install --features local-embeddings
+local-embeddings = ["blumi-llm/local-embeddings"]
 # Opt-in NVIDIA CUDA acceleration (heavy; needs CUDA toolkit + driver):
 #   cargo build --release --features gpu-cuda
 gpu-cuda = ["blumi-llm/gpu-cuda"]
