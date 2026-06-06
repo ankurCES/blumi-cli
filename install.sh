@@ -79,7 +79,24 @@ if dl "$url" "$tmp/$asset" 2>/dev/null; then
 else
   say "${dim}no prebuilt binary for ${target} — building from source…${off}"
   have cargo || err "no prebuilt binary and 'cargo' was not found.\n  install Rust (https://rustup.rs), then re-run this installer."
-  cargo install --git "$REPO_URL" --locked --force --root "$tmp/cargo" "$BIN"
+  # GPU acceleration of the bundled ONNX embedder:
+  #  - Apple Silicon: CoreML is enabled automatically (target-gated; no flag).
+  #  - NVIDIA Linux: opt in with BLUMI_CUDA=1. This is a heavier native build that
+  #    needs the CUDA runtime; if it can't complete we fall back to a lean build so
+  #    you always end up with a working binary. (For GPU *LLM inference* — the big
+  #    win — run a local server like Ollama and point blumi at it; no rebuild.)
+  if [ "$os" = "Linux" ] && [ "${BLUMI_CUDA:-0}" = "1" ]; then
+    say "${dim}BLUMI_CUDA=1 — building with NVIDIA CUDA acceleration (gpu-cuda)…${off}"
+    if cargo install --git "$REPO_URL" --force --root "$tmp/cargo" --features gpu-cuda "$BIN"; then
+      :
+    else
+      say "${pink}CUDA build didn't complete${off} — installing a lean (CPU) build instead."
+      say "${dim}  tip: run Ollama for GPU inference instead — see \`blumi accel doctor\`.${off}"
+      cargo install --git "$REPO_URL" --locked --force --root "$tmp/cargo" "$BIN"
+    fi
+  else
+    cargo install --git "$REPO_URL" --locked --force --root "$tmp/cargo" "$BIN"
+  fi
   install_bin "$tmp/cargo/bin/$BIN"
   how="source"
 fi
@@ -93,6 +110,15 @@ fi
 
 say ""
 say "${cyan}✓${off} installed ${BIN} (${how}) → ${BIN_DIR}/${BIN}"
+
+# GPU hint for NVIDIA Linux boxes that built lean (no CUDA feature).
+if [ "$os" = "Linux" ] && have nvidia-smi && [ "${BLUMI_CUDA:-0}" != "1" ]; then
+  say ""
+  say "${cyan}NVIDIA GPU detected.${off} To use it:"
+  say "  ${dim}• LLM inference (biggest win): run Ollama (auto-uses your GPU), then set${off}"
+  say "  ${dim}  llm.provider=ollama — works with this build, no rebuild. See \`blumi accel doctor\`.${off}"
+  say "  ${dim}• In-process CUDA embedder: re-run with ${off}${pink}BLUMI_CUDA=1${off}${dim} (heavier build).${off}"
+fi
 
 # ── Runtimes for the default MCP servers (uv for python, node for npx) ──────
 # Auto-installed so the bundled MCP servers work on a fresh machine. Best-effort
