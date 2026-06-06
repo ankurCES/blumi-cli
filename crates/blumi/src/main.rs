@@ -372,7 +372,21 @@ enum SessionCmd {
 /// can't be opened in TUI mode we discard logs rather than risk corrupting the UI.
 fn init_tracing(log_file: Option<PathBuf>) {
     use tracing_subscriber::EnvFilter;
-    let filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("warn"));
+    // ONNX Runtime (`ort`) emits a flood of per-allocation DEBUG lines
+    // ("Reserving memory in BFCArena …"). Floor it at `warn` so it stays quiet
+    // even under broad debug — UNLESS the user explicitly named `ort` in
+    // RUST_LOG (then they're asking for it, so we leave their setting alone).
+    let raw = std::env::var("RUST_LOG").unwrap_or_default();
+    let mut filter = if raw.trim().is_empty() {
+        EnvFilter::new("warn")
+    } else {
+        EnvFilter::new(raw.clone())
+    };
+    if !raw.contains("ort") {
+        filter = filter
+            .add_directive("ort=warn".parse().expect("static directive"))
+            .add_directive("ort_sys=warn".parse().expect("static directive"));
+    }
     match log_file {
         Some(path) => match std::fs::OpenOptions::new()
             .create(true)

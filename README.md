@@ -66,6 +66,15 @@ the grid** — what one machine learns, the others pick up — while your privat
 leave the node. It also indexes your repos into a local **code knowledge base**, so the agent can
 `code_search` *where* something lives before it edits. → **[Memory and code intelligence](#memory-and-code-intelligence)**.
 
+### ⚕ Heals its own failures — and uses your GPU
+
+When a tool call fails, blumi **classifies** it, takes a **budgeted recovery action**, and emits a
+trace you can watch (`⚕ self-heal …`) — then **remembers the fix** so a similar failure recalls it
+next time, shared across the grid. Recurring failures get mined into **auto-written recovery skills**
+(low-risk; risky changes ask first). Meanwhile the bundled embedder runs on the **GPU when present** —
+Apple CoreML/Metal out of the box on Apple Silicon, NVIDIA CUDA opt-in — falling back to CPU
+otherwise. → **[Self-healing & evolution](#self-healing--evolution)** · **[GPU acceleration](#gpu-acceleration)**.
+
 ---
 
 # Part 1 — blumi CLI
@@ -236,6 +245,25 @@ off. The agent reads/writes it with the `memory` tool (`add` / `query`).
   machine learns, the others pick up (re-admitted through each peer's own dedup gate and origin-tagged,
   so they never loop). Your private `user` namespace **never leaves the node**.
 
+### Self-healing & evolution
+
+Reliability as a *bounded control problem* (after the
+[self-healing-orchestrators paper](https://arxiv.org/abs/2606.01416)), wired into the failure
+taxonomy and the memory above:
+
+- **Reflex recovery** — a failed tool result is classified (bad args, state conflict, crash, empty)
+  and gets a **budgeted, targeted** recovery action plus an observability trace (`⚕ self-heal …`
+  inline in the TUI; `/api/heal` for the gateway). Only idempotent tools auto-retry; the rest escalate.
+  It composes with the doom-loop guard rather than duplicating it.
+- **Learns from failures** — a recovery is stored as a **failure→fix episode** in the `agent`
+  namespace, so it **diffuses across the grid**; a similar future failure **recalls the known fix**
+  and injects it. Paths/secrets are redacted before anything is stored.
+- **Evolves** — recurring failure clusters are mined into **auto-written recovery skills** (low-risk,
+  with a notice); anything risky (config / providers / secrets / deletes) raises an approval instead.
+  Kill switch: `heal.evolve = "off"`.
+
+Watch it on the phone in the blugo **Heal** tab, or in the TUI inline as recoveries happen.
+
 **Native code knowledge base.** Index a repo into a local `knowledge.db` and search it by meaning or
 keyword (hybrid vector + FTS5), with gitignore-aware, diff-aware (re-)indexing:
 
@@ -252,20 +280,41 @@ Everything is **on by default** (first use downloads the ~130 MB model once, the
 turn any of it off in `settings.json`:
 
 ```json
-"embeddings": { "enabled": true, "backend": "local", "model": "bge-small-en-v1.5" },
-"memory":     { "enabled": true, "diffuse": true, "dedup_threshold": 0.92 },
-"knowledge":  { "enabled": true, "max_file_kb": 256 }
+"embeddings":   { "enabled": true, "backend": "local", "model": "bge-small-en-v1.5" },
+"acceleration": { "mode": "auto" },
+"memory":       { "enabled": true, "diffuse": true, "dedup_threshold": 0.92 },
+"heal":         { "enabled": true, "recovery_budget": 2, "evolve": "auto" },
+"knowledge":    { "enabled": true, "max_file_kb": 256 }
 ```
 
 Full guide: **[Memory & Knowledge](https://github.com/ankurCES/blumi-cli/wiki/Memory-and-Knowledge)**.
+
+## GPU acceleration
+
+blumi uses your GPU for the bundled embedder when one is detected, and falls back to CPU otherwise.
+`blumi accel doctor` prints exactly what's detected and how to wire more:
+
+- **Apple Silicon** — CoreML/Metal is **on by default** (no flag — the execution provider is baked
+  into the ONNX Runtime blumi already downloads, so ≈zero extra binary size).
+- **NVIDIA** — CUDA is opt-in: `curl … | BLUMI_CUDA=1 sh`, or `cargo install --features gpu-cuda`.
+  The installer auto-detects an NVIDIA GPU and prints these options.
+- **The model itself** — blumi is BYOK, so the biggest win is running the **LLM on a local GPU
+  server** (Ollama / vLLM / llama.cpp) and pointing a provider at it (the `ollama`, `local-mlx`,
+  `local-cuda` presets ship in config). The bundled embedder only handles embeddings.
+- **Grid-aware** — every node reports its accelerator in `/api/grid/metrics`, so the grid knows which
+  peer is strongest (CUDA > Apple CoreML > CPU). Surfaced in the TUI (`/accel`), `/api/status`, and
+  the blugo Status/Grid panels.
+
+The heavy embedder build is **Apple-default + opt-in elsewhere**, so a plain Linux/CI install stays
+lean (FTS5 fallback) and never does a multi-GB native link unless you ask for GPU.
 
 ## Workspace layout
 
 ```
 crates/
   blumi-protocol   wire contract: Command / Event / Message / ToolResult (pure serde)
-  blumi-core       the brain: traits + session actor (agent loop) + context mgmt + permissions
-  blumi-llm        provider clients (OpenAI-compatible, Anthropic, Gemini, …) + local embeddings
+  blumi-core       the brain: traits + session actor (agent loop) + context mgmt + permissions + self-healing
+  blumi-llm        provider clients (OpenAI-compatible, Anthropic, Gemini, …) + local embeddings (GPU: CoreML/CUDA)
   blumi-tools      built-in tools (incl. code_search/code_retrieve) + JSON-Schema + pipeline
   blumi-exec       execution backends (Local; Docker/SSH feature-gated)
   blumi-mcp        MCP client (rmcp) + tool adapters
@@ -279,7 +328,7 @@ crates/
   blumi-config     layered configuration (figment)
   blumi-tui        ratatui terminal UI
   blumi-web        axum server + embedded React build
-  blumi            the binary (clap) — incl. `serve` gateway + `grid` discovery/dispatch
+  blumi            the binary (clap) — incl. `serve` gateway, `grid` discovery/dispatch, `accel` GPU doctor, self-heal evolution
 blugo/             the Flutter phone app (outside the cargo workspace)
 ```
 
@@ -292,6 +341,7 @@ cargo clippy --all-targets --all-features -- -D warnings
 cargo fmt --all --check
 ```
 
+Releases are tracked in **[CHANGELOG.md](CHANGELOG.md)** (Keep a Changelog + SemVer).
 CI runs the Rust gate + the blugo Flutter gate on every push/PR (`.github/workflows/ci.yml`).
 The web UI lives in `crates/blumi-web/frontend` (React + Vite + TS); its built `dist/` is
 committed and embedded via `rust-embed`, so a plain `cargo build` needs no JS toolchain.
