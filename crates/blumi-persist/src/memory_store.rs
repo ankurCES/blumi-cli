@@ -51,6 +51,43 @@ impl Default for MemoryParams {
 
 /// Semantic memory over the shared [`Store`], with an optional embeddings
 /// backend (absent → FTS5 fallback everywhere).
+/// A full memory entry for the white-box editor (list/view/edit/pin/delete).
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct MemoryEntry {
+    pub id: i64,
+    pub namespace: String,
+    pub kind: String,
+    pub text: String,
+    /// Authoring node id (`""` = local).
+    pub origin: String,
+    pub source_session: Option<String>,
+    pub created_at: String,
+    pub updated_at: String,
+    pub hits: i64,
+    pub last_used_at: Option<String>,
+    pub utility: f64,
+    pub status: String,
+    pub pinned: bool,
+}
+
+fn row_to_entry(r: &sqlx::sqlite::SqliteRow) -> MemoryEntry {
+    MemoryEntry {
+        id: r.get("id"),
+        namespace: r.get("namespace"),
+        kind: r.get("kind"),
+        text: r.get("text"),
+        origin: r.get("origin"),
+        source_session: r.get("source_session"),
+        created_at: r.get("created_at"),
+        updated_at: r.get("updated_at"),
+        hits: r.get("hits"),
+        last_used_at: r.get("last_used_at"),
+        utility: r.get("utility"),
+        status: r.get("status"),
+        pinned: r.get::<i64, _>("pinned") != 0,
+    }
+}
+
 pub struct SemanticMemoryImpl {
     store: Arc<Store>,
     embedder: Option<Arc<dyn EmbeddingClient>>,
@@ -383,14 +420,132 @@ impl SemanticMemoryImpl {
         .unwrap_or(0)
     }
 
+    // --- White-box editor (list / view / pin / delete / edit) ---
+
+    /// List memory entries for the editor. `namespace`/`status` = `None` ⇒ all;
+    /// pinned-first, then highest-utility, then most-recently-updated.
+    pub async fn list_memories(
+        &self,
+        namespace: Option<&str>,
+        status: Option<&str>,
+        limit: i64,
+    ) -> Vec<MemoryEntry> {
+        let rows = sqlx::query(
+            "SELECT id, namespace, kind, text, origin, source_session, created_at,
+                    updated_at, hits, last_used_at, utility, status, pinned
+             FROM memories
+             WHERE (?1 IS NULL OR namespace = ?1) AND (?2 IS NULL OR status = ?2)
+             ORDER BY pinned DESC, utility DESC, updated_at DESC
+             LIMIT ?3",
+        )
+        .bind(namespace)
+        .bind(status)
+        .bind(limit.clamp(1, 2000))
+        .fetch_all(self.pool())
+        .await
+        .unwrap_or_default();
+        rows.iter().map(row_to_entry).collect()
+    }
+
+    /// Fetch a single entry by id.
+    pub async fn get_memory(&self, id: i64) -> Option<MemoryEntry> {
+        let row = sqlx::query(
+            "SELECT id, namespace, kind, text, origin, source_session, created_at,
+                    updated_at, hits, last_used_at, utility, status, pinned
+             FROM memories WHERE id = ?",
+        )
+        .bind(id)
+        .fetch_optional(self.pool())
+        .await
+        .ok()??;
+        Some(row_to_entry(&row))
+    }
+
+    /// Pin/unpin an entry. Pinned entries are exempt from eviction + consolidation
+    /// (see `evict`/`consolidate`). Returns whether a row was updated.
+    pub async fn set_pinned(&self, id: i64, pinned: bool) -> bool {
+        sqlx::query("UPDATE memories SET pinned = ?, updated_at = ? WHERE id = ?")
+            .bind(pinned as i64)
+            .bind(now())
+            .bind(id)
+            .execute(self.pool())
+            .await
+            .map(|r| r.rows_affected() > 0)
+            .unwrap_or(false)
+    }
+
+    /// Hard-delete an entry: its vector cascades (FK `ON DELETE CASCADE`), the
+    /// `memories_ad` trigger removes it from FTS5, and we clean up graph edges.
+    pub async fn delete_memory(&self, id: i64) -> bool {
+        let _ = sqlx::query("DELETE FROM memory_edges WHERE src = ? OR dst = ?")
+            .bind(id)
+            .bind(id)
+            .execute(self.pool())
+            .await;
+        sqlx::query("DELETE FROM memories WHERE id = ?")
+            .bind(id)
+            .execute(self.pool())
+            .await
+            .map(|r| r.rows_affected() > 0)
+            .unwrap_or(false)
+    }
+
+    /// Replace an entry's text: keep the external-content FTS5 index in sync (no
+    /// update trigger exists, so mirror delete+insert) and re-embed (best-effort;
+    /// a cold embedder defers to `backfill_vectors`). Returns whether it updated.
+    pub async fn update_memory_text(&self, id: i64, new_text: &str) -> bool {
+        let new_text = new_text.trim();
+        if new_text.is_empty() {
+            return false;
+        }
+        let Some(old) = sqlx::query("SELECT text FROM memories WHERE id = ?")
+            .bind(id)
+            .fetch_optional(self.pool())
+            .await
+            .ok()
+            .flatten()
+        else {
+            return false;
+        };
+        let old_text: String = old.get("text");
+        let updated = sqlx::query("UPDATE memories SET text = ?, updated_at = ? WHERE id = ?")
+            .bind(new_text)
+            .bind(now())
+            .bind(id)
+            .execute(self.pool())
+            .await
+            .map(|r| r.rows_affected() > 0)
+            .unwrap_or(false);
+        if !updated {
+            return false;
+        }
+        // Mirror the insert/delete triggers for the changed row.
+        let _ = sqlx::query(
+            "INSERT INTO memories_fts(memories_fts, rowid, text) VALUES('delete', ?, ?)",
+        )
+        .bind(id)
+        .bind(&old_text)
+        .execute(self.pool())
+        .await;
+        let _ = sqlx::query("INSERT INTO memories_fts(rowid, text) VALUES (?, ?)")
+            .bind(id)
+            .bind(new_text)
+            .execute(self.pool())
+            .await;
+        if let Some(v) = self.embed_one(new_text).await {
+            self.insert_vector(id, &v).await;
+        }
+        true
+    }
+
     /// Fold near-duplicate clusters in `namespace` into the highest-utility
     /// member (losers → `status='merged'`, utility/hits folded into the keeper).
-    /// Returns how many were merged. No-op without vectors.
+    /// Returns how many were merged. No-op without vectors. Pinned rows are exempt.
     pub async fn consolidate(&self, namespace: &str) -> usize {
         let rows = sqlx::query(
             "SELECT m.id AS id, m.utility AS utility, m.hits AS hits, v.vec AS vec
              FROM memories m JOIN memory_vectors v ON v.memory_id = m.id
-             WHERE m.status = 'active' AND m.namespace = ?
+             WHERE m.status = 'active' AND m.namespace = ? AND m.pinned = 0
              ORDER BY m.utility DESC, m.id ASC",
         )
         .bind(namespace)
@@ -464,7 +619,7 @@ impl SemanticMemoryImpl {
             "UPDATE memories SET status = 'evicted'
              WHERE id IN (
                  SELECT id FROM memories
-                 WHERE namespace = ? AND status = 'active'
+                 WHERE namespace = ? AND status = 'active' AND pinned = 0
                  ORDER BY utility ASC, updated_at ASC LIMIT ?
              )",
         )
@@ -994,6 +1149,79 @@ mod tests {
         assert_eq!(mem.count("project:x").await, 2);
         let still = mem.query(Some("project:x"), "rust", 5).await;
         assert!(still.iter().any(|h| h.id == keep));
+    }
+
+    #[tokio::test]
+    async fn pinned_entry_survives_eviction() {
+        let mem = store_with(Some(Arc::new(MockEmbedder))).await;
+        let texts = [
+            "rust topic",
+            "python topic",
+            "cooking topic",
+            "music topic",
+            "rust python topic",
+        ];
+        let mut ids = Vec::new();
+        for t in texts {
+            ids.push(mem.remember("project:x", "note", t).await.unwrap());
+        }
+        // Pin a low-utility entry — it must survive even though it'd be evicted.
+        let pinned = ids[1];
+        assert!(mem.set_pinned(pinned, true).await);
+        mem.evict("project:x", 1).await;
+        let remaining = mem
+            .list_memories(Some("project:x"), Some("active"), 100)
+            .await;
+        assert!(
+            remaining.iter().any(|e| e.id == pinned && e.pinned),
+            "pinned entry must survive eviction"
+        );
+    }
+
+    #[tokio::test]
+    async fn update_text_reembeds_for_vector_search() {
+        let mem = store_with(Some(Arc::new(MockEmbedder))).await;
+        let id = mem
+            .remember("agent", "note", "rust ownership")
+            .await
+            .unwrap();
+        assert!(mem.update_memory_text(id, "python lists").await);
+        assert_eq!(mem.get_memory(id).await.unwrap().text, "python lists");
+        // Re-embedded: the entry now ranks for the new topic.
+        let hits = mem.query(None, "python", 5).await;
+        assert!(hits.iter().any(|h| h.id == id));
+    }
+
+    #[tokio::test]
+    async fn update_text_resyncs_fts_without_embeddings() {
+        let mem = store_with(None).await;
+        let id = mem
+            .remember("user", "fact", "deploy with make ship")
+            .await
+            .unwrap();
+        assert!(
+            mem.update_memory_text(id, "deploy with cargo release")
+                .await
+        );
+        // FTS index follows: the new term hits, the old one doesn't.
+        assert!(mem.query(None, "cargo", 5).await.iter().any(|h| h.id == id));
+        assert!(mem.query(None, "make", 5).await.is_empty());
+    }
+
+    #[tokio::test]
+    async fn delete_and_pin_roundtrip() {
+        let mem = store_with(Some(Arc::new(MockEmbedder))).await;
+        let id = mem
+            .remember("agent", "note", "rust ownership")
+            .await
+            .unwrap();
+        assert!(mem.set_pinned(id, true).await);
+        assert!(mem.get_memory(id).await.unwrap().pinned);
+        assert!(mem.delete_memory(id).await);
+        assert!(mem.get_memory(id).await.is_none());
+        assert_eq!(mem.count("agent").await, 0);
+        // Gone from search too (FTS trigger + vector cascade).
+        assert!(mem.query(None, "rust", 5).await.iter().all(|h| h.id != id));
     }
 
     #[tokio::test]

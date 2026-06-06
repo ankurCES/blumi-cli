@@ -6,7 +6,7 @@
 //! idempotent (replace its messages). JSONL export lives elsewhere.
 
 mod memory_store;
-pub use memory_store::{MemoryParams, SemanticMemoryImpl};
+pub use memory_store::{MemoryEntry, MemoryParams, SemanticMemoryImpl};
 
 use async_trait::async_trait;
 use blumi_core::SessionSnapshot;

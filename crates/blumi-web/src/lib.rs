@@ -310,6 +310,28 @@ pub trait Management: Send + Sync {
         serde_json::json!({ "nodes": [], "edges": [] })
     }
 
+    /// White-box editor: list individual memory entries → `{ entries: [...] }`.
+    async fn memory_list(
+        &self,
+        _namespace: Option<&str>,
+        _status: Option<&str>,
+        _limit: u32,
+    ) -> serde_json::Value {
+        serde_json::json!({ "entries": [] })
+    }
+    /// Pin/unpin an entry (exempt from eviction + consolidation).
+    async fn memory_pin(&self, _id: i64, _pinned: bool) -> serde_json::Value {
+        serde_json::json!({ "ok": false, "error": "memory disabled" })
+    }
+    /// Delete an entry.
+    async fn memory_delete(&self, _id: i64) -> serde_json::Value {
+        serde_json::json!({ "ok": false, "error": "memory disabled" })
+    }
+    /// Replace an entry's text (re-embeds + resyncs FTS).
+    async fn memory_update(&self, _id: i64, _text: &str) -> serde_json::Value {
+        serde_json::json!({ "ok": false, "error": "memory disabled" })
+    }
+
     /// Self-healing summary → `{ counts: {...}, recent: [...] }`: recovery,
     /// evolution, and proposal episodes for the `/heal` views. Default: empty.
     async fn heal_status(&self) -> serde_json::Value {
@@ -499,6 +521,10 @@ pub fn router(state: AppState) -> Router {
         .route("/api/heal", get(api::heal_status))
         .route("/api/route", get(api::route_status))
         .route("/api/memory/graph", post(api::memory_graph))
+        .route("/api/memory/list", post(api::memory_list))
+        .route("/api/memory/pin", post(api::memory_pin))
+        .route("/api/memory/delete", post(api::memory_delete))
+        .route("/api/memory/update", post(api::memory_update))
         .route(
             "/api/self/config",
             get(api::self_config_get).post(api::self_config_set),

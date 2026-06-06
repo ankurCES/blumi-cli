@@ -404,6 +404,50 @@ impl Management for WebManagement {
         }
     }
 
+    async fn memory_list(
+        &self,
+        namespace: Option<&str>,
+        status: Option<&str>,
+        limit: u32,
+    ) -> serde_json::Value {
+        let Some(mem) = &self.mem else {
+            return serde_json::json!({ "entries": [] });
+        };
+        // Default to active entries; `status="all"` shows merged/evicted too.
+        let status = match status {
+            Some("all") | Some("") => None,
+            other => other.or(Some("active")),
+        };
+        let entries = mem
+            .list_memories(namespace, status, limit.clamp(1, 1000) as i64)
+            .await;
+        serde_json::json!({ "entries": entries })
+    }
+
+    // NOTE: editing/pinning a `user`-namespace entry stays local — `high_utility`
+    // (diffusion export) already excludes `user%` and ignores `pinned`, so these
+    // never change what crosses the grid.
+    async fn memory_pin(&self, id: i64, pinned: bool) -> serde_json::Value {
+        match &self.mem {
+            Some(mem) => serde_json::json!({ "ok": mem.set_pinned(id, pinned).await }),
+            None => serde_json::json!({ "ok": false, "error": "memory disabled" }),
+        }
+    }
+
+    async fn memory_delete(&self, id: i64) -> serde_json::Value {
+        match &self.mem {
+            Some(mem) => serde_json::json!({ "ok": mem.delete_memory(id).await }),
+            None => serde_json::json!({ "ok": false, "error": "memory disabled" }),
+        }
+    }
+
+    async fn memory_update(&self, id: i64, text: &str) -> serde_json::Value {
+        match &self.mem {
+            Some(mem) => serde_json::json!({ "ok": mem.update_memory_text(id, text).await }),
+            None => serde_json::json!({ "ok": false, "error": "memory disabled" }),
+        }
+    }
+
     async fn heal_status(&self) -> serde_json::Value {
         match &self.mem {
             Some(mem) => mem.heal_summary(30).await,

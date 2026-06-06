@@ -893,6 +893,63 @@ pub async fn memory_graph(
     )
 }
 
+// --- White-box memory editor (list / pin / delete / update) ---
+
+#[derive(Deserialize)]
+pub struct MemListBody {
+    #[serde(default)]
+    pub namespace: Option<String>,
+    #[serde(default)]
+    pub status: Option<String>,
+    #[serde(default)]
+    pub limit: Option<u32>,
+}
+
+#[derive(Deserialize)]
+pub struct MemPinBody {
+    pub id: i64,
+    pub pinned: bool,
+}
+
+#[derive(Deserialize)]
+pub struct MemIdBody {
+    pub id: i64,
+}
+
+#[derive(Deserialize)]
+pub struct MemUpdateBody {
+    pub id: i64,
+    pub text: String,
+}
+
+pub async fn memory_list(State(state): State<AppState>, Json(b): Json<MemListBody>) -> Json<Value> {
+    Json(
+        state
+            .mgmt()
+            .memory_list(
+                b.namespace.as_deref(),
+                b.status.as_deref(),
+                b.limit.unwrap_or(200),
+            )
+            .await,
+    )
+}
+
+pub async fn memory_pin(State(state): State<AppState>, Json(b): Json<MemPinBody>) -> Json<Value> {
+    Json(state.mgmt().memory_pin(b.id, b.pinned).await)
+}
+
+pub async fn memory_delete(State(state): State<AppState>, Json(b): Json<MemIdBody>) -> Json<Value> {
+    Json(state.mgmt().memory_delete(b.id).await)
+}
+
+pub async fn memory_update(
+    State(state): State<AppState>,
+    Json(b): Json<MemUpdateBody>,
+) -> Json<Value> {
+    Json(state.mgmt().memory_update(b.id, &b.text).await)
+}
+
 #[derive(Deserialize)]
 pub struct KbIngestBody {
     pub path: String,
