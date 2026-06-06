@@ -14,14 +14,59 @@ Future<void> showControlCenter(BuildContext context, AppController app) {
     isScrollControlled: true,
     showDragHandle: true,
     backgroundColor: Theme.of(context).colorScheme.surface,
-    builder: (_) => DraggableScrollableSheet(
-      expand: false,
-      initialChildSize: 0.7,
-      minChildSize: 0.4,
-      maxChildSize: 0.95,
-      builder: (context, scroll) => _ControlCenter(app, scroll),
-    ),
+    builder: (_) => _ControlSheet(app),
   );
+}
+
+/// Hosts the draggable sheet and grows it toward full height when the soft
+/// keyboard opens (so a focused field has room above the keyboard), shrinking
+/// back to the glance size when it closes.
+class _ControlSheet extends StatefulWidget {
+  final AppController app;
+  const _ControlSheet(this.app);
+  @override
+  State<_ControlSheet> createState() => _ControlSheetState();
+}
+
+class _ControlSheetState extends State<_ControlSheet> {
+  static const _rest = 0.7;
+  static const _full = 0.96;
+  final _sheet = DraggableScrollableController();
+  bool _raised = false;
+
+  @override
+  void dispose() {
+    _sheet.dispose();
+    super.dispose();
+  }
+
+  void _animateTo(double size) {
+    if (!_sheet.isAttached) return;
+    _sheet.animateTo(size,
+        duration: const Duration(milliseconds: 220), curve: Curves.easeOut);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final keyboardUp = MediaQuery.of(context).viewInsets.bottom > 0;
+    if (keyboardUp && !_raised) {
+      _raised = true;
+      WidgetsBinding.instance
+          .addPostFrameCallback((_) => mounted ? _animateTo(_full) : null);
+    } else if (!keyboardUp && _raised) {
+      _raised = false;
+      WidgetsBinding.instance
+          .addPostFrameCallback((_) => mounted ? _animateTo(_rest) : null);
+    }
+    return DraggableScrollableSheet(
+      controller: _sheet,
+      expand: false,
+      initialChildSize: _rest,
+      minChildSize: 0.4,
+      maxChildSize: _full,
+      builder: (context, scroll) => _ControlCenter(widget.app, scroll),
+    );
+  }
 }
 
 class _ControlCenter extends StatelessWidget {
