@@ -136,6 +136,7 @@ login` / the in-app settings. See **[Configuration](https://github.com/ankurCES/
 | `blumi loop` | Autonomously work the task board: select → run → advance, repeat |
 | `blumi task` | Manage the task board (the work queue for `blumi loop`) |
 | `blumi gateway` | Run as a messaging bot (Telegram/Discord/Slack/WhatsApp) |
+| `blumi accel` | Inspect the GPU/accelerator: `detect` / `status` / `doctor` (setup hints) |
 | `blumi cron` / `playbook` / `skills` / `mcp` / `session` / `stats` | Automations & management |
 
 Run `blumi <command> --help` for any subcommand. Full reference:
@@ -261,8 +262,12 @@ taxonomy and the memory above:
 - **Evolves** — recurring failure clusters are mined into **auto-written recovery skills** (low-risk,
   with a notice); anything risky (config / providers / secrets / deletes) raises an approval instead.
   Kill switch: `heal.evolve = "off"`.
+- **Confirmed** — with `heal.verify` on, a recovery is marked *verified* only when the retried tool
+  actually **succeeds on a later step** (ground truth, not just "a fix was suggested"), and the fix
+  that worked has its utility reinforced.
 
-Watch it on the phone in the blugo **Heal** tab, or in the TUI inline as recoveries happen.
+See it in the TUI with **`/heal`** (or the inline `⚕ self-heal` traces as they happen), the blugo
+**Heal** tab, or `GET /api/heal`.
 
 **Native code knowledge base.** Index a repo into a local `knowledge.db` and search it by meaning or
 keyword (hybrid vector + FTS5), with gitignore-aware, diff-aware (re-)indexing:
@@ -296,14 +301,18 @@ blumi uses your GPU for the bundled embedder when one is detected, and falls bac
 
 - **Apple Silicon** — CoreML/Metal is **on by default** (no flag — the execution provider is baked
   into the ONNX Runtime blumi already downloads, so ≈zero extra binary size).
-- **NVIDIA** — CUDA is opt-in: `curl … | BLUMI_CUDA=1 sh`, or `cargo install --features gpu-cuda`.
-  The installer auto-detects an NVIDIA GPU and prints these options.
-- **The model itself** — blumi is BYOK, so the biggest win is running the **LLM on a local GPU
-  server** (Ollama / vLLM / llama.cpp) and pointing a provider at it (the `ollama`, `local-mlx`,
-  `local-cuda` presets ship in config). The bundled embedder only handles embeddings.
-- **Grid-aware** — every node reports its accelerator in `/api/grid/metrics`, so the grid knows which
-  peer is strongest (CUDA > Apple CoreML > CPU). Surfaced in the TUI (`/accel`), `/api/status`, and
-  the blugo Status/Grid panels.
+- **NVIDIA / Linux** — the recommended path is **lean blumi + a local server**: the default Linux
+  install builds without the heavy ONNX dep (FTS5 locally), and you run **Ollama** for the real win —
+  *LLM inference on the GPU* — plus GPU embeddings. The in-process CUDA embedder is best-effort opt-in
+  (`curl … | BLUMI_CUDA=1 sh`): CUDA's ONNX Runtime is a shared lib, so the installer ships it next to
+  the binary, **verifies it loads, and auto-falls back to a lean build** if it can't.
+- **The model itself** — blumi is BYOK, so the biggest GPU win is running the **LLM on a local server**
+  (Ollama / vLLM / llama.cpp) and pointing a provider at it (the `ollama`, `local-mlx`, `local-cuda`
+  presets ship in config). The bundled embedder only handles embeddings.
+- **Grid-aware offload** — every node reports its accelerator in `/api/grid/metrics` (strongest =
+  CUDA > Apple CoreML > CPU; shown in the TUI `/accel`, `/api/status`, blugo). A CPU node can set
+  `embeddings.backend = "grid"` to **offload embedding to the strongest GPU peer** (with a local/FTS5
+  fallback) — so a lean Linux box rides a Mac/CUDA peer for vectors.
 
 The heavy embedder build is **Apple-default + opt-in elsewhere**, so a plain Linux/CI install stays
 lean (FTS5 fallback) and never does a multi-GB native link unless you ask for GPU.
