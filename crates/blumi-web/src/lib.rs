@@ -293,6 +293,11 @@ pub trait Management: Send + Sync {
         serde_json::json!({ "hits": [] })
     }
 
+    /// The proposed-plan history (the `/plans` browser) → `{ plans: [...] }`.
+    async fn plans(&self) -> serde_json::Value {
+        serde_json::json!({ "plans": [] })
+    }
+
     // --- Self-management ---
 
     /// The whole settings.json as JSON, with every secret redacted (for the
@@ -459,6 +464,7 @@ pub fn router(state: AppState) -> Router {
         .route("/api/knowledge/ingest", post(api::knowledge_ingest))
         .route("/api/knowledge/remove", post(api::knowledge_remove))
         .route("/api/memory/search", post(api::memory_search))
+        .route("/api/plans", get(api::plans))
         .route(
             "/api/self/config",
             get(api::self_config_get).post(api::self_config_set),

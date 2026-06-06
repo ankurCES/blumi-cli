@@ -88,7 +88,7 @@ class _ControlCenter extends StatelessWidget {
         bottom: MediaQuery.of(context).viewInsets.bottom,
       ),
       child: DefaultTabController(
-        length: 8,
+        length: 9,
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
@@ -121,6 +121,7 @@ class _ControlCenter extends StatelessWidget {
                 Tab(text: 'Skills'),
                 Tab(text: 'Memory'),
                 Tab(text: 'Code'),
+                Tab(text: 'Plans'),
               ],
             ),
             Expanded(
@@ -134,6 +135,7 @@ class _ControlCenter extends StatelessWidget {
                   _SkillsTab(app, scroll),
                   _MemoryTab(app, scroll),
                   _KnowledgeTab(app, scroll),
+                  _PlansTab(app, scroll),
                 ],
               ),
             ),
@@ -1942,6 +1944,121 @@ class _KnowledgeTabState extends State<_KnowledgeTab>
               '${h['snippet'] ?? ''}',
               maxLines: 8,
               style: const TextStyle(fontFamily: 'monospace', fontSize: 12),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+// --- Plans -----------------------------------------------------------------
+
+class _PlansTab extends StatefulWidget {
+  final AppController app;
+  final ScrollController scroll;
+  const _PlansTab(this.app, this.scroll);
+  @override
+  State<_PlansTab> createState() => _PlansTabState();
+}
+
+class _PlansTabState extends State<_PlansTab>
+    with AutomaticKeepAliveClientMixin {
+  @override
+  bool get wantKeepAlive => true;
+
+  ApiClient get _api => widget.app.session!.api;
+  List<Map<String, dynamic>> _plans = [];
+  bool _loading = true;
+
+  @override
+  void initState() {
+    super.initState();
+    _load();
+  }
+
+  Future<void> _load() async {
+    setState(() => _loading = true);
+    try {
+      final p = await _api.plans();
+      if (!mounted) return;
+      setState(() {
+        _plans = p.reversed.toList(); // newest first
+        _loading = false;
+      });
+    } catch (_) {
+      if (!mounted) return;
+      setState(() => _loading = false);
+    }
+  }
+
+  (Color, String) _badge(String status, ColorScheme cs) {
+    switch (status) {
+      case 'live':
+        return (Colors.greenAccent, 'live');
+      case 'rejected':
+        return (cs.error, 'rejected');
+      default:
+        return (Colors.green, 'approved');
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    super.build(context);
+    final cs = Theme.of(context).colorScheme;
+    return ListView(
+      controller: widget.scroll,
+      padding: const EdgeInsets.all(16),
+      children: [
+        Row(children: [
+          _label('Proposed plans', cs),
+          const Spacer(),
+          IconButton(
+            tooltip: 'Refresh',
+            visualDensity: VisualDensity.compact,
+            icon: const Icon(Icons.refresh, size: 18),
+            onPressed: _loading ? null : _load,
+          ),
+        ]),
+        if (_loading)
+          const Padding(
+              padding: EdgeInsets.all(8), child: LinearProgressIndicator())
+        else if (_plans.isEmpty)
+          Text(
+            'No plans yet. Approve or reject a plan in plan mode and it shows up here.',
+            style: TextStyle(color: cs.onSurface.withValues(alpha: 0.6)),
+          )
+        else
+          for (final p in _plans) _planCard(p, cs),
+      ],
+    );
+  }
+
+  Widget _planCard(Map<String, dynamic> p, ColorScheme cs) {
+    final status = '${p['status'] ?? 'approved'}';
+    final (dotColor, label) = _badge(status, cs);
+    final title = '${p['title'] ?? '(untitled plan)'}';
+    final content = '${p['content'] ?? ''}';
+    return Card(
+      margin: const EdgeInsets.only(bottom: 8),
+      child: Theme(
+        data: Theme.of(context).copyWith(dividerColor: Colors.transparent),
+        child: ExpansionTile(
+          tilePadding: const EdgeInsets.symmetric(horizontal: 12),
+          leading: Icon(Icons.circle, size: 12, color: dotColor),
+          title: Text(
+            title,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: const TextStyle(fontWeight: FontWeight.w600),
+          ),
+          subtitle: Text(label, style: TextStyle(fontSize: 11, color: dotColor)),
+          childrenPadding: const EdgeInsets.fromLTRB(12, 0, 12, 12),
+          children: [
+            SelectableText(
+              content,
+              style: const TextStyle(fontFamily: 'monospace', fontSize: 12.5),
             ),
           ],
         ),

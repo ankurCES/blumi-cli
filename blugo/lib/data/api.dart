@@ -286,6 +286,13 @@ class ApiClient {
   Future<Map<String, dynamic>> memorySearch(String query, {int limit = 10}) =>
       _postJson('/api/memory/search', {'query': query, 'limit': limit});
 
+  /// Proposed-plan history: `[{ title, content, status, created_at }]`
+  /// (status: live | approved | rejected), newest last.
+  Future<List<Map<String, dynamic>>> plans() async {
+    final j = await _getJson('/api/plans');
+    return ((j['plans'] as List?) ?? []).cast<Map<String, dynamic>>();
+  }
+
   // --- Self-management ---
 
   /// Reload the agent in place (apply config/skill changes).

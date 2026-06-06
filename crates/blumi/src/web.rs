@@ -374,6 +374,25 @@ impl Management for WebManagement {
         serde_json::json!({ "hits": arr })
     }
 
+    async fn plans(&self) -> serde_json::Value {
+        match &self.store {
+            Some(store) => {
+                let rows = store.list_plans(200).await.unwrap_or_default();
+                let arr: Vec<serde_json::Value> = rows
+                    .iter()
+                    .map(|p| {
+                        serde_json::json!({
+                            "id": p.id, "title": p.title, "content": p.content,
+                            "status": p.status, "created_at": p.created_at,
+                        })
+                    })
+                    .collect();
+                serde_json::json!({ "plans": arr })
+            }
+            None => serde_json::json!({ "plans": [] }),
+        }
+    }
+
     fn grid_peer_ids(&self) -> Vec<String> {
         match &self.grid {
             // Key by stable host:port, NOT the registry id (which flips between

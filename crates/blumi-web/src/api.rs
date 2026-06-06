@@ -835,6 +835,10 @@ pub async fn memory_search(
     )
 }
 
+pub async fn plans(State(state): State<AppState>) -> Json<Value> {
+    Json(state.mgmt().plans().await)
+}
+
 #[derive(Deserialize)]
 pub struct KbIngestBody {
     pub path: String,
