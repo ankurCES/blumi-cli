@@ -24,11 +24,19 @@ The Rust workspace and the blugo app share the version number.
 
 ### Fixed
 
-- **NVIDIA CUDA build on Linux** (`BLUMI_CUDA=1`) — pin `ort-sys` to `=2.0.0-rc.9`
-  and restore `--locked` on the installer's CUDA path. `ort`'s range dependency on
-  `ort-sys` floated to rc.12 on a non-locked resolve, whose `download-binaries`
-  build is broken (TLS-feature / ureq mismatch). Apple CoreML builds were
-  unaffected (already `--locked`).
+- **NVIDIA CUDA build on Linux** (`BLUMI_CUDA=1`) — two issues:
+  - *Build:* pin `ort-sys` to `=2.0.0-rc.9` and restore `--locked` on the
+    installer's CUDA path. `ort`'s range dependency on `ort-sys` floated to rc.12
+    on a non-locked resolve, whose `download-binaries` build is broken
+    (TLS-feature / ureq mismatch).
+  - *Runtime:* CUDA's ONNX Runtime is a **shared** lib, so `cargo install` (binary
+    only) left `libonnxruntime.so` unresolvable → every `blumi` invocation failed
+    with "error while loading shared libraries". The installer now ships the `.so`
+    next to the binary (`copy-dylibs` + `$ORIGIN` rpath) and **verifies the binary
+    loads**, auto-falling back to a lean (CPU) build otherwise — so a reinstall can
+    never leave a binary that won't start.
+  Apple CoreML builds were unaffected (statically linked, already `--locked`). For
+  Linux GPU the reliable path remains a local server (Ollama) for LLM + embeddings.
 
 ## [0.2.0] — 2026-06-06
 

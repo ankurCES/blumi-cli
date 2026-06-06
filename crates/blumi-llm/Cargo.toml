@@ -59,7 +59,10 @@ local-embeddings = ["dep:fastembed"]
 gpu-coreml = ["local-embeddings", "dep:ort", "dep:ort-sys", "ort/coreml"]
 # NVIDIA CUDA acceleration — OPT-IN ONLY (large runtime; needs the CUDA toolkit
 # at build time and a matching driver at run time). Build: `cargo build --features gpu-cuda`.
-gpu-cuda = ["local-embeddings", "dep:ort", "dep:ort-sys", "ort/cuda"]
+# `copy-dylibs` emits the (shared) ONNX Runtime libs next to the binary with an
+# `$ORIGIN` rpath, so a binary installed alongside its `.so` finds it at runtime
+# (CUDA onnxruntime is shared, unlike the static CPU/CoreML builds).
+gpu-cuda = ["local-embeddings", "dep:ort", "dep:ort-sys", "ort/cuda", "ort/copy-dylibs"]
 
 [dev-dependencies]
 tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }

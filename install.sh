@@ -80,27 +80,42 @@ else
   say "${dim}no prebuilt binary for ${target} — building from source…${off}"
   have cargo || err "no prebuilt binary and 'cargo' was not found.\n  install Rust (https://rustup.rs), then re-run this installer."
   # GPU acceleration of the bundled ONNX embedder:
-  #  - Apple Silicon: CoreML is enabled automatically (target-gated; no flag).
-  #  - NVIDIA Linux: opt in with BLUMI_CUDA=1. This is a heavier native build that
-  #    needs the CUDA runtime; if it can't complete we fall back to a lean build so
-  #    you always end up with a working binary. (For GPU *LLM inference* — the big
-  #    win — run a local server like Ollama and point blumi at it; no rebuild.)
+  #  - Apple Silicon: CoreML is enabled automatically (target-gated; no flag). Its
+  #    ONNX Runtime is statically linked, so the installed binary is self-contained.
+  #  - NVIDIA Linux: opt in with BLUMI_CUDA=1. CUDA's ONNX Runtime is a SHARED lib
+  #    (libonnxruntime.so), so we ship it next to the binary and then VERIFY the
+  #    binary actually loads — falling back to a lean (CPU) build if it can't, so
+  #    you never end up with a binary that won't start. (For GPU *LLM inference* —
+  #    the big win — run Ollama and point blumi at it; no rebuild.)
+  #  --locked is REQUIRED everywhere: it keeps ort-sys pinned to rc.9 (a non-locked
+  #  resolve floats it to rc.12, whose download build is broken on Linux).
+  built_cuda=0
   if [ "$os" = "Linux" ] && [ "${BLUMI_CUDA:-0}" = "1" ]; then
     say "${dim}BLUMI_CUDA=1 — building with NVIDIA CUDA acceleration (gpu-cuda)…${off}"
-    # --locked is REQUIRED: it keeps ort-sys pinned to rc.9. Without it, Cargo
-    # floats ort-sys to rc.12 (the range matches pre-releases), whose download
-    # build is broken (TLS-feature/ureq mismatch) and fails on Linux.
-    if cargo install --git "$REPO_URL" --locked --force --root "$tmp/cargo" --features gpu-cuda "$BIN"; then
-      :
+    ctd="$tmp/cuda-target"
+    if CARGO_TARGET_DIR="$ctd" cargo install --git "$REPO_URL" --locked --force \
+        --root "$tmp/cargo" --features gpu-cuda "$BIN"; then
+      install_bin "$tmp/cargo/bin/$BIN"
+      # Ship the shared ONNX Runtime libs next to the binary ($ORIGIN rpath finds
+      # them). Look in the build dir + ort's download cache.
+      for d in "$ctd" "$HOME/.cache/ort.pyke.io"; do
+        [ -d "$d" ] && find "$d" -name 'libonnxruntime*.so*' \
+          -exec cp -f {} "$BIN_DIR/" \; 2>/dev/null || true
+      done
+      if "$BIN_DIR/$BIN" --version >/dev/null 2>&1; then
+        built_cuda=1
+      else
+        say "${pink}CUDA binary can't load libonnxruntime.so${off} — installing a lean (CPU) build instead."
+        say "${dim}  for GPU on Linux, run Ollama and point blumi at it — see \`blumi accel doctor\`.${off}"
+      fi
     else
       say "${pink}CUDA build didn't complete${off} — installing a lean (CPU) build instead."
-      say "${dim}  tip: run Ollama for GPU inference instead — see \`blumi accel doctor\`.${off}"
-      cargo install --git "$REPO_URL" --locked --force --root "$tmp/cargo" "$BIN"
     fi
-  else
-    cargo install --git "$REPO_URL" --locked --force --root "$tmp/cargo" "$BIN"
   fi
-  install_bin "$tmp/cargo/bin/$BIN"
+  if [ "$built_cuda" != "1" ]; then
+    cargo install --git "$REPO_URL" --locked --force --root "$tmp/cargo" "$BIN"
+    install_bin "$tmp/cargo/bin/$BIN"
+  fi
   how="source"
 fi
 
