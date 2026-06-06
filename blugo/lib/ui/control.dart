@@ -32,48 +32,68 @@ class _ControlCenter extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final cs = Theme.of(context).colorScheme;
-    return DefaultTabController(
-      length: 8,
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Padding(
-            padding: const EdgeInsets.fromLTRB(16, 4, 16, 0),
-            child: Row(children: [
-              Text('✿ control center',
-                  style: TextStyle(
-                      fontWeight: FontWeight.bold, color: cs.primary, fontSize: 16)),
-            ]),
-          ),
-          TabBar(
-            isScrollable: true,
-            tabAlignment: TabAlignment.start,
-            labelColor: cs.primary,
-            indicatorColor: cs.primary,
-            tabs: const [
-              Tab(text: 'Settings'),
-              Tab(text: 'Status'),
-              Tab(text: 'Tasks'),
-              Tab(text: 'Grid'),
-              Tab(text: 'Usage'),
-              Tab(text: 'Skills'),
-              Tab(text: 'Memory'),
-              Tab(text: 'Code'),
-            ],
-          ),
-          Expanded(
-            child: TabBarView(children: [
-              _SettingsTab(app, scroll),
-              _StatusTab(app, scroll),
-              _TasksTab(app, scroll),
-              _GridTab(app, scroll),
-              _UsageTab(app, scroll),
-              _SkillsTab(app, scroll),
-              _MemoryTab(app, scroll),
-              _KnowledgeTab(app, scroll),
-            ]),
-          ),
-        ],
+    // Lift the sheet's content above the soft keyboard so focused text fields
+    // (Code search/ingest, Grid prompt, Memory editor, …) aren't covered. The
+    // bottom inset shrinks the tab body, and the focused field auto-scrolls into
+    // the now-visible viewport.
+    return AnimatedPadding(
+      duration: const Duration(milliseconds: 150),
+      curve: Curves.easeOut,
+      padding: EdgeInsets.only(
+        bottom: MediaQuery.of(context).viewInsets.bottom,
+      ),
+      child: DefaultTabController(
+        length: 8,
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 4, 16, 0),
+              child: Row(
+                children: [
+                  Text(
+                    '✿ control center',
+                    style: TextStyle(
+                      fontWeight: FontWeight.bold,
+                      color: cs.primary,
+                      fontSize: 16,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            TabBar(
+              isScrollable: true,
+              tabAlignment: TabAlignment.start,
+              labelColor: cs.primary,
+              indicatorColor: cs.primary,
+              tabs: const [
+                Tab(text: 'Settings'),
+                Tab(text: 'Status'),
+                Tab(text: 'Tasks'),
+                Tab(text: 'Grid'),
+                Tab(text: 'Usage'),
+                Tab(text: 'Skills'),
+                Tab(text: 'Memory'),
+                Tab(text: 'Code'),
+              ],
+            ),
+            Expanded(
+              child: TabBarView(
+                children: [
+                  _SettingsTab(app, scroll),
+                  _StatusTab(app, scroll),
+                  _TasksTab(app, scroll),
+                  _GridTab(app, scroll),
+                  _UsageTab(app, scroll),
+                  _SkillsTab(app, scroll),
+                  _MemoryTab(app, scroll),
+                  _KnowledgeTab(app, scroll),
+                ],
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -146,20 +166,23 @@ class _AsyncViewState<T> extends State<_AsyncView<T>> {
   Widget build(BuildContext context) {
     final cs = Theme.of(context).colorScheme;
     if (_data != null) {
-      return Stack(children: [
-        Positioned.fill(
-          child: RefreshIndicator(
-            onRefresh: _refresh, // pull down to force-refresh (bypass TTL)
-            child: widget.builder(context, _data as T, _refresh),
+      return Stack(
+        children: [
+          Positioned.fill(
+            child: RefreshIndicator(
+              onRefresh: _refresh, // pull down to force-refresh (bypass TTL)
+              child: widget.builder(context, _data as T, _refresh),
+            ),
           ),
-        ),
-        if (_loading)
-          const Positioned(
+          if (_loading)
+            const Positioned(
               top: 0,
               left: 0,
               right: 0,
-              child: LinearProgressIndicator(minHeight: 2)),
-      ]);
+              child: LinearProgressIndicator(minHeight: 2),
+            ),
+        ],
+      );
     }
     if (_error != null) return _errorRetry(cs, _refresh);
     return const Center(child: CircularProgressIndicator());
@@ -167,18 +190,24 @@ class _AsyncViewState<T> extends State<_AsyncView<T>> {
 }
 
 Widget _errorRetry(ColorScheme cs, Future<void> Function() onRetry) => Center(
-      child: Column(mainAxisSize: MainAxisSize.min, children: [
-        Icon(Icons.cloud_off, color: cs.onSurface.withValues(alpha: 0.4)),
-        const SizedBox(height: 8),
-        Text('couldn’t load',
-            style: TextStyle(color: cs.onSurface.withValues(alpha: 0.6))),
-        const SizedBox(height: 8),
-        OutlinedButton.icon(
-            onPressed: onRetry,
-            icon: const Icon(Icons.refresh),
-            label: const Text('Retry')),
-      ]),
-    );
+  child: Column(
+    mainAxisSize: MainAxisSize.min,
+    children: [
+      Icon(Icons.cloud_off, color: cs.onSurface.withValues(alpha: 0.4)),
+      const SizedBox(height: 8),
+      Text(
+        'couldn’t load',
+        style: TextStyle(color: cs.onSurface.withValues(alpha: 0.6)),
+      ),
+      const SizedBox(height: 8),
+      OutlinedButton.icon(
+        onPressed: onRetry,
+        icon: const Icon(Icons.refresh),
+        label: const Text('Retry'),
+      ),
+    ],
+  ),
+);
 
 // --- Settings --------------------------------------------------------------
 
@@ -245,9 +274,11 @@ class _SettingsTabState extends State<_SettingsTab> {
   Future<void> _loadVoices() async {
     final key = _ttsKey.text.trim();
     if (key.isEmpty) {
-      setState(() => _voiceError = _ttsKeySet
-          ? 'Re-enter your API key to load voices'
-          : 'Enter your API key first');
+      setState(
+        () => _voiceError = _ttsKeySet
+            ? 'Re-enter your API key to load voices'
+            : 'Enter your API key first',
+      );
       return;
     }
     setState(() {
@@ -295,7 +326,9 @@ class _SettingsTabState extends State<_SettingsTab> {
       _ttsKey.clear();
       _sttKey.clear();
       await _loadVoice();
-      messenger.showSnackBar(const SnackBar(content: Text('voice settings saved')));
+      messenger.showSnackBar(
+        const SnackBar(content: Text('voice settings saved')),
+      );
     } catch (e) {
       messenger.showSnackBar(SnackBar(content: Text('save failed: $e')));
     }
@@ -327,29 +360,33 @@ class _SettingsTabState extends State<_SettingsTab> {
           ),
           const SizedBox(height: 18),
           _label('Model', cs),
-          Builder(builder: (context) {
-            final models = app.models;
-            final current = app.session?.modelName ?? '';
-            if (models.isEmpty) {
-              return Text(current.isEmpty ? '(loading…)' : current,
-                  style: TextStyle(color: cs.onSurface.withValues(alpha: 0.7)));
-            }
-            return Wrap(
-              spacing: 8,
-              runSpacing: 8,
-              children: [
-                for (final m in models)
-                  ChoiceChip(
-                    label: Text(m),
-                    selected: current == m,
-                    onSelected: (_) {
-                      app.session?.applyModel(m); // optimistic
-                      _api.setModel(m);
-                    },
-                  ),
-              ],
-            );
-          }),
+          Builder(
+            builder: (context) {
+              final models = app.models;
+              final current = app.session?.modelName ?? '';
+              if (models.isEmpty) {
+                return Text(
+                  current.isEmpty ? '(loading…)' : current,
+                  style: TextStyle(color: cs.onSurface.withValues(alpha: 0.7)),
+                );
+              }
+              return Wrap(
+                spacing: 8,
+                runSpacing: 8,
+                children: [
+                  for (final m in models)
+                    ChoiceChip(
+                      label: Text(m),
+                      selected: current == m,
+                      onSelected: (_) {
+                        app.session?.applyModel(m); // optimistic
+                        _api.setModel(m);
+                      },
+                    ),
+                ],
+              );
+            },
+          ),
           const SizedBox(height: 18),
           _label('Persona', cs),
           if (app.personas.isEmpty)
@@ -362,15 +399,21 @@ class _SettingsTabState extends State<_SettingsTab> {
                     dense: true,
                     contentPadding: EdgeInsets.zero,
                     selected: app.activePersona == p.name,
-                    leading: Icon(app.activePersona == p.name
-                        ? Icons.radio_button_checked
-                        : Icons.radio_button_unchecked),
+                    leading: Icon(
+                      app.activePersona == p.name
+                          ? Icons.radio_button_checked
+                          : Icons.radio_button_unchecked,
+                    ),
                     title: Text(p.name),
                     subtitle: p.description.isEmpty
                         ? null
-                        : Text(p.description,
-                            maxLines: 2, overflow: TextOverflow.ellipsis),
-                    onTap: () => app.setPersona(p.name), // optimistic in AppController
+                        : Text(
+                            p.description,
+                            maxLines: 2,
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                    onTap: () =>
+                        app.setPersona(p.name), // optimistic in AppController
                   ),
               ],
             ),
@@ -378,55 +421,73 @@ class _SettingsTabState extends State<_SettingsTab> {
           SwitchListTile(
             contentPadding: EdgeInsets.zero,
             title: const Text('YOLO — auto-approve tools'),
-            subtitle: Text('skip permission cards',
-                style: TextStyle(color: cs.onSurface.withValues(alpha: 0.6))),
+            subtitle: Text(
+              'skip permission cards',
+              style: TextStyle(color: cs.onSurface.withValues(alpha: 0.6)),
+            ),
             value: app.yolo,
             onChanged: app.setYolo,
           ),
           const SizedBox(height: 8),
           _label('Runtime', cs),
-          Row(children: [
-            const Expanded(child: Text('Plan mode')),
-            Switch(
-              value: _planMode,
-              onChanged: (v) {
-                setState(() => _planMode = v);
-                _api.setPlanMode(v);
-              },
+          Row(
+            children: [
+              const Expanded(child: Text('Plan mode')),
+              Switch(
+                value: _planMode,
+                onChanged: (v) {
+                  setState(() => _planMode = v);
+                  _api.setPlanMode(v);
+                },
+              ),
+            ],
+          ),
+          const SizedBox(height: 4),
+          Text(
+            'Approval brain',
+            style: TextStyle(
+              fontSize: 12,
+              color: cs.onSurface.withValues(alpha: 0.6),
             ),
-          ]),
+          ),
           const SizedBox(height: 4),
-          Text('Approval brain',
-              style: TextStyle(
-                  fontSize: 12, color: cs.onSurface.withValues(alpha: 0.6))),
-          const SizedBox(height: 4),
-          Wrap(spacing: 8, children: [
-            for (final mode in const ['off', 'advisory', 'auto'])
-              ChoiceChip(
-                label: Text(mode),
-                selected: _brainMode == mode,
-                onSelected: (_) {
-                  setState(() => _brainMode = mode);
-                  _api.setBrainMode(mode);
-                },
-              ),
-          ]),
+          Wrap(
+            spacing: 8,
+            children: [
+              for (final mode in const ['off', 'advisory', 'auto'])
+                ChoiceChip(
+                  label: Text(mode),
+                  selected: _brainMode == mode,
+                  onSelected: (_) {
+                    setState(() => _brainMode = mode);
+                    _api.setBrainMode(mode);
+                  },
+                ),
+            ],
+          ),
           const SizedBox(height: 8),
-          Text('Auto-continue steps',
-              style: TextStyle(
-                  fontSize: 12, color: cs.onSurface.withValues(alpha: 0.6))),
+          Text(
+            'Auto-continue steps',
+            style: TextStyle(
+              fontSize: 12,
+              color: cs.onSurface.withValues(alpha: 0.6),
+            ),
+          ),
           const SizedBox(height: 4),
-          Wrap(spacing: 8, children: [
-            for (final n in const [0, 4, 12, 24])
-              ChoiceChip(
-                label: Text('$n'),
-                selected: _autoCont == n,
-                onSelected: (_) {
-                  setState(() => _autoCont = n);
-                  _api.setAutoContinue(n);
-                },
-              ),
-          ]),
+          Wrap(
+            spacing: 8,
+            children: [
+              for (final n in const [0, 4, 12, 24])
+                ChoiceChip(
+                  label: Text('$n'),
+                  selected: _autoCont == n,
+                  onSelected: (_) {
+                    setState(() => _autoCont = n);
+                    _api.setAutoContinue(n);
+                  },
+                ),
+            ],
+          ),
           const Divider(height: 28),
           _label('Voice', cs),
           SwitchListTile(
@@ -435,24 +496,28 @@ class _SettingsTabState extends State<_SettingsTab> {
             value: _voiceEnabled,
             onChanged: (v) => setState(() => _voiceEnabled = v),
           ),
-          Wrap(spacing: 8, children: [
-            for (final p in const ['elevenlabs', 'openai'])
-              ChoiceChip(
-                label: Text(p),
-                selected: _ttsProvider == p,
-                onSelected: (_) => setState(() {
-                  _ttsProvider = p;
-                  _voices = [];
-                  _voiceError = null;
-                }),
-              ),
-          ]),
+          Wrap(
+            spacing: 8,
+            children: [
+              for (final p in const ['elevenlabs', 'openai'])
+                ChoiceChip(
+                  label: Text(p),
+                  selected: _ttsProvider == p,
+                  onSelected: (_) => setState(() {
+                    _ttsProvider = p;
+                    _voices = [];
+                    _voiceError = null;
+                  }),
+                ),
+            ],
+          ),
           const SizedBox(height: 12),
           TextField(
             controller: _ttsKey,
             obscureText: true,
-            onSubmitted:
-                _ttsProvider == 'elevenlabs' ? (_) => _loadVoices() : null,
+            onSubmitted: _ttsProvider == 'elevenlabs'
+                ? (_) => _loadVoices()
+                : null,
             decoration: InputDecoration(
               labelText: _ttsProvider == 'elevenlabs'
                   ? 'ElevenLabs API key'
@@ -464,39 +529,48 @@ class _SettingsTabState extends State<_SettingsTab> {
           // ElevenLabs: authenticate the key and pick the voice from a dropdown.
           if (_ttsProvider == 'elevenlabs') ...[
             const SizedBox(height: 10),
-            Row(children: [
-              OutlinedButton.icon(
-                onPressed: _loadingVoices ? null : _loadVoices,
-                icon: _loadingVoices
-                    ? const SizedBox(
-                        width: 16,
-                        height: 16,
-                        child: CircularProgressIndicator(strokeWidth: 2))
-                    : const Icon(Icons.podcasts, size: 18),
-                label: Text(_voices.isEmpty
-                    ? 'Authenticate & load voices'
-                    : 'Reload voices'),
-              ),
-              const SizedBox(width: 10),
-              if (_voices.isNotEmpty)
-                Text('✓ ${_voices.length} voices',
+            Row(
+              children: [
+                OutlinedButton.icon(
+                  onPressed: _loadingVoices ? null : _loadVoices,
+                  icon: _loadingVoices
+                      ? const SizedBox(
+                          width: 16,
+                          height: 16,
+                          child: CircularProgressIndicator(strokeWidth: 2),
+                        )
+                      : const Icon(Icons.podcasts, size: 18),
+                  label: Text(
+                    _voices.isEmpty
+                        ? 'Authenticate & load voices'
+                        : 'Reload voices',
+                  ),
+                ),
+                const SizedBox(width: 10),
+                if (_voices.isNotEmpty)
+                  Text(
+                    '✓ ${_voices.length} voices',
                     style: const TextStyle(
-                        color: Color(0xFF4FE0A0),
-                        fontWeight: FontWeight.w600)),
-            ]),
+                      color: Color(0xFF4FE0A0),
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+              ],
+            ),
             if (_voiceError != null)
               Padding(
                 padding: const EdgeInsets.only(top: 6),
-                child: Text(_voiceError!,
-                    style: TextStyle(color: cs.error, fontSize: 12.5)),
+                child: Text(
+                  _voiceError!,
+                  style: TextStyle(color: cs.error, fontSize: 12.5),
+                ),
               ),
             const SizedBox(height: 12),
             if (_voices.isNotEmpty)
               DropdownButtonFormField<String>(
-                initialValue:
-                    _voices.any((v) => v.id == _ttsVoice.text.trim())
-                        ? _ttsVoice.text.trim()
-                        : null,
+                initialValue: _voices.any((v) => v.id == _ttsVoice.text.trim())
+                    ? _ttsVoice.text.trim()
+                    : null,
                 isExpanded: true,
                 decoration: const InputDecoration(
                   labelText: 'Voice',
@@ -505,11 +579,11 @@ class _SettingsTabState extends State<_SettingsTab> {
                 items: [
                   for (final v in _voices)
                     DropdownMenuItem(
-                        value: v.id,
-                        child: Text(v.name, overflow: TextOverflow.ellipsis)),
+                      value: v.id,
+                      child: Text(v.name, overflow: TextOverflow.ellipsis),
+                    ),
                 ],
-                onChanged: (id) =>
-                    setState(() => _ttsVoice.text = id ?? ''),
+                onChanged: (id) => setState(() => _ttsVoice.text = id ?? ''),
               )
             else
               TextField(
@@ -549,55 +623,67 @@ class _SettingsTabState extends State<_SettingsTab> {
           ),
           const Divider(height: 28),
           _label('Maintenance', cs),
-          Wrap(spacing: 8, runSpacing: 8, children: [
-            OutlinedButton.icon(
-              onPressed: _reload,
-              icon: const Icon(Icons.refresh, size: 18),
-              label: const Text('Reload agent'),
-            ),
-            OutlinedButton.icon(
-              onPressed: _recover,
-              icon: const Icon(Icons.healing, size: 18),
-              label: const Text('Recover'),
-            ),
-            OutlinedButton.icon(
-              onPressed: _restart,
-              icon: Icon(Icons.power_settings_new, size: 18, color: cs.error),
-              label: Text('Restart gateway', style: TextStyle(color: cs.error)),
-            ),
-            OutlinedButton.icon(
-              onPressed: _editConfig,
-              icon: const Icon(Icons.tune, size: 18),
-              label: const Text('Edit config'),
-            ),
-            OutlinedButton.icon(
-              onPressed: _newSkill,
-              icon: const Icon(Icons.auto_awesome, size: 18),
-              label: const Text('New skill'),
-            ),
-          ]),
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            children: [
+              OutlinedButton.icon(
+                onPressed: _reload,
+                icon: const Icon(Icons.refresh, size: 18),
+                label: const Text('Reload agent'),
+              ),
+              OutlinedButton.icon(
+                onPressed: _recover,
+                icon: const Icon(Icons.healing, size: 18),
+                label: const Text('Recover'),
+              ),
+              OutlinedButton.icon(
+                onPressed: _restart,
+                icon: Icon(Icons.power_settings_new, size: 18, color: cs.error),
+                label: Text(
+                  'Restart gateway',
+                  style: TextStyle(color: cs.error),
+                ),
+              ),
+              OutlinedButton.icon(
+                onPressed: _editConfig,
+                icon: const Icon(Icons.tune, size: 18),
+                label: const Text('Edit config'),
+              ),
+              OutlinedButton.icon(
+                onPressed: _newSkill,
+                icon: const Icon(Icons.auto_awesome, size: 18),
+                label: const Text('New skill'),
+              ),
+            ],
+          ),
           const SizedBox(height: 18),
-          Row(children: [
-            _label('Grid', cs),
-            const Spacer(),
-            IconButton(
-              tooltip: 'Refresh',
-              visualDensity: VisualDensity.compact,
-              icon: const Icon(Icons.refresh, size: 18),
-              onPressed: () => setState(() {}),
-            ),
-          ]),
+          Row(
+            children: [
+              _label('Grid', cs),
+              const Spacer(),
+              IconButton(
+                tooltip: 'Refresh',
+                visualDensity: VisualDensity.compact,
+                icon: const Icon(Icons.refresh, size: 18),
+                onPressed: () => setState(() {}),
+              ),
+            ],
+          ),
           FutureBuilder<Map<String, dynamic>>(
             future: _api.gridMetrics(),
             builder: (context, snap) {
               if (snap.connectionState != ConnectionState.done) {
                 return const Padding(
-                    padding: EdgeInsets.all(8), child: LinearProgressIndicator());
+                  padding: EdgeInsets.all(8),
+                  child: LinearProgressIndicator(),
+                );
               }
               if (snap.hasError) {
-                return Text('grid off / unavailable',
-                    style:
-                        TextStyle(color: cs.onSurface.withValues(alpha: 0.6)));
+                return Text(
+                  'grid off / unavailable',
+                  style: TextStyle(color: cs.onSurface.withValues(alpha: 0.6)),
+                );
               }
               final d = snap.data!;
               final me = (d['self'] as Map?) ?? const {};
@@ -610,36 +696,48 @@ class _SettingsTabState extends State<_SettingsTab> {
                 final t = asMap(m['tokens']);
                 return Padding(
                   padding: const EdgeInsets.symmetric(vertical: 4),
-                  child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                    Icon(online ? Icons.dns : Icons.cloud_off,
+                  child: Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Icon(
+                        online ? Icons.dns : Icons.cloud_off,
                         size: 16,
                         color: online
                             ? Colors.greenAccent
-                            : cs.onSurface.withValues(alpha: 0.4)),
-                    const SizedBox(width: 8),
-                    Expanded(
-                      child: Column(
+                            : cs.onSurface.withValues(alpha: 0.4),
+                      ),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: Column(
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
-                            Text(name,
-                                style:
-                                    const TextStyle(fontWeight: FontWeight.w600)),
+                            Text(
+                              name,
+                              style: const TextStyle(
+                                fontWeight: FontWeight.w600,
+                              ),
+                            ),
                             if (online)
                               Text(
-                                  'tasks ${n(m['tasks_local'])} local · ${n(m['tasks_remote'])} remote   ·   ↑${n(t['input'])} ↓${n(t['output'])} tok',
-                                  style: TextStyle(
-                                      fontSize: 11,
-                                      color:
-                                          cs.onSurface.withValues(alpha: 0.6)))
+                                'tasks ${n(m['tasks_local'])} local · ${n(m['tasks_remote'])} remote   ·   ↑${n(t['input'])} ↓${n(t['output'])} tok',
+                                style: TextStyle(
+                                  fontSize: 11,
+                                  color: cs.onSurface.withValues(alpha: 0.6),
+                                ),
+                              )
                             else
-                              Text('offline',
-                                  style: TextStyle(
-                                      fontSize: 11,
-                                      color:
-                                          cs.onSurface.withValues(alpha: 0.5))),
-                          ]),
-                    ),
-                  ]),
+                              Text(
+                                'offline',
+                                style: TextStyle(
+                                  fontSize: 11,
+                                  color: cs.onSurface.withValues(alpha: 0.5),
+                                ),
+                              ),
+                          ],
+                        ),
+                      ),
+                    ],
+                  ),
                 );
               }
 
@@ -647,20 +745,28 @@ class _SettingsTabState extends State<_SettingsTab> {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Text(
-                      '${n(totals['nodes_online'])} node(s) online · ${n(totals['tasks_total'])} tasks · ↑${n(tt['input'])} ↓${n(tt['output'])} tok grid-wide',
-                      style: TextStyle(
-                          fontSize: 12,
-                          color: cs.primary,
-                          fontWeight: FontWeight.w600)),
+                    '${n(totals['nodes_online'])} node(s) online · ${n(totals['tasks_total'])} tasks · ↑${n(tt['input'])} ↓${n(tt['output'])} tok grid-wide',
+                    style: TextStyle(
+                      fontSize: 12,
+                      color: cs.primary,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
                   const SizedBox(height: 4),
                   node('this gateway', true, me),
                   for (final p in peers)
-                    node((p as Map)['name']?.toString() ?? 'peer',
-                        p['online'] == true, asMap(p['metrics'])),
+                    node(
+                      (p as Map)['name']?.toString() ?? 'peer',
+                      p['online'] == true,
+                      asMap(p['metrics']),
+                    ),
                   if (peers.isEmpty)
-                    Text('no peers discovered on the network',
-                        style:
-                            TextStyle(color: cs.onSurface.withValues(alpha: 0.6))),
+                    Text(
+                      'no peers discovered on the network',
+                      style: TextStyle(
+                        color: cs.onSurface.withValues(alpha: 0.6),
+                      ),
+                    ),
                 ],
               );
             },
@@ -688,7 +794,10 @@ class _SettingsTabState extends State<_SettingsTab> {
     try {
       final r = await _api.selfRecover();
       m.showSnackBar(
-          SnackBar(content: Text('recover: ${r['action'] ?? r['error'] ?? 'ok'}')));
+        SnackBar(
+          content: Text('recover: ${r['action'] ?? r['error'] ?? 'ok'}'),
+        ),
+      );
     } catch (e) {
       m.showSnackBar(SnackBar(content: Text('recover failed: $e')));
     }
@@ -701,23 +810,29 @@ class _SettingsTabState extends State<_SettingsTab> {
       builder: (c) => AlertDialog(
         title: const Text('Restart gateway?'),
         content: const Text(
-            'Bounces the gateway service. In-flight turns are interrupted; '
-            'the app reconnects automatically.'),
+          'Bounces the gateway service. In-flight turns are interrupted; '
+          'the app reconnects automatically.',
+        ),
         actions: [
           TextButton(
-              onPressed: () => Navigator.pop(c, false),
-              child: const Text('Cancel')),
+            onPressed: () => Navigator.pop(c, false),
+            child: const Text('Cancel'),
+          ),
           FilledButton(
-              onPressed: () => Navigator.pop(c, true),
-              child: const Text('Restart')),
+            onPressed: () => Navigator.pop(c, true),
+            child: const Text('Restart'),
+          ),
         ],
       ),
     );
     if (ok != true) return;
     try {
       final r = await _api.selfRestart();
-      m.showSnackBar(SnackBar(
-          content: Text('restart: ${r['mode'] ?? (r['error'] ?? 'ok')}')));
+      m.showSnackBar(
+        SnackBar(
+          content: Text('restart: ${r['mode'] ?? (r['error'] ?? 'ok')}'),
+        ),
+      );
     } catch (e) {
       m.showSnackBar(SnackBar(content: Text('restart failed: $e')));
     }
@@ -731,34 +846,51 @@ class _SettingsTabState extends State<_SettingsTab> {
       context: context,
       builder: (c) => AlertDialog(
         title: const Text('Set config key'),
-        content: Column(mainAxisSize: MainAxisSize.min, children: [
-          TextField(
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            TextField(
               controller: keyC,
               decoration: const InputDecoration(
-                  labelText: 'dotted key, e.g. llm.temperature')),
-          TextField(
+                labelText: 'dotted key, e.g. llm.temperature',
+              ),
+            ),
+            TextField(
               controller: valC,
-              decoration:
-                  const InputDecoration(labelText: 'value (JSON or text)')),
-        ]),
+              decoration: const InputDecoration(
+                labelText: 'value (JSON or text)',
+              ),
+            ),
+          ],
+        ),
         actions: [
           TextButton(
-              onPressed: () => Navigator.pop(c, false),
-              child: const Text('Cancel')),
+            onPressed: () => Navigator.pop(c, false),
+            child: const Text('Cancel'),
+          ),
           FilledButton(
-              onPressed: () => Navigator.pop(c, true),
-              child: const Text('Set + reload')),
+            onPressed: () => Navigator.pop(c, true),
+            child: const Text('Set + reload'),
+          ),
         ],
       ),
     );
     if (ok != true || keyC.text.trim().isEmpty) return;
     try {
-      final r =
-          await _api.selfConfigSet(keyC.text.trim(), valC.text, reload: true);
-      m.showSnackBar(SnackBar(
-          content: Text(r['ok'] == true
-              ? (r['message']?.toString() ?? 'config set')
-              : 'error: ${r['error']}')));
+      final r = await _api.selfConfigSet(
+        keyC.text.trim(),
+        valC.text,
+        reload: true,
+      );
+      m.showSnackBar(
+        SnackBar(
+          content: Text(
+            r['ok'] == true
+                ? (r['message']?.toString() ?? 'config set')
+                : 'error: ${r['error']}',
+          ),
+        ),
+      );
     } catch (e) {
       m.showSnackBar(SnackBar(content: Text('config failed: $e')));
     }
@@ -773,36 +905,53 @@ class _SettingsTabState extends State<_SettingsTab> {
       context: context,
       builder: (c) => AlertDialog(
         title: const Text('New / update skill'),
-        content: Column(mainAxisSize: MainAxisSize.min, children: [
-          TextField(
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            TextField(
               controller: nameC,
-              decoration: const InputDecoration(labelText: 'name (slug)')),
-          TextField(
+              decoration: const InputDecoration(labelText: 'name (slug)'),
+            ),
+            TextField(
               controller: descC,
-              decoration: const InputDecoration(labelText: 'description')),
-          TextField(
+              decoration: const InputDecoration(labelText: 'description'),
+            ),
+            TextField(
               controller: instrC,
               maxLines: 4,
-              decoration:
-                  const InputDecoration(labelText: 'instructions (markdown)')),
-        ]),
+              decoration: const InputDecoration(
+                labelText: 'instructions (markdown)',
+              ),
+            ),
+          ],
+        ),
         actions: [
           TextButton(
-              onPressed: () => Navigator.pop(c, false),
-              child: const Text('Cancel')),
+            onPressed: () => Navigator.pop(c, false),
+            child: const Text('Cancel'),
+          ),
           FilledButton(
-              onPressed: () => Navigator.pop(c, true),
-              child: const Text('Save + reload')),
+            onPressed: () => Navigator.pop(c, true),
+            child: const Text('Save + reload'),
+          ),
         ],
       ),
     );
     if (ok != true || nameC.text.trim().isEmpty) return;
     try {
       final r = await _api.skillWrite(
-          nameC.text.trim(), descC.text.trim(), instrC.text,
-          reload: true);
-      m.showSnackBar(SnackBar(
-          content: Text(r['ok'] == true ? 'skill saved' : 'error: ${r['error']}')));
+        nameC.text.trim(),
+        descC.text.trim(),
+        instrC.text,
+        reload: true,
+      );
+      m.showSnackBar(
+        SnackBar(
+          content: Text(
+            r['ok'] == true ? 'skill saved' : 'error: ${r['error']}',
+          ),
+        ),
+      );
     } catch (e) {
       m.showSnackBar(SnackBar(content: Text('skill failed: $e')));
     }
@@ -868,26 +1017,37 @@ class _StatusTabState extends State<_StatusTab> {
               controller: widget.scroll,
               padding: const EdgeInsets.all(16),
               children: [
-                _row('uptime', _fmtUptime((st['uptime_secs'] as num?) ?? 0), cs),
+                _row(
+                  'uptime',
+                  _fmtUptime((st['uptime_secs'] as num?) ?? 0),
+                  cs,
+                ),
                 _row('model', st['model']?.toString() ?? s.modelName, cs),
                 _row('version', st['version']?.toString() ?? '—', cs),
                 const SizedBox(height: 14),
                 _label('context', cs),
                 ClipRRect(
                   borderRadius: BorderRadius.circular(4),
-                  child: LinearProgressIndicator(value: s.contextFrac, minHeight: 8),
+                  child: LinearProgressIndicator(
+                    value: s.contextFrac,
+                    minHeight: 8,
+                  ),
                 ),
                 const SizedBox(height: 2),
-                Text('${(s.contextFrac * 100).round()}%',
-                    style: const TextStyle(fontSize: 12)),
+                Text(
+                  '${(s.contextFrac * 100).round()}%',
+                  style: const TextStyle(fontSize: 12),
+                ),
                 const SizedBox(height: 14),
                 _row('tokens', '↑${s.inputTokens}  ↓${s.outputTokens}', cs),
                 if (s.costUsd > 0)
                   _row('cost', '\$${s.costUsd.toStringAsFixed(4)}', cs),
                 const SizedBox(height: 14),
                 _label('working dir', cs),
-                Text(st['working_dir']?.toString() ?? '—',
-                    style: const TextStyle(fontFamily: 'monospace', fontSize: 12)),
+                Text(
+                  st['working_dir']?.toString() ?? '—',
+                  style: const TextStyle(fontFamily: 'monospace', fontSize: 12),
+                ),
               ],
             ),
           ),
@@ -897,19 +1057,21 @@ class _StatusTabState extends State<_StatusTab> {
   }
 
   Widget _row(String k, String v, ColorScheme cs) => Padding(
-        padding: const EdgeInsets.symmetric(vertical: 4),
-        child: Row(
-          mainAxisAlignment: MainAxisAlignment.spaceBetween,
-          children: [
-            Text(k, style: TextStyle(color: cs.onSurface.withValues(alpha: 0.7))),
-            Flexible(
-              child: Text(v,
-                  textAlign: TextAlign.right,
-                  style: const TextStyle(fontFamily: 'monospace', fontSize: 13)),
-            ),
-          ],
+    padding: const EdgeInsets.symmetric(vertical: 4),
+    child: Row(
+      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+      children: [
+        Text(k, style: TextStyle(color: cs.onSurface.withValues(alpha: 0.7))),
+        Flexible(
+          child: Text(
+            v,
+            textAlign: TextAlign.right,
+            style: const TextStyle(fontFamily: 'monospace', fontSize: 13),
+          ),
         ),
-      );
+      ],
+    ),
+  );
 }
 
 // --- Tasks (the persistent board) ------------------------------------------
@@ -970,12 +1132,12 @@ class _TasksTabState extends State<_TasksTab> {
   static const _order = ['doing', 'review', 'todo', 'done', 'cancelled'];
 
   (String, Color) _style(String state, ColorScheme cs) => switch (state) {
-        'doing' => ('▶', cs.primary),
-        'review' => ('→', cs.secondary),
-        'done' => ('✓', Colors.greenAccent),
-        'cancelled' => ('✗', cs.onSurface.withValues(alpha: 0.4)),
-        _ => ('○', cs.onSurface.withValues(alpha: 0.7)),
-      };
+    'doing' => ('▶', cs.primary),
+    'review' => ('→', cs.secondary),
+    'done' => ('✓', Colors.greenAccent),
+    'cancelled' => ('✗', cs.onSurface.withValues(alpha: 0.4)),
+    _ => ('○', cs.onSurface.withValues(alpha: 0.7)),
+  };
 
   Widget _loopBar(ColorScheme cs) {
     final running = (_loop['running'] as bool?) ?? false;
@@ -993,8 +1155,11 @@ class _TasksTabState extends State<_TasksTab> {
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
               style: TextStyle(
-                  fontSize: 12,
-                  color: running ? cs.primary : cs.onSurface.withValues(alpha: 0.6)),
+                fontSize: 12,
+                color: running
+                    ? cs.primary
+                    : cs.onSurface.withValues(alpha: 0.6),
+              ),
             ),
           ),
           const SizedBox(width: 8),
@@ -1002,11 +1167,13 @@ class _TasksTabState extends State<_TasksTab> {
               ? FilledButton.tonalIcon(
                   onPressed: _toggleLoop,
                   icon: const Icon(Icons.stop, size: 18),
-                  label: const Text('Stop'))
+                  label: const Text('Stop'),
+                )
               : FilledButton.icon(
                   onPressed: _toggleLoop,
                   icon: const Icon(Icons.play_arrow, size: 18),
-                  label: const Text('Run loop')),
+                  label: const Text('Run loop'),
+                ),
         ],
       ),
     );
@@ -1041,8 +1208,11 @@ class _TasksTabState extends State<_TasksTab> {
         final tasks = snap.data!;
         if (tasks.isEmpty) {
           return Center(
-              child: Text('(no tasks — add with `blumi task add`)',
-                  style: TextStyle(color: cs.onSurface.withValues(alpha: 0.6))));
+            child: Text(
+              '(no tasks — add with `blumi task add`)',
+              style: TextStyle(color: cs.onSurface.withValues(alpha: 0.6)),
+            ),
+          );
         }
         final byState = {for (final s in _order) s: <TaskItem>[]};
         for (final t in tasks) {
@@ -1062,11 +1232,14 @@ class _TasksTabState extends State<_TasksTab> {
                 if (byState[state]!.isNotEmpty) ...[
                   Padding(
                     padding: const EdgeInsets.only(top: 8, bottom: 4),
-                    child: Text('${state.toUpperCase()} · ${byState[state]!.length}',
-                        style: TextStyle(
-                            fontWeight: FontWeight.bold,
-                            fontSize: 12,
-                            color: cs.onSurface.withValues(alpha: 0.7))),
+                    child: Text(
+                      '${state.toUpperCase()} · ${byState[state]!.length}',
+                      style: TextStyle(
+                        fontWeight: FontWeight.bold,
+                        fontSize: 12,
+                        color: cs.onSurface.withValues(alpha: 0.7),
+                      ),
+                    ),
                   ),
                   for (final t in byState[state]!) _taskTile(t, cs),
                 ],
@@ -1092,37 +1265,55 @@ class _TasksTabState extends State<_TasksTab> {
               color: cs.onSurface.withValues(alpha: 0.1),
               borderRadius: BorderRadius.circular(4),
             ),
-            child: Text('P${t.priority}',
-                style: TextStyle(fontSize: 10, color: cs.onSurface.withValues(alpha: 0.7))),
+            child: Text(
+              'P${t.priority}',
+              style: TextStyle(
+                fontSize: 10,
+                color: cs.onSurface.withValues(alpha: 0.7),
+              ),
+            ),
           ),
           Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text(t.title,
-                    style: TextStyle(
-                        decoration: t.state == 'done' || t.state == 'cancelled'
-                            ? TextDecoration.lineThrough
-                            : null)),
+                Text(
+                  t.title,
+                  style: TextStyle(
+                    decoration: t.state == 'done' || t.state == 'cancelled'
+                        ? TextDecoration.lineThrough
+                        : null,
+                  ),
+                ),
                 if (t.detail.isNotEmpty)
-                  Text(t.detail,
-                      maxLines: 2,
-                      overflow: TextOverflow.ellipsis,
-                      style: TextStyle(
-                          fontSize: 12, color: cs.onSurface.withValues(alpha: 0.6))),
+                  Text(
+                    t.detail,
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                      fontSize: 12,
+                      color: cs.onSurface.withValues(alpha: 0.6),
+                    ),
+                  ),
                 // Remote-runtime attribution: which grid peer is executing this.
                 if (t.owner != null)
                   Padding(
                     padding: const EdgeInsets.only(top: 2),
-                    child: Row(mainAxisSize: MainAxisSize.min, children: [
-                      Icon(Icons.dns, size: 12, color: cs.tertiary),
-                      const SizedBox(width: 3),
-                      Text('remote · ${t.owner}',
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Icon(Icons.dns, size: 12, color: cs.tertiary),
+                        const SizedBox(width: 3),
+                        Text(
+                          'remote · ${t.owner}',
                           style: TextStyle(
-                              fontSize: 11,
-                              color: cs.tertiary,
-                              fontWeight: FontWeight.w500)),
-                    ]),
+                            fontSize: 11,
+                            color: cs.tertiary,
+                            fontWeight: FontWeight.w500,
+                          ),
+                        ),
+                      ],
+                    ),
                   ),
               ],
             ),
@@ -1147,8 +1338,7 @@ class _GridTab extends StatefulWidget {
   State<_GridTab> createState() => _GridTabState();
 }
 
-class _GridTabState extends State<_GridTab>
-    with AutomaticKeepAliveClientMixin {
+class _GridTabState extends State<_GridTab> with AutomaticKeepAliveClientMixin {
   @override
   bool get wantKeepAlive => true;
 
@@ -1207,8 +1397,10 @@ class _GridTabState extends State<_GridTab>
       final r = await _api.gridDelegate(text, target: _target);
       if (!mounted) return;
       if (r['ok'] == true) {
-        setState(() => _results =
-            ((r['results'] as List?) ?? []).cast<Map<String, dynamic>>());
+        setState(
+          () => _results = ((r['results'] as List?) ?? [])
+              .cast<Map<String, dynamic>>(),
+        );
       } else {
         setState(() => _error = r['error']?.toString() ?? 'delegation failed');
       }
@@ -1228,56 +1420,76 @@ class _GridTabState extends State<_GridTab>
       controller: widget.scroll,
       padding: const EdgeInsets.all(16),
       children: [
-        Row(children: [
-          _label('Live peers', cs),
-          const Spacer(),
-          IconButton(
-            tooltip: 'Refresh peers',
-            visualDensity: VisualDensity.compact,
-            icon: const Icon(Icons.refresh, size: 18),
-            onPressed: _loadingPeers ? null : _loadPeers,
-          ),
-        ]),
+        Row(
+          children: [
+            _label('Live peers', cs),
+            const Spacer(),
+            IconButton(
+              tooltip: 'Refresh peers',
+              visualDensity: VisualDensity.compact,
+              icon: const Icon(Icons.refresh, size: 18),
+              onPressed: _loadingPeers ? null : _loadPeers,
+            ),
+          ],
+        ),
         if (_loadingPeers)
           const Padding(
-              padding: EdgeInsets.all(8), child: LinearProgressIndicator())
+            padding: EdgeInsets.all(8),
+            child: LinearProgressIndicator(),
+          )
         else if (_peers.isEmpty)
-          Text('no live grid peers',
-              style: TextStyle(color: cs.onSurface.withValues(alpha: 0.6)))
+          Text(
+            'no live grid peers',
+            style: TextStyle(color: cs.onSurface.withValues(alpha: 0.6)),
+          )
         else
           for (final p in _peers)
             Padding(
               padding: const EdgeInsets.symmetric(vertical: 3),
-              child: Row(children: [
-                const Icon(Icons.dns, size: 16, color: Colors.greenAccent),
-                const SizedBox(width: 8),
-                Text(p.name,
-                    style: const TextStyle(fontWeight: FontWeight.w600)),
-                const SizedBox(width: 8),
-                Text(p.host,
+              child: Row(
+                children: [
+                  const Icon(Icons.dns, size: 16, color: Colors.greenAccent),
+                  const SizedBox(width: 8),
+                  Text(
+                    p.name,
+                    style: const TextStyle(fontWeight: FontWeight.w600),
+                  ),
+                  const SizedBox(width: 8),
+                  Text(
+                    p.host,
                     style: TextStyle(
-                        fontSize: 12,
-                        color: cs.onSurface.withValues(alpha: 0.6))),
-              ]),
+                      fontSize: 12,
+                      color: cs.onSurface.withValues(alpha: 0.6),
+                    ),
+                  ),
+                ],
+              ),
             ),
         const SizedBox(height: 18),
         _label('Delegate a task', cs),
         const SizedBox(height: 4),
-        Row(children: [
-          Text('Run on ',
-              style: TextStyle(color: cs.onSurface.withValues(alpha: 0.7))),
-          DropdownButton<String>(
-            value: _target,
-            onChanged:
-                _busy ? null : (v) => setState(() => _target = v ?? 'all'),
-            items: [
-              const DropdownMenuItem(
-                  value: 'all', child: Text('all peers (broadcast)')),
-              for (final p in _peers)
-                DropdownMenuItem(value: p.name, child: Text(p.name)),
-            ],
-          ),
-        ]),
+        Row(
+          children: [
+            Text(
+              'Run on ',
+              style: TextStyle(color: cs.onSurface.withValues(alpha: 0.7)),
+            ),
+            DropdownButton<String>(
+              value: _target,
+              onChanged: _busy
+                  ? null
+                  : (v) => setState(() => _target = v ?? 'all'),
+              items: [
+                const DropdownMenuItem(
+                  value: 'all',
+                  child: Text('all peers (broadcast)'),
+                ),
+                for (final p in _peers)
+                  DropdownMenuItem(value: p.name, child: Text(p.name)),
+              ],
+            ),
+          ],
+        ),
         const SizedBox(height: 8),
         TextField(
           controller: _prompt,
@@ -1300,7 +1512,8 @@ class _GridTabState extends State<_GridTab>
                 ? const SizedBox(
                     width: 16,
                     height: 16,
-                    child: CircularProgressIndicator(strokeWidth: 2))
+                    child: CircularProgressIndicator(strokeWidth: 2),
+                  )
                 : const Icon(Icons.hub, size: 18),
             label: Text(_busy ? 'Delegating…' : 'Delegate over grid'),
           ),
@@ -1331,33 +1544,48 @@ class _GridTabState extends State<_GridTab>
       margin: const EdgeInsets.only(bottom: 8),
       child: Padding(
         padding: const EdgeInsets.all(10),
-        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-          Row(children: [
-            Icon(ok ? Icons.check_circle : Icons.error,
-                size: 16, color: ok ? Colors.greenAccent : cs.error),
-            const SizedBox(width: 6),
-            Text(peer, style: const TextStyle(fontWeight: FontWeight.bold)),
-            const SizedBox(width: 6),
-            Expanded(
-              child: Text(host,
-                  style: TextStyle(
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                Icon(
+                  ok ? Icons.check_circle : Icons.error,
+                  size: 16,
+                  color: ok ? Colors.greenAccent : cs.error,
+                ),
+                const SizedBox(width: 6),
+                Text(peer, style: const TextStyle(fontWeight: FontWeight.bold)),
+                const SizedBox(width: 6),
+                Expanded(
+                  child: Text(
+                    host,
+                    style: TextStyle(
                       fontSize: 11,
-                      color: cs.onSurface.withValues(alpha: 0.55))),
-            ),
-            Text('${(ms / 1000).toStringAsFixed(1)}s',
-                style: TextStyle(
+                      color: cs.onSurface.withValues(alpha: 0.55),
+                    ),
+                  ),
+                ),
+                Text(
+                  '${(ms / 1000).toStringAsFixed(1)}s',
+                  style: TextStyle(
                     fontSize: 11,
-                    color: cs.onSurface.withValues(alpha: 0.55))),
-          ]),
-          const SizedBox(height: 6),
-          SelectableText(
-            body,
-            style: TextStyle(
+                    color: cs.onSurface.withValues(alpha: 0.55),
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 6),
+            SelectableText(
+              body,
+              style: TextStyle(
                 fontFamily: 'monospace',
                 fontSize: 12.5,
-                color: ok ? cs.onSurface : cs.error),
-          ),
-        ]),
+                color: ok ? cs.onSurface : cs.error,
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -1408,8 +1636,8 @@ class _KnowledgeTabState extends State<_KnowledgeTab>
       if (!mounted) return;
       setState(() {
         _status = st;
-        _sources =
-            ((src['sources'] as List?) ?? []).cast<Map<String, dynamic>>();
+        _sources = ((src['sources'] as List?) ?? [])
+            .cast<Map<String, dynamic>>();
       });
     } catch (_) {}
   }
@@ -1467,8 +1695,9 @@ class _KnowledgeTabState extends State<_KnowledgeTab>
     try {
       final r = await _api.knowledgeSearch(q, limit: 12);
       if (!mounted) return;
-      setState(() =>
-          _hits = ((r['hits'] as List?) ?? []).cast<Map<String, dynamic>>());
+      setState(
+        () => _hits = ((r['hits'] as List?) ?? []).cast<Map<String, dynamic>>(),
+      );
     } catch (e) {
       if (mounted) setState(() => _error = '$e');
     } finally {
@@ -1494,19 +1723,23 @@ class _KnowledgeTabState extends State<_KnowledgeTab>
       padding: const EdgeInsets.all(16),
       children: [
         if (!enabled)
-          Text('Code knowledge base is disabled (set knowledge.enabled).',
-              style: TextStyle(color: cs.onSurface.withValues(alpha: 0.6)))
+          Text(
+            'Code knowledge base is disabled (set knowledge.enabled).',
+            style: TextStyle(color: cs.onSurface.withValues(alpha: 0.6)),
+          )
         else ...[
-          Row(children: [
-            _label('Knowledge base', cs),
-            const Spacer(),
-            IconButton(
-              tooltip: 'Refresh',
-              visualDensity: VisualDensity.compact,
-              icon: const Icon(Icons.refresh, size: 18),
-              onPressed: _refresh,
-            ),
-          ]),
+          Row(
+            children: [
+              _label('Knowledge base', cs),
+              const Spacer(),
+              IconButton(
+                tooltip: 'Refresh',
+                visualDensity: VisualDensity.compact,
+                icon: const Icon(Icons.refresh, size: 18),
+                onPressed: _refresh,
+              ),
+            ],
+          ),
           Text(
             '${_status['files'] ?? 0} files · ${_status['symbols'] ?? 0} symbols · ${_status['vectors'] ?? 0} vectors',
             style: TextStyle(color: cs.onSurface.withValues(alpha: 0.7)),
@@ -1533,7 +1766,8 @@ class _KnowledgeTabState extends State<_KnowledgeTab>
                   ? const SizedBox(
                       width: 16,
                       height: 16,
-                      child: CircularProgressIndicator(strokeWidth: 2))
+                      child: CircularProgressIndicator(strokeWidth: 2),
+                    )
                   : const Icon(Icons.account_tree, size: 18),
               label: Text((_busy || ingesting) ? 'Indexing…' : 'Index'),
             ),
@@ -1541,10 +1775,13 @@ class _KnowledgeTabState extends State<_KnowledgeTab>
           if ((_status['message']?.toString() ?? '').isNotEmpty)
             Padding(
               padding: const EdgeInsets.only(top: 6),
-              child: Text(_status['message'].toString(),
-                  style: TextStyle(
-                      fontSize: 12,
-                      color: cs.onSurface.withValues(alpha: 0.6))),
+              child: Text(
+                _status['message'].toString(),
+                style: TextStyle(
+                  fontSize: 12,
+                  color: cs.onSurface.withValues(alpha: 0.6),
+                ),
+              ),
             ),
           if (_sources.isNotEmpty) ...[
             const SizedBox(height: 12),
@@ -1552,23 +1789,30 @@ class _KnowledgeTabState extends State<_KnowledgeTab>
             for (final s in _sources)
               Padding(
                 padding: const EdgeInsets.symmetric(vertical: 2),
-                child: Row(children: [
-                  Expanded(
-                    child: Text('${s['source']}',
+                child: Row(
+                  children: [
+                    Expanded(
+                      child: Text(
+                        '${s['source']}',
                         overflow: TextOverflow.ellipsis,
-                        style: const TextStyle(fontSize: 12.5)),
-                  ),
-                  Text('${s['symbols']}',
+                        style: const TextStyle(fontSize: 12.5),
+                      ),
+                    ),
+                    Text(
+                      '${s['symbols']}',
                       style: TextStyle(
-                          fontSize: 11,
-                          color: cs.onSurface.withValues(alpha: 0.55))),
-                  IconButton(
-                    tooltip: 'Remove',
-                    visualDensity: VisualDensity.compact,
-                    icon: const Icon(Icons.delete_outline, size: 16),
-                    onPressed: () => _remove('${s['source']}'),
-                  ),
-                ]),
+                        fontSize: 11,
+                        color: cs.onSurface.withValues(alpha: 0.55),
+                      ),
+                    ),
+                    IconButton(
+                      tooltip: 'Remove',
+                      visualDensity: VisualDensity.compact,
+                      icon: const Icon(Icons.delete_outline, size: 16),
+                      onPressed: () => _remove('${s['source']}'),
+                    ),
+                  ],
+                ),
               ),
           ],
           const SizedBox(height: 18),
@@ -1588,7 +1832,8 @@ class _KnowledgeTabState extends State<_KnowledgeTab>
                     ? const SizedBox(
                         width: 16,
                         height: 16,
-                        child: CircularProgressIndicator(strokeWidth: 2))
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      )
                     : const Icon(Icons.search),
                 onPressed: _searching ? null : _search,
               ),
@@ -1611,33 +1856,50 @@ class _KnowledgeTabState extends State<_KnowledgeTab>
   Widget _hitCard(Map<String, dynamic> h, ColorScheme cs) {
     final path = '${h['path'] ?? ''}';
     final parts = path.split('/');
-    final short = parts.length > 2 ? '…/${parts.sublist(parts.length - 2).join('/')}' : path;
+    final short = parts.length > 2
+        ? '…/${parts.sublist(parts.length - 2).join('/')}'
+        : path;
     return Card(
       margin: const EdgeInsets.only(bottom: 8),
       child: Padding(
         padding: const EdgeInsets.all(10),
-        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-          Row(children: [
-            Icon(Icons.code, size: 15, color: cs.primary),
-            const SizedBox(width: 6),
-            Expanded(
-              child: Text('${h['name'] ?? ''}',
-                  style: const TextStyle(fontWeight: FontWeight.bold)),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                Icon(Icons.code, size: 15, color: cs.primary),
+                const SizedBox(width: 6),
+                Expanded(
+                  child: Text(
+                    '${h['name'] ?? ''}',
+                    style: const TextStyle(fontWeight: FontWeight.bold),
+                  ),
+                ),
+                Text(
+                  '${h['kind'] ?? ''}',
+                  style: TextStyle(
+                    fontSize: 11,
+                    color: cs.onSurface.withValues(alpha: 0.55),
+                  ),
+                ),
+              ],
             ),
-            Text('${h['kind'] ?? ''}',
-                style: TextStyle(
-                    fontSize: 11, color: cs.onSurface.withValues(alpha: 0.55))),
-          ]),
-          Text('$short:${h['start_line'] ?? 0}',
+            Text(
+              '$short:${h['start_line'] ?? 0}',
               style: TextStyle(
-                  fontSize: 11, color: cs.onSurface.withValues(alpha: 0.55))),
-          const SizedBox(height: 6),
-          SelectableText(
-            '${h['snippet'] ?? ''}',
-            maxLines: 8,
-            style: const TextStyle(fontFamily: 'monospace', fontSize: 12),
-          ),
-        ]),
+                fontSize: 11,
+                color: cs.onSurface.withValues(alpha: 0.55),
+              ),
+            ),
+            const SizedBox(height: 6),
+            SelectableText(
+              '${h['snippet'] ?? ''}',
+              maxLines: 8,
+              style: const TextStyle(fontFamily: 'monospace', fontSize: 12),
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -1662,8 +1924,11 @@ class _UsageTab extends StatelessWidget {
       builder: (context, u, refresh) {
         if (u.isEmpty) {
           return Center(
-              child: Text('(no usage yet)',
-                  style: TextStyle(color: cs.onSurface.withValues(alpha: 0.6))));
+            child: Text(
+              '(no usage yet)',
+              style: TextStyle(color: cs.onSurface.withValues(alpha: 0.6)),
+            ),
+          );
         }
         return ListView(
           controller: scroll,
@@ -1676,9 +1941,13 @@ class _UsageTab extends StatelessWidget {
                   mainAxisAlignment: MainAxisAlignment.spaceBetween,
                   children: [
                     Text(e.key, style: const TextStyle(fontSize: 13)),
-                    Text('${e.value}',
-                        style: const TextStyle(
-                            fontSize: 13, fontFamily: 'monospace')),
+                    Text(
+                      '${e.value}',
+                      style: const TextStyle(
+                        fontSize: 13,
+                        fontFamily: 'monospace',
+                      ),
+                    ),
                   ],
                 ),
               ),
@@ -1709,8 +1978,11 @@ class _SkillsTab extends StatelessWidget {
       builder: (context, skills, refresh) {
         if (skills.isEmpty) {
           return Center(
-              child: Text('(no skills)',
-                  style: TextStyle(color: cs.onSurface.withValues(alpha: 0.6))));
+            child: Text(
+              '(no skills)',
+              style: TextStyle(color: cs.onSurface.withValues(alpha: 0.6)),
+            ),
+          );
         }
         return ListView(
           controller: scroll,
@@ -1720,7 +1992,11 @@ class _SkillsTab extends StatelessWidget {
               ListTile(
                 dense: true,
                 contentPadding: EdgeInsets.zero,
-                leading: Icon(Icons.auto_awesome, size: 18, color: cs.secondary),
+                leading: Icon(
+                  Icons.auto_awesome,
+                  size: 18,
+                  color: cs.secondary,
+                ),
                 title: Text(s),
               ),
           ],
@@ -1766,23 +2042,28 @@ class _MemoryTab extends StatelessWidget {
   }
 
   Widget _memoryBlock(String text, ColorScheme cs) => Container(
-        width: double.infinity,
-        margin: const EdgeInsets.only(top: 6),
-        padding: const EdgeInsets.all(10),
-        decoration: BoxDecoration(
-          color: Colors.black.withValues(alpha: 0.25),
-          borderRadius: BorderRadius.circular(8),
-        ),
-        child: SelectableText(text,
-            style: const TextStyle(fontFamily: 'monospace', fontSize: 12)),
-      );
+    width: double.infinity,
+    margin: const EdgeInsets.only(top: 6),
+    padding: const EdgeInsets.all(10),
+    decoration: BoxDecoration(
+      color: Colors.black.withValues(alpha: 0.25),
+      borderRadius: BorderRadius.circular(8),
+    ),
+    child: SelectableText(
+      text,
+      style: const TextStyle(fontFamily: 'monospace', fontSize: 12),
+    ),
+  );
 }
 
 Widget _label(String t, ColorScheme cs) => Padding(
-      padding: const EdgeInsets.only(bottom: 4),
-      child: Text(t,
-          style: TextStyle(
-              fontWeight: FontWeight.bold,
-              color: cs.onSurface.withValues(alpha: 0.7),
-              fontSize: 13)),
-    );
+  padding: const EdgeInsets.only(bottom: 4),
+  child: Text(
+    t,
+    style: TextStyle(
+      fontWeight: FontWeight.bold,
+      color: cs.onSurface.withValues(alpha: 0.7),
+      fontSize: 13,
+    ),
+  ),
+);
