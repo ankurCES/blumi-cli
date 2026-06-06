@@ -839,6 +839,18 @@ pub async fn plans(State(state): State<AppState>) -> Json<Value> {
     Json(state.mgmt().plans().await)
 }
 
+pub async fn memory_graph(
+    State(state): State<AppState>,
+    Json(b): Json<KbSearchBody>,
+) -> Json<Value> {
+    Json(
+        state
+            .mgmt()
+            .memory_graph(&b.query, b.limit.unwrap_or(40))
+            .await,
+    )
+}
+
 #[derive(Deserialize)]
 pub struct KbIngestBody {
     pub path: String,

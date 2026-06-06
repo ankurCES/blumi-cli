@@ -298,6 +298,12 @@ pub trait Management: Send + Sync {
         serde_json::json!({ "plans": [] })
     }
 
+    /// A query-centred memory subgraph → `{ nodes: [...], edges: [...] }`
+    /// (SEDM memories + similarity edges) for the mobile graph view.
+    async fn memory_graph(&self, _query: &str, _limit: u32) -> serde_json::Value {
+        serde_json::json!({ "nodes": [], "edges": [] })
+    }
+
     // --- Self-management ---
 
     /// The whole settings.json as JSON, with every secret redacted (for the
@@ -465,6 +471,7 @@ pub fn router(state: AppState) -> Router {
         .route("/api/knowledge/remove", post(api::knowledge_remove))
         .route("/api/memory/search", post(api::memory_search))
         .route("/api/plans", get(api::plans))
+        .route("/api/memory/graph", post(api::memory_graph))
         .route(
             "/api/self/config",
             get(api::self_config_get).post(api::self_config_set),

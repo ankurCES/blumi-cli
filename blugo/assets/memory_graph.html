@@ -1,0 +1,107 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no" />
+<style>
+  :root { color-scheme: dark; }
+  html, body { margin: 0; height: 100%; background: #16090e; overflow: hidden;
+    font-family: -apple-system, system-ui, sans-serif; }
+  #svg { width: 100vw; height: 100vh; display: block; touch-action: none; }
+  .edge { stroke: #7c5cff; }
+  .node { cursor: pointer; }
+  .label { fill: #d8d2dc; font-size: 9px; pointer-events: none; }
+  #empty { position: fixed; inset: 0; display: flex; align-items: center;
+    justify-content: center; color: #8a8090; padding: 24px; text-align: center; }
+  #card { position: fixed; left: 8px; right: 8px; bottom: 8px; background: #241620;
+    border: 1px solid #7c5cff; border-radius: 10px; padding: 10px 12px; color: #eee;
+    font-size: 13px; display: none; max-height: 40vh; overflow: auto; }
+  #card .ns { color: #9b8cff; font-size: 11px; }
+</style>
+</head>
+<body>
+<svg id="svg"><g id="edges"></g><g id="nodes"></g></svg>
+<div id="empty">Search your memory to see the graph.</div>
+<div id="card"></div>
+<script>
+const NS = { svg: document.getElementById('svg'), edges: document.getElementById('edges'),
+  nodes: document.getElementById('nodes'), empty: document.getElementById('empty'),
+  card: document.getElementById('card') };
+let W = window.innerWidth, H = window.innerHeight, raf = null, N = [], E = [];
+
+function color(ns) {
+  if (ns === 'user') return '#4fa3ff';
+  if (ns && ns.indexOf('project') === 0) return '#c084fc';
+  if (ns === 'agent') return '#4fe0a0';
+  return '#9aa0a6';
+}
+function svgEl(t) { return document.createElementNS('http://www.w3.org/2000/svg', t); }
+
+function render(data) {
+  cancelAnimationFrame(raf);
+  W = window.innerWidth; H = window.innerHeight;
+  const nodes = (data && data.nodes) || [];
+  const edges = (data && data.edges) || [];
+  NS.empty.style.display = nodes.length ? 'none' : 'flex';
+  NS.edges.innerHTML = ''; NS.nodes.innerHTML = ''; NS.card.style.display = 'none';
+  const byId = {};
+  N = nodes.map((n, i) => {
+    const o = { ...n, x: W/2 + (Math.cos(i) * 60), y: H/2 + (Math.sin(i) * 60), vx: 0, vy: 0 };
+    byId[n.id] = o; return o;
+  });
+  E = edges.map(e => ({ s: byId[e.src], t: byId[e.dst], w: e.weight || 0.5 }))
+           .filter(e => e.s && e.t);
+
+  const els = { e: [], c: [], l: [] };
+  E.forEach(e => { const ln = svgEl('line'); ln.setAttribute('class', 'edge');
+    ln.setAttribute('stroke-width', (0.5 + e.w * 2).toFixed(2));
+    ln.setAttribute('stroke-opacity', (0.25 + e.w * 0.5).toFixed(2));
+    NS.edges.appendChild(ln); els.e.push(ln); });
+  N.forEach(n => {
+    const g = svgEl('g'); g.setAttribute('class', 'node');
+    const c = svgEl('circle'); const r = n.seed ? 9 : 6;
+    c.setAttribute('r', r); c.setAttribute('fill', color(n.namespace));
+    if (n.seed) { c.setAttribute('stroke', '#fff'); c.setAttribute('stroke-width', '1.5'); }
+    const t = svgEl('text'); t.setAttribute('class', 'label'); t.setAttribute('dx', r + 2);
+    t.setAttribute('dy', 3); t.textContent = (n.text || '').slice(0, 22);
+    g.appendChild(c); g.appendChild(t);
+    g.addEventListener('click', () => {
+      NS.card.innerHTML = '<div class="ns">' + (n.namespace || '') +
+        (n.seed ? ' · match' : '') + '</div>' + escapeHtml(n.text || '');
+      NS.card.style.display = 'block';
+    });
+    NS.nodes.appendChild(g); els.c.push(c); els.l.push(t);
+  });
+
+  let iter = 0;
+  function tick() {
+    // Repulsion (O(n^2), fine ≤ ~80 nodes).
+    for (let i = 0; i < N.length; i++) for (let j = i+1; j < N.length; j++) {
+      const a = N[i], b = N[j]; let dx = a.x-b.x, dy = a.y-b.y;
+      let d2 = dx*dx + dy*dy || 0.01; const f = 1400 / d2;
+      const d = Math.sqrt(d2); const fx = f*dx/d, fy = f*dy/d;
+      a.vx += fx; a.vy += fy; b.vx -= fx; b.vy -= fy;
+    }
+    // Springs along edges.
+    E.forEach(e => { let dx = e.t.x-e.s.x, dy = e.t.y-e.s.y;
+      const d = Math.sqrt(dx*dx+dy*dy) || 0.01; const k = (d - 70) * 0.02;
+      const fx = k*dx/d, fy = k*dy/d;
+      e.s.vx += fx; e.s.vy += fy; e.t.vx -= fx; e.t.vy -= fy; });
+    // Centering + damping + integrate.
+    N.forEach(n => { n.vx += (W/2 - n.x) * 0.002; n.vy += (H/2 - n.y) * 0.002;
+      n.vx *= 0.85; n.vy *= 0.85; n.x += n.vx; n.y += n.vy;
+      n.x = Math.max(12, Math.min(W-12, n.x)); n.y = Math.max(12, Math.min(H-12, n.y)); });
+    E.forEach((e, i) => { els.e[i].setAttribute('x1', e.s.x); els.e[i].setAttribute('y1', e.s.y);
+      els.e[i].setAttribute('x2', e.t.x); els.e[i].setAttribute('y2', e.t.y); });
+    N.forEach((n, i) => { els.c[i].setAttribute('cx', n.x); els.c[i].setAttribute('cy', n.y);
+      els.l[i].setAttribute('x', n.x); els.l[i].setAttribute('y', n.y); });
+    if (++iter < 320) raf = requestAnimationFrame(tick);
+  }
+  tick();
+}
+function escapeHtml(s){return s.replace(/[&<>]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));}
+window.render = render;
+window.addEventListener('resize', () => { W = window.innerWidth; H = window.innerHeight; });
+</script>
+</body>
+</html>

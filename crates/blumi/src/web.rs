@@ -393,6 +393,17 @@ impl Management for WebManagement {
         }
     }
 
+    async fn memory_graph(&self, query: &str, limit: u32) -> serde_json::Value {
+        match &self.mem {
+            Some(mem) => {
+                let g = mem.memory_graph(query, limit.clamp(1, 80) as usize).await;
+                serde_json::to_value(g)
+                    .unwrap_or_else(|_| serde_json::json!({ "nodes": [], "edges": [] }))
+            }
+            None => serde_json::json!({ "nodes": [], "edges": [] }),
+        }
+    }
+
     fn grid_peer_ids(&self) -> Vec<String> {
         match &self.grid {
             // Key by stable host:port, NOT the registry id (which flips between

@@ -293,6 +293,11 @@ class ApiClient {
     return ((j['plans'] as List?) ?? []).cast<Map<String, dynamic>>();
   }
 
+  /// A query-centred memory subgraph for the D3 view:
+  /// `{ nodes: [{id, namespace, text, score, seed}], edges: [{src,dst,weight}] }`.
+  Future<Map<String, dynamic>> memoryGraph(String query, {int limit = 40}) =>
+      _postJson('/api/memory/graph', {'query': query, 'limit': limit});
+
   // --- Self-management ---
 
   /// Reload the agent in place (apply config/skill changes).

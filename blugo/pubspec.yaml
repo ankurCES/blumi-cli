@@ -43,6 +43,7 @@ dependencies:
   path_provider: ^2.1.5
   gpt_markdown: ^1.1.7
   flutter_highlight: ^0.7.0
+  webview_flutter: ^4.10.0
 
 dev_dependencies:
   flutter_test:
@@ -83,6 +84,7 @@ flutter:
 
   assets:
     - assets/icon/blugo_mark.png
+    - assets/memory_graph.html
 
   # To add assets to your application, add an assets section, like this:
   # assets:

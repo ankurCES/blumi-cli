@@ -1,5 +1,7 @@
 import 'dart:async';
+import 'dart:convert';
 import 'package:flutter/material.dart';
+import 'package:webview_flutter/webview_flutter.dart';
 import '../data/api.dart';
 import '../data/cache.dart';
 import '../data/elevenlabs.dart';
@@ -88,7 +90,7 @@ class _ControlCenter extends StatelessWidget {
         bottom: MediaQuery.of(context).viewInsets.bottom,
       ),
       child: DefaultTabController(
-        length: 9,
+        length: 10,
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
@@ -122,6 +124,7 @@ class _ControlCenter extends StatelessWidget {
                 Tab(text: 'Memory'),
                 Tab(text: 'Code'),
                 Tab(text: 'Plans'),
+                Tab(text: 'Graph'),
               ],
             ),
             Expanded(
@@ -136,6 +139,7 @@ class _ControlCenter extends StatelessWidget {
                   _MemoryTab(app, scroll),
                   _KnowledgeTab(app, scroll),
                   _PlansTab(app, scroll),
+                  _GraphTab(app, scroll),
                 ],
               ),
             ),
@@ -2064,6 +2068,109 @@ class _PlansTabState extends State<_PlansTab>
         ),
       ),
     );
+  }
+}
+
+// --- Memory graph (D3-style) -----------------------------------------------
+
+class _GraphTab extends StatefulWidget {
+  final AppController app;
+  final ScrollController scroll;
+  const _GraphTab(this.app, this.scroll);
+  @override
+  State<_GraphTab> createState() => _GraphTabState();
+}
+
+class _GraphTabState extends State<_GraphTab>
+    with AutomaticKeepAliveClientMixin {
+  @override
+  bool get wantKeepAlive => true;
+
+  ApiClient get _api => widget.app.session!.api;
+  late final WebViewController _wv;
+  final _q = TextEditingController();
+  bool _ready = false;
+  bool _busy = false;
+  String? _pendingJson;
+
+  @override
+  void initState() {
+    super.initState();
+    _wv = WebViewController()
+      ..setJavaScriptMode(JavaScriptMode.unrestricted)
+      ..setBackgroundColor(const Color(0xFF16090E))
+      ..setNavigationDelegate(NavigationDelegate(onPageFinished: (_) {
+        _ready = true;
+        if (_pendingJson != null) {
+          _wv.runJavaScript('render($_pendingJson)');
+          _pendingJson = null;
+        }
+      }))
+      ..loadFlutterAsset('assets/memory_graph.html');
+  }
+
+  @override
+  void dispose() {
+    _q.dispose();
+    super.dispose();
+  }
+
+  Future<void> _search() async {
+    final q = _q.text.trim();
+    if (q.isEmpty || _busy) return;
+    FocusScope.of(context).unfocus();
+    setState(() => _busy = true);
+    try {
+      final data = await _api.memoryGraph(q, limit: 50);
+      final js = jsonEncode(data);
+      if (_ready) {
+        await _wv.runJavaScript('render($js)');
+      } else {
+        _pendingJson = js;
+      }
+    } catch (_) {
+      // leave the canvas as-is
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    super.build(context);
+    final cs = Theme.of(context).colorScheme;
+    return Column(children: [
+      Padding(
+        padding: const EdgeInsets.fromLTRB(12, 12, 12, 6),
+        child: TextField(
+          controller: _q,
+          textInputAction: TextInputAction.search,
+          onSubmitted: (_) => _search(),
+          decoration: InputDecoration(
+            hintText: 'Search memory → graph',
+            isDense: true,
+            border: const OutlineInputBorder(),
+            filled: true,
+            fillColor: cs.surfaceContainerHighest.withValues(alpha: 0.3),
+            suffixIcon: IconButton(
+              icon: _busy
+                  ? const SizedBox(
+                      width: 16,
+                      height: 16,
+                      child: CircularProgressIndicator(strokeWidth: 2))
+                  : const Icon(Icons.search),
+              onPressed: _busy ? null : _search,
+            ),
+          ),
+        ),
+      ),
+      Expanded(
+        child: ClipRRect(
+          borderRadius: BorderRadius.circular(10),
+          child: WebViewWidget(controller: _wv),
+        ),
+      ),
+    ]);
   }
 }
 
