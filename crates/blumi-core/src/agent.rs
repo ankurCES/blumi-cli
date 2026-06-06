@@ -65,6 +65,11 @@ pub struct AgentTurnRunner {
     memory: Option<Arc<dyn crate::SemanticMemory>>,
     /// How many memories to recall per turn for RAG injection.
     recall_k: usize,
+    /// Reflex self-healing controls (budgeted recovery + failure→fix learning).
+    /// `None` = disabled — failed tool results go back to the model unchanged
+    /// (today's behaviour). When set, classified failures get a budgeted,
+    /// traced recovery nudge and (with memory) episodic learning + recall.
+    heal: Option<blumi_config::HealConfig>,
 }
 
 impl AgentTurnRunner {
@@ -99,6 +104,7 @@ impl AgentTurnRunner {
             checkpoint: None,
             memory: None,
             recall_k: 5,
+            heal: None,
         }
     }
 
@@ -123,6 +129,15 @@ impl AgentTurnRunner {
         if k > 0 {
             self.recall_k = k;
         }
+        self
+    }
+
+    /// Enable reflex self-healing: classify failed tool results, take a budgeted
+    /// recovery action (the paper's failure-taxonomy → targeted-action loop),
+    /// emit an observability trace, and — when semantic memory is also attached —
+    /// learn failure→fix episodes + recall them on similar future failures.
+    pub fn with_heal(mut self, heal: blumi_config::HealConfig) -> Self {
+        self.heal = Some(heal);
         self
     }
 
@@ -174,6 +189,14 @@ impl TurnRunner for AgentTurnRunner {
         let tool_ctx = self.tool_ctx(&ctx);
         let mut recent_signatures: Vec<String> = Vec::new();
         let mut loop_nudges: u32 = 0;
+        // Reflex self-healing budget for this turn (0 when heal is disabled).
+        let mut recovery_budget = crate::recovery::RecoveryBudget::new(
+            self.heal
+                .as_ref()
+                .filter(|h| h.enabled)
+                .map(|h| h.recovery_budget)
+                .unwrap_or(0),
+        );
 
         // Snapshot the active persona for this turn: it layers extra
         // instructions onto the system prompt and may override the temperature.
@@ -467,6 +490,108 @@ impl TurnRunner for AgentTurnRunner {
                     crate::Checkpoint::from_state(&st, iteration)
                 };
                 cp.save(snapshot).await;
+            }
+
+            // --- Reflex self-healing (arXiv 2606.01416) + failure→fix memory ---
+            // After results land, classify the first recoverable failure, spend a
+            // turn-bounded budget on a targeted recovery action, emit an
+            // observability trace, and inject corrective guidance for the model's
+            // next step. With memory attached we also recall a known fix for a
+            // similar past failure and record this episode (dedup collapses
+            // repeats). We GUIDE the model rather than re-execute, so there's no
+            // at-least-once double-side-effect risk. Pairs with (doesn't duplicate)
+            // the doom-loop guard above, which owns identical-repeat loops.
+            if let Some(heal) = self.heal.clone() {
+                if heal.enabled && !recovery_budget.exhausted() {
+                    for call in &tool_calls {
+                        let Some(result) = results.get(call.id.as_str()) else {
+                            continue;
+                        };
+                        if result.class.is_success()
+                            || !crate::recovery::is_recoverable(result.class)
+                        {
+                            continue;
+                        }
+                        let idempotent = self
+                            .registry
+                            .get(&call.name)
+                            .map(|t| t.is_read_only())
+                            .unwrap_or(false);
+                        let action = crate::recovery::action_for(result.class, idempotent);
+                        let class_s = crate::recovery::class_str(result.class);
+
+                        // Failure-triggered recall: a known fix for a similar past
+                        // failure (graph-augmented recall over the `agent` namespace).
+                        let mut known_fix: Option<String> = None;
+                        if heal.learn {
+                            if let Some(mem) = &self.memory {
+                                let q = format!("tool {} failure {class_s}", call.name);
+                                let hits = tokio::time::timeout(
+                                    std::time::Duration::from_secs(2),
+                                    mem.recall(&q, 3),
+                                )
+                                .await
+                                .unwrap_or_default();
+                                known_fix = hits
+                                    .into_iter()
+                                    .find(|h| h.text.contains("action="))
+                                    .map(|h| h.text.replace('\n', " "));
+                            }
+                        }
+
+                        if !recovery_budget.spend() {
+                            break;
+                        }
+                        let outcome = if action == crate::recovery::RecoveryAction::Escalate {
+                            "escalated"
+                        } else {
+                            "recovered"
+                        };
+                        ctx.events.emit(Event::Recovery {
+                            tool: call.name.clone(),
+                            class: class_s.to_string(),
+                            action: action.as_str().to_string(),
+                            outcome: outcome.to_string(),
+                            budget_left: recovery_budget.remaining(),
+                            verified: None,
+                        });
+
+                        let mut msg = crate::recovery::guidance(
+                            &call.name,
+                            action,
+                            result.retry_hint.as_deref(),
+                        );
+                        if let Some(fix) = &known_fix {
+                            msg.push_str(
+                                "\n[Known fix for a similar past failure — verify before \
+                                 relying on it]\n",
+                            );
+                            msg.push_str(fix.trim());
+                        }
+                        state.lock().await.messages.push(Message::user(msg));
+
+                        // Learn: record the episode (namespace "agent" so it can
+                        // diffuse across the grid; never "user"). Path/secret
+                        // redaction guards what leaves this node.
+                        if heal.learn {
+                            if let Some(mem) = &self.memory {
+                                let raw = crate::recovery::episode_text(
+                                    &call.name,
+                                    result.class,
+                                    action,
+                                    outcome,
+                                );
+                                let text = if heal.redact_paths {
+                                    crate::recovery::redact(&raw)
+                                } else {
+                                    raw
+                                };
+                                mem.remember("agent", "recovery", &text).await;
+                            }
+                        }
+                        break; // at most one recovery per iteration
+                    }
+                }
             }
 
             if ct.is_cancelled() {
@@ -818,6 +943,32 @@ mod tests {
         }
     }
 
+    /// A tool that always returns an InvalidInput failure (for self-healing).
+    struct FailTool;
+    #[async_trait]
+    impl Tool for FailTool {
+        fn name(&self) -> &str {
+            "Fail"
+        }
+        fn description(&self) -> &str {
+            "always fails with invalid input"
+        }
+        fn input_schema(&self) -> serde_json::Value {
+            serde_json::json!({ "type": "object" })
+        }
+        async fn execute(
+            &self,
+            _input: serde_json::Value,
+            _ctx: &ToolContext,
+            _ct: CancellationToken,
+        ) -> Result<ToolResult, crate::ToolError> {
+            Ok(ToolResult::invalid_input(
+                "bad args",
+                "provide a valid `path` argument",
+            ))
+        }
+    }
+
     struct NoopExec;
     #[async_trait]
     impl Executor for NoopExec {
@@ -1032,6 +1183,95 @@ mod tests {
                 .iter()
                 .any(|m| m.text().contains("same tool call")),
             "a redirect nudge should have been injected"
+        );
+    }
+
+    #[tokio::test]
+    async fn reflex_recovery_emits_trace_and_guidance() {
+        // iteration 1: call a tool that fails with InvalidInput; iteration 2: finish.
+        let llm = Arc::new(ScriptedLlm {
+            scripts: std::sync::Mutex::new(
+                vec![
+                    vec![
+                        tool_call_chunk("c1", "Fail", "{}"),
+                        StreamChunk::Done {
+                            reason: FinishReason::ToolCalls,
+                        },
+                    ],
+                    vec![
+                        StreamChunk::Text { text: "ok".into() },
+                        StreamChunk::Done {
+                            reason: FinishReason::Stop,
+                        },
+                    ],
+                ]
+                .into(),
+            ),
+        });
+
+        let mut reg = ToolRegistry::new();
+        reg.register(Arc::new(FailTool));
+        let perms = Arc::new(PermissionEngine::new(PermissionConfig {
+            yolo: true,
+            ..Default::default()
+        }));
+
+        let runner = Arc::new(
+            AgentTurnRunner::new(
+                llm,
+                Arc::new(reg),
+                perms,
+                Arc::new(NoopExec),
+                LlmOptions::default(),
+                10,
+                131_072,
+                "you are blumi".into(),
+                PathBuf::from("."),
+            )
+            .with_heal(blumi_config::HealConfig {
+                enabled: true,
+                recovery_budget: 2,
+                verify: false,
+                learn: false, // no memory attached in this test
+                evolve: blumi_config::HealEvolve::Off,
+                redact_paths: true,
+            }),
+        );
+
+        let h = spawn_session(SessionId::from("s"), "m", runner);
+        let mut rx = h.subscribe();
+        h.send(Command::UserMessage {
+            text: "go".into(),
+            attachments: vec![],
+            stream_id: None,
+        })
+        .await
+        .unwrap();
+
+        let events = drain_until_done(&mut rx).await;
+
+        // A self-healing trace fired, classifying the failure + the action taken.
+        let rec = events.iter().find_map(|e| match e {
+            Event::Recovery {
+                class,
+                action,
+                tool,
+                ..
+            } => Some((class.clone(), action.clone(), tool.clone())),
+            _ => None,
+        });
+        let (class, action, tool) = rec.expect("a Recovery event should be emitted");
+        assert_eq!(class, "invalid_input");
+        assert_eq!(action, "arg_fix");
+        assert_eq!(tool, "Fail");
+
+        // Corrective guidance was injected as a trailing user message.
+        let snap = h.snapshot().await;
+        assert!(
+            snap.messages
+                .iter()
+                .any(|m| m.text().contains("[Self-healing — recovery guidance]")),
+            "recovery guidance should be injected for the model's next step"
         );
     }
 

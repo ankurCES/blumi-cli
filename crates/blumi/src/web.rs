@@ -404,6 +404,13 @@ impl Management for WebManagement {
         }
     }
 
+    async fn heal_status(&self) -> serde_json::Value {
+        match &self.mem {
+            Some(mem) => mem.heal_summary(30).await,
+            None => serde_json::json!({ "counts": {}, "recent": [] }),
+        }
+    }
+
     fn grid_peer_ids(&self) -> Vec<String> {
         match &self.grid {
             // Key by stable host:port, NOT the registry id (which flips between
@@ -1080,6 +1087,9 @@ pub async fn run(
             let secret = grid_secret.clone().unwrap_or_default();
             let diffuse = provider.config.memory.diffuse;
             let period = provider.config.memory.sweep_secs.max(15);
+            // Self-healing evolution: mine recurring failures into recovery skills.
+            let heal = provider.config.heal.clone();
+            let skills_dir = provider.config.paths.skills.clone();
             let origin = if provider.config.grid.node_name.trim().is_empty() {
                 whoami::fallible::hostname().unwrap_or_else(|_| "blumi".to_string())
             } else {
@@ -1093,6 +1103,16 @@ pub async fn run(
                     let (merged, evicted) = mem.sweep().await;
                     if merged > 0 || evicted > 0 {
                         tracing::debug!("memory sweep: merged={merged} evicted={evicted}");
+                    }
+                    // Self-evolution: cluster recurring failures → low-risk recovery
+                    // skill (auto) or proposal. Idempotent (markers dedup); the new
+                    // skill loads on the next session reload.
+                    if heal.enabled && !matches!(heal.evolve, blumi_config::HealEvolve::Off) {
+                        for action in
+                            crate::evolve::mine_once(&mem, &skills_dir, heal.evolve, 3).await
+                        {
+                            tracing::info!("self-evolve: {action}");
+                        }
                     }
                     if !diffuse {
                         continue;

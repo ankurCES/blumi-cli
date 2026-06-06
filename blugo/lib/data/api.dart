@@ -298,6 +298,10 @@ class ApiClient {
   Future<Map<String, dynamic>> memoryGraph(String query, {int limit = 40}) =>
       _postJson('/api/memory/graph', {'query': query, 'limit': limit});
 
+  /// Self-healing summary: `{ counts: {recovery, evolution, ...},
+  /// recent: [{kind, text, at, hits}] }` — recoveries + evolutions the agent did.
+  Future<Map<String, dynamic>> healStatus() => _getJson('/api/heal');
+
   // --- Self-management ---
 
   /// Reload the agent in place (apply config/skill changes).

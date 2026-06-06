@@ -798,6 +798,19 @@ async fn handle_core(model: &mut Model, event: Event, session: &SessionHandle) {
         Event::Notice { message } => {
             model.entries.push(Entry::Notice(message));
         }
+        Event::Recovery {
+            tool,
+            class,
+            action,
+            outcome,
+            budget_left,
+            ..
+        } => {
+            // Make self-healing visible inline as it happens.
+            model.entries.push(Entry::Notice(format!(
+                "⚕ self-heal · {tool}: {class} → {action} ({outcome}; {budget_left} left)"
+            )));
+        }
         Event::Reload { reason } => {
             // The agent asked to reload itself; the app loop performs the
             // in-place rebuild once the turn goes idle (keeps the transcript).

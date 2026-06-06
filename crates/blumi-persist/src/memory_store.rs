@@ -537,6 +537,64 @@ impl SemanticMemoryImpl {
             .collect()
     }
 
+    /// Recent active episode texts of a given `kind` in the `agent` namespace
+    /// (used by the self-healing evolution miner over `recovery`/`failure`).
+    pub async fn episodes_by_kind(&self, kind: &str, limit: i64) -> Vec<String> {
+        let rows = sqlx::query(
+            "SELECT text FROM memories
+             WHERE status = 'active' AND namespace = 'agent' AND kind = ?
+             ORDER BY created_at DESC LIMIT ?",
+        )
+        .bind(kind)
+        .bind(limit)
+        .fetch_all(self.pool())
+        .await
+        .unwrap_or_default();
+        rows.iter().map(|r| r.get::<String, _>("text")).collect()
+    }
+
+    /// A compact summary of self-healing activity for the `/api/heal` view +
+    /// `/heal` overlays: per-kind counts + the most recent recovery/evolution
+    /// episodes (newest first).
+    pub async fn heal_summary(&self, limit: i64) -> serde_json::Value {
+        use serde_json::json;
+        let kinds = ["recovery", "evolution", "evolution_proposal", "failure"];
+        let mut counts = serde_json::Map::new();
+        for k in kinds {
+            let c: i64 = sqlx::query_scalar(
+                "SELECT COUNT(*) FROM memories
+                 WHERE status='active' AND namespace='agent' AND kind = ?",
+            )
+            .bind(k)
+            .fetch_one(self.pool())
+            .await
+            .unwrap_or(0);
+            counts.insert(k.to_string(), json!(c));
+        }
+        let rows = sqlx::query(
+            "SELECT kind, text, created_at, hits FROM memories
+             WHERE status='active' AND namespace='agent'
+                   AND kind IN ('recovery','evolution','evolution_proposal')
+             ORDER BY created_at DESC LIMIT ?",
+        )
+        .bind(limit)
+        .fetch_all(self.pool())
+        .await
+        .unwrap_or_default();
+        let recent: Vec<serde_json::Value> = rows
+            .iter()
+            .map(|r| {
+                json!({
+                    "kind": r.get::<String, _>("kind"),
+                    "text": r.get::<String, _>("text"),
+                    "at": r.get::<String, _>("created_at"),
+                    "hits": r.get::<i64, _>("hits"),
+                })
+            })
+            .collect();
+        json!({ "counts": counts, "recent": recent })
+    }
+
     // --- Memory graph (similarity edges over SEDM) ----------------------
 
     /// Rebuild the memory similarity graph: link each memory to its top-`top_k`

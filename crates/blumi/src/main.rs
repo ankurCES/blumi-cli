@@ -5,6 +5,7 @@ mod branding;
 mod cron;
 mod discovery;
 mod engine;
+mod evolve;
 mod gateway;
 mod grid;
 mod knowledge;

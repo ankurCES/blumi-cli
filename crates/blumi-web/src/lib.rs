@@ -304,6 +304,12 @@ pub trait Management: Send + Sync {
         serde_json::json!({ "nodes": [], "edges": [] })
     }
 
+    /// Self-healing summary → `{ counts: {...}, recent: [...] }`: recovery,
+    /// evolution, and proposal episodes for the `/heal` views. Default: empty.
+    async fn heal_status(&self) -> serde_json::Value {
+        serde_json::json!({ "counts": {}, "recent": [] })
+    }
+
     // --- Self-management ---
 
     /// The whole settings.json as JSON, with every secret redacted (for the
@@ -477,6 +483,7 @@ pub fn router(state: AppState) -> Router {
         .route("/api/knowledge/remove", post(api::knowledge_remove))
         .route("/api/memory/search", post(api::memory_search))
         .route("/api/plans", get(api::plans))
+        .route("/api/heal", get(api::heal_status))
         .route("/api/memory/graph", post(api::memory_graph))
         .route(
             "/api/self/config",

@@ -430,6 +430,11 @@ pub async fn build_session(
     if let Some(mem) = &memory_dyn {
         runner = runner.with_memory(mem.clone(), config.memory.recall_k as usize);
     }
+    // Reflex self-healing: classified, budgeted recovery on failed tool steps +
+    // failure→fix learning (uses the memory attached above when present).
+    if config.heal.enabled {
+        runner = runner.with_heal(config.heal.clone());
+    }
     let runner = Arc::new(runner);
 
     let mut state =

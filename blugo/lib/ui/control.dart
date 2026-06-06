@@ -90,7 +90,7 @@ class _ControlCenter extends StatelessWidget {
         bottom: MediaQuery.of(context).viewInsets.bottom,
       ),
       child: DefaultTabController(
-        length: 10,
+        length: 11,
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
@@ -125,6 +125,7 @@ class _ControlCenter extends StatelessWidget {
                 Tab(text: 'Code'),
                 Tab(text: 'Plans'),
                 Tab(text: 'Graph'),
+                Tab(text: 'Heal'),
               ],
             ),
             Expanded(
@@ -140,6 +141,7 @@ class _ControlCenter extends StatelessWidget {
                   _KnowledgeTab(app, scroll),
                   _PlansTab(app, scroll),
                   _GraphTab(app, scroll),
+                  _HealTab(app, scroll),
                 ],
               ),
             ),
@@ -2203,6 +2205,112 @@ class _GraphTabState extends State<_GraphTab>
       ),
     ]);
   }
+}
+
+// --- Self-healing ----------------------------------------------------------
+
+class _HealTab extends StatelessWidget {
+  final AppController app;
+  final ScrollController scroll;
+  const _HealTab(this.app, this.scroll);
+
+  @override
+  Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+    return _AsyncView<Map<String, dynamic>>(
+      cache: app.cache,
+      cacheKey: app.ck('heal'),
+      ttl: const Duration(seconds: 15),
+      fetch: () => app.session!.api.healStatus(),
+      parse: (raw) => (raw as Map).cast<String, dynamic>(),
+      builder: (context, data, refresh) {
+        final counts = (data['counts'] as Map?)?.cast<String, dynamic>() ?? {};
+        final recent = ((data['recent'] as List?) ?? []).cast<Map>();
+        int c(String k) => (counts[k] as num?)?.toInt() ?? 0;
+        if (recent.isEmpty && c('recovery') == 0 && c('evolution') == 0) {
+          return Center(
+            child: Text(
+              'No self-healing activity yet.\nRecoveries + learned fixes show up here.',
+              textAlign: TextAlign.center,
+              style: TextStyle(color: cs.onSurface.withValues(alpha: 0.6)),
+            ),
+          );
+        }
+        IconData icon(String kind) {
+          switch (kind) {
+            case 'evolution':
+              return Icons.auto_awesome;
+            case 'evolution_proposal':
+              return Icons.lightbulb_outline;
+            default:
+              return Icons.healing;
+          }
+        }
+
+        return ListView(
+          controller: scroll,
+          padding: const EdgeInsets.all(16),
+          children: [
+            Wrap(
+              spacing: 8,
+              runSpacing: 8,
+              children: [
+                _healChip('recoveries', c('recovery'), cs),
+                _healChip('evolved', c('evolution'), cs),
+                _healChip('proposed', c('evolution_proposal'), cs),
+              ],
+            ),
+            const SizedBox(height: 14),
+            Text(
+              'Recent',
+              style: TextStyle(fontWeight: FontWeight.w600, color: cs.primary),
+            ),
+            const SizedBox(height: 6),
+            for (final r in recent)
+              Padding(
+                padding: const EdgeInsets.symmetric(vertical: 4),
+                child: Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Icon(
+                      icon(r['kind']?.toString() ?? ''),
+                      size: 16,
+                      color: cs.primary,
+                    ),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: Text(
+                        r['text']?.toString() ?? '',
+                        style: const TextStyle(
+                          fontSize: 12,
+                          fontFamily: 'monospace',
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+          ],
+        );
+      },
+    );
+  }
+
+  Widget _healChip(String label, int n, ColorScheme cs) => Container(
+    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+    decoration: BoxDecoration(
+      color: cs.primary.withValues(alpha: 0.12),
+      borderRadius: BorderRadius.circular(8),
+    ),
+    child: Text(
+      '$n $label',
+      style: TextStyle(
+        color: cs.primary,
+        fontWeight: FontWeight.w600,
+        fontSize: 12,
+      ),
+    ),
+  );
 }
 
 // --- Usage -----------------------------------------------------------------

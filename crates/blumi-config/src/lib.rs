@@ -304,6 +304,55 @@ impl Default for MemoryConfig {
     }
 }
 
+/// Self-healing evolution autonomy (how the failure-pattern miner may act).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "lowercase")]
+pub enum HealEvolve {
+    /// Never mine failures or propose changes.
+    Off,
+    /// Mine failures + surface proposed changes for human approval only.
+    Propose,
+    /// Auto-apply LOW-RISK changes (e.g. a new recovery skill) with a notice;
+    /// risky changes (config/providers/permissions/secrets/deletes) still need
+    /// approval. This is the user-selected default.
+    #[default]
+    Auto,
+}
+
+/// Self-healing + self-evolving agent controls: the in-turn reflex recovery
+/// layer (failure taxonomy → budgeted action → verify → trace), failure→fix
+/// memory learning, and the evolution miner. Every part degrades gracefully —
+/// disabled or absent subsystems just mean today's behaviour.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct HealConfig {
+    /// Master switch for in-turn recovery + learning + evolution.
+    pub enabled: bool,
+    /// Max budgeted recovery attempts per turn (0 = no auto-recovery).
+    pub recovery_budget: u32,
+    /// Verify a recovered step with the local-LLM brain before continuing.
+    pub verify: bool,
+    /// Write failure→fix episodes to memory + recall them on similar failures.
+    pub learn: bool,
+    /// Evolution autonomy: off | propose | auto.
+    pub evolve: HealEvolve,
+    /// Redact absolute paths / secret-looking tokens from stored failure text.
+    pub redact_paths: bool,
+}
+
+impl Default for HealConfig {
+    fn default() -> Self {
+        HealConfig {
+            enabled: true,
+            recovery_budget: 2,
+            verify: false,
+            learn: true,
+            evolve: HealEvolve::Auto,
+            redact_paths: true,
+        }
+    }
+}
+
 /// Native-lite code knowledge base. When enabled, `blumi knowledge ingest` and
 /// the `code_search` / `code_retrieve` tools index repos into `knowledge.db`
 /// (FTS5 + embeddings when available). Disable to drop the code-KB tools.
@@ -675,6 +724,9 @@ pub struct BlumiConfig {
     /// Semantic long-term memory (vector Store + RAG + SEDM governance).
     #[serde(default)]
     pub memory: MemoryConfig,
+    /// Self-healing + self-evolving agent controls (reflex recovery + learning).
+    #[serde(default)]
+    pub heal: HealConfig,
     /// Native-lite code knowledge base (code_search / code_retrieve + CLI).
     #[serde(default)]
     pub knowledge: KnowledgeConfig,
@@ -711,6 +763,7 @@ impl Default for BlumiConfig {
             embeddings: EmbeddingConfig::default(),
             acceleration: AccelerationConfig::default(),
             memory: MemoryConfig::default(),
+            heal: HealConfig::default(),
             knowledge: KnowledgeConfig::default(),
             workspaces: WorkspaceConfig::default(),
             git: GitConfig::default(),

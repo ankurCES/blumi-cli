@@ -175,6 +175,24 @@ pub enum Event {
     /// An informational message from the core (e.g. `/undo` / `/compact`
     /// confirmations). Rendered like a system note, not an error.
     Notice { message: String },
+    /// A self-healing recovery attempt on a failed tool/step: what failed, the
+    /// action taken, and how it turned out. This is the paper's "observability
+    /// trace" — surfaced in the `/heal` views (TUI/blugo/gateway).
+    Recovery {
+        /// Tool whose result triggered recovery.
+        tool: String,
+        /// Failure class (e.g. "invalid_input", "state_conflict", "crash").
+        class: String,
+        /// Recovery action taken ("retry_with_hint" / "state_repair" / "escalate" / …).
+        action: String,
+        /// Outcome: "recovered" | "escalated" | "exhausted" | "learned".
+        outcome: String,
+        /// Recovery attempts left in this turn's budget.
+        budget_left: u32,
+        /// Whether the brain verified the recovered step (None = not verified).
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        verified: Option<bool>,
+    },
     /// The agent asked to reload itself (self-evolution): the host should
     /// rebuild the session so newly written skills + config edits take effect,
     /// preserving the conversation. Hosts that can't reload may ignore it.
@@ -217,6 +235,7 @@ impl Event {
             Event::Compaction { .. } => "compaction",
             Event::TurnDone { .. } => "done",
             Event::Notice { .. } => "notice",
+            Event::Recovery { .. } => "recovery",
             Event::Reload { .. } => "reload",
             Event::Restart { .. } => "restart",
             Event::Error { .. } => "error",

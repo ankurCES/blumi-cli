@@ -839,6 +839,11 @@ pub async fn plans(State(state): State<AppState>) -> Json<Value> {
     Json(state.mgmt().plans().await)
 }
 
+/// GET /api/heal → self-healing summary (recovery + evolution episodes).
+pub async fn heal_status(State(state): State<AppState>) -> Json<Value> {
+    Json(state.mgmt().heal_status().await)
+}
+
 pub async fn memory_graph(
     State(state): State<AppState>,
     Json(b): Json<KbSearchBody>,
