@@ -1,0 +1,70 @@
+<!doctype html>
+<html>
+<head><meta charset="utf-8">
+<style>
+  :root{
+    --rose:#FF4F87; --lav:#9B86FF; --violet:#6B50FF; --cyan:#68FFD6;
+    --muted:#9AA0B4;
+  }
+  *{box-sizing:border-box;}
+  html,body{margin:0;padding:0;overflow:hidden;background:#0A0C12;}
+  .banner{
+    position:relative; width:1200px; height:420px; overflow:hidden;
+    font-family:"Helvetica Neue",Helvetica,Arial,sans-serif;
+    -webkit-font-smoothing:antialiased; text-rendering:optimizeLegibility;
+    background:
+      radial-gradient(115% 115% at 50% 34%, rgba(155,134,255,0.12), rgba(0,0,0,0) 58%),
+      radial-gradient(75% 80% at 50% 30%, rgba(255,79,135,0.11), rgba(0,0,0,0) 55%),
+      radial-gradient(60% 70% at 50% 72%, rgba(104,255,214,0.06), rgba(0,0,0,0) 60%),
+      linear-gradient(135deg, #160A13 0%, #0E0B17 46%, #0A0C12 100%);
+    display:flex; flex-direction:column; align-items:center; justify-content:center;
+  }
+  /* gentle vignette to focus the lockup */
+  .banner::after{
+    content:""; position:absolute; inset:0; pointer-events:none;
+    background:radial-gradient(125% 95% at 50% 50%, rgba(0,0,0,0) 56%, rgba(0,0,0,0.45) 100%);
+  }
+  .flowerWrap{ position:relative; width:118px; height:118px; margin-bottom:20px; }
+  .glow{ position:absolute; inset:-58px; border-radius:50%;
+    background:radial-gradient(circle, rgba(140,120,255,0.34), rgba(255,79,135,0.12) 46%, rgba(0,0,0,0) 70%);
+    filter:blur(6px); }
+  .flower{ position:relative; width:118px; height:118px;
+    filter:drop-shadow(0 7px 24px rgba(123,92,255,0.45)); }
+  .word{
+    font-size:88px; font-weight:800; letter-spacing:-1.5px; line-height:1; margin:0;
+    background:linear-gradient(96deg, var(--rose) 0%, var(--lav) 37%, var(--violet) 65%, var(--cyan) 100%);
+    -webkit-background-clip:text; background-clip:text; color:transparent;
+  }
+  .rule{ width:104px; height:3px; border-radius:3px; margin:19px 0 17px; opacity:.9;
+    background:linear-gradient(90deg, var(--rose), var(--violet), var(--cyan)); }
+  .tag{ font-size:21px; font-weight:500; color:var(--muted); letter-spacing:.3px; }
+  .tag b{ color:#DBDEEA; font-weight:600; }
+</style></head>
+<body>
+  <div class="banner">
+    <div class="flowerWrap">
+      <div class="glow"></div>
+      <svg class="flower" viewBox="-72 -72 144 144" xmlns="http://www.w3.org/2000/svg">
+        <defs><linearGradient id="bloom" x1="0" y1="0" x2="1" y2="1">
+          <stop offset="0" stop-color="#FF4F87"/><stop offset=".45" stop-color="#9B86FF"/>
+          <stop offset=".75" stop-color="#6B50FF"/><stop offset="1" stop-color="#68FFD6"/>
+        </linearGradient></defs>
+        <g fill="url(#bloom)">
+          <ellipse cx="0" cy="-36" rx="19" ry="33"/>
+          <ellipse cx="0" cy="36" rx="19" ry="33"/>
+          <ellipse cx="-36" cy="0" rx="33" ry="19"/>
+          <ellipse cx="36" cy="0" rx="33" ry="19"/>
+          <ellipse cx="-26" cy="-26" rx="28" ry="15" transform="rotate(45 -26 -26)"/>
+          <ellipse cx="26" cy="26" rx="28" ry="15" transform="rotate(45 26 26)"/>
+          <ellipse cx="26" cy="-26" rx="28" ry="15" transform="rotate(-45 26 -26)"/>
+          <ellipse cx="-26" cy="26" rx="28" ry="15" transform="rotate(-45 -26 26)"/>
+        </g>
+        <circle cx="0" cy="0" r="17" fill="#68FFD6"/>
+        <circle cx="0" cy="0" r="7.5" fill="#0E1116"/>
+      </svg>
+    </div>
+    <div class="word">blumi</div>
+    <div class="rule"></div>
+    <div class="tag"><b>Bring your own everything.</b> What you configure is what you get.</div>
+  </div>
+</body></html>

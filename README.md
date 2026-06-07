@@ -1,11 +1,12 @@
 # blumi
 
 <p align="center">
-  <img src="assets/blumi-logo.svg" alt="blumi" width="520">
+  <img src="assets/blumi-header.png" alt="blumi — Bring your own everything. What you configure is what you get." width="820">
 </p>
 
 <p align="center">
-  <em>A local-first, provider-agnostic agentic coding companion —<br>
+  <strong>Bring your own everything. What you configure is what you get.</strong><br>
+  <em>A local-first, provider-agnostic agentic coding companion —
   one Rust core, three faces: a terminal UI, a web UI, and a phone app.</em>
 </p>
 
