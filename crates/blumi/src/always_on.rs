@@ -164,6 +164,17 @@ impl DiscoveryScheduler {
                 .await;
         }
         tracing::info!("always-on: report at {}", report.display());
+
+        // Fan out a completion notification (desktop / bot / web push) per
+        // notify.*; gated by `notify.enabled` + the `discovery` trigger.
+        let title = format!("blumi discovered {added} task(s)");
+        let body = candidates
+            .iter()
+            .map(|c| format!("• {}", c.title))
+            .collect::<Vec<_>>()
+            .join("\n");
+        crate::notify::notify_completion(&self.config, "discovery", &title, &body, false).await;
+
         Ok(added)
     }
 

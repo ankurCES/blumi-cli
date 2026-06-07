@@ -12,6 +12,7 @@ mod grid;
 mod knowledge;
 mod loop_run;
 mod mcp;
+mod notify;
 mod onboarding;
 mod playbook;
 mod prompt;

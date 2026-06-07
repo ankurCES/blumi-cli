@@ -130,9 +130,16 @@ pub async fn run(config: BlumiConfig, opts: LoopOptions) -> anyhow::Result<()> {
         },
     );
     eprintln!("\n\x1b[1m✿ loop done — {summary}\x1b[0m");
-    if opts.notify {
-        notify("blumi loop finished", &summary);
-    }
+    // Fan out completion per notify.* (desktop / bot / web push). The --notify
+    // flag forces a one-off desktop notification even when notify.* is off.
+    crate::notify::notify_completion(
+        &config,
+        "loop",
+        "blumi loop finished",
+        &summary,
+        opts.notify,
+    )
+    .await;
     Ok(())
 }
 
@@ -206,26 +213,4 @@ async fn run_turn(
 
 fn first_line(s: &str) -> String {
     s.lines().next().unwrap_or("").chars().take(120).collect()
-}
-
-/// Best-effort desktop notification.
-fn notify(title: &str, body: &str) {
-    #[cfg(target_os = "macos")]
-    let cmd = (
-        "osascript",
-        vec![
-            "-e".to_string(),
-            format!("display notification {:?} with title {:?}", body, title),
-        ],
-    );
-    #[cfg(target_os = "linux")]
-    let cmd = ("notify-send", vec![title.to_string(), body.to_string()]);
-    #[cfg(not(any(target_os = "macos", target_os = "linux")))]
-    let cmd: (&str, Vec<String>) = ("true", vec![]);
-
-    let _ = std::process::Command::new(cmd.0)
-        .args(cmd.1)
-        .stdout(std::process::Stdio::null())
-        .stderr(std::process::Stdio::null())
-        .spawn();
 }

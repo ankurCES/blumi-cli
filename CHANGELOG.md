@@ -20,6 +20,15 @@ The Rust workspace and the blugo app share the version number.
     open** (allows) so a broken guardrail can't brick the agent. A `matcher` scopes a
     hook by tool name (substring; empty = all). Hooks are read on session build, so a
     newly added one applies on the next `reload_self`/restart.
+- **Completion notifications** (`notify`, **off by default**) — when an autonomous
+  run finishes (`blumi loop` or always-on discovery), blumi fans out a short alert
+  to the channels you enable. First wave (server-side push — reaches you with no app
+  open): an **OS desktop** notification (macOS `osascript` / Linux `notify-send`) and
+  a proactive **gateway-bot** message (Telegram / Discord / Slack / WhatsApp) to a
+  configured chat/channel, reusing the `gateway.*` credentials. Config:
+  `notify { enabled, on:[loop,discovery,turn], desktop, bot:{transport,target},
+  web_push }`. `blumi loop --notify` still fires a one-off desktop notification even
+  when `notify` is off. (Browser in-tab + phone + Web Push surfaces follow.)
 - **Web Control Center panels** — the browser/phone Control Center gains four
   tabs over the new backends: **routing** (tiers + `$ saved`), **entries**
   (white-box memory: pin / edit / delete), **discovery** (always-on status +

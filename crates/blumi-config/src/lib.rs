@@ -865,6 +865,65 @@ pub struct HooksConfig {
     pub pre_tool_use: Vec<HookDef>,
 }
 
+/// Proactive completion notifications (off by default). When `enabled`, blumi
+/// fans out a short message when an autonomous run finishes (`blumi loop` or
+/// always-on discovery) to whichever channels you turn on: an OS desktop
+/// notification, a gateway-bot message, and/or browser Web Push. The browser
+/// in-tab alert and the blugo phone notification ride the live event stream and
+/// don't need this config.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct NotifyConfig {
+    /// Master switch. Off ⇒ no proactive notifications (the `blumi loop --notify`
+    /// flag still fires a one-off desktop notification for that run).
+    pub enabled: bool,
+    /// Which completion events fire: any of `loop`, `discovery`, `turn`. Empty ⇒
+    /// the default set (`loop` + `discovery`).
+    pub on: Vec<String>,
+    /// Post an OS desktop notification (macOS `osascript` / Linux `notify-send`).
+    pub desktop: bool,
+    /// Proactively message a gateway bot (Telegram / Discord / Slack / WhatsApp).
+    pub bot: Option<NotifyBot>,
+    /// Push to subscribed browsers via Web Push (VAPID). Only reaches browsers
+    /// served over a secure context (HTTPS or `http://localhost`).
+    pub web_push: bool,
+}
+
+impl Default for NotifyConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            on: Vec::new(),
+            desktop: true,
+            bot: None,
+            web_push: false,
+        }
+    }
+}
+
+impl NotifyConfig {
+    /// Does trigger `kind` fire? Empty `on` ⇒ the default `loop` + `discovery` set.
+    pub fn fires(&self, kind: &str) -> bool {
+        if self.on.is_empty() {
+            matches!(kind, "loop" | "discovery")
+        } else {
+            self.on.iter().any(|k| k == kind)
+        }
+    }
+}
+
+/// A gateway-bot target for completion notifications. Credentials come from the
+/// matching `gateway.*` config; this just picks the transport and destination.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(default)]
+pub struct NotifyBot {
+    /// `telegram` | `discord` | `slack` | `whatsapp`.
+    pub transport: String,
+    /// Telegram chat id, Discord channel id, Slack channel, or WhatsApp recipient
+    /// phone (E.164).
+    pub target: String,
+}
+
 /// The full blumi configuration.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
@@ -927,6 +986,9 @@ pub struct BlumiConfig {
     /// Lifecycle hooks (UserPromptSubmit context injection; off by default).
     #[serde(default)]
     pub hooks: HooksConfig,
+    /// Proactive completion notifications (desktop / bot / web push; off by default).
+    #[serde(default)]
+    pub notify: NotifyConfig,
     /// Native-lite code knowledge base (code_search / code_retrieve + CLI).
     #[serde(default)]
     pub knowledge: KnowledgeConfig,
@@ -967,6 +1029,7 @@ impl Default for BlumiConfig {
             heal: HealConfig::default(),
             always_on: AlwaysOnConfig::default(),
             hooks: HooksConfig::default(),
+            notify: NotifyConfig::default(),
             knowledge: KnowledgeConfig::default(),
             workspaces: WorkspaceConfig::default(),
             git: GitConfig::default(),
