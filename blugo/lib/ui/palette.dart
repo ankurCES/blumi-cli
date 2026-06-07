@@ -3,15 +3,16 @@ import '../data/models.dart';
 import '../data/voice.dart';
 import '../state/app.dart';
 import 'control.dart';
+import 'kit/kit.dart';
 
 /// A quick-action command palette (opened from the composer's `/` or a header
 /// action) mirroring the TUI slash palette.
 Future<void> showCommandPalette(BuildContext context, AppController app) {
-  return showModalBottomSheet(
-    context: context,
-    showDragHandle: true,
-    backgroundColor: Theme.of(context).colorScheme.surface,
-    builder: (_) => _Palette(app, host: context),
+  return showBlumiSheet(
+    context,
+    title: 'Commands',
+    icon: Icons.bolt,
+    child: _Palette(app, host: context),
   );
 }
 
@@ -30,18 +31,22 @@ class _Palette extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final cs = Theme.of(context).colorScheme;
+    final t = BlumiTokens.of(context);
     final s = app.session;
     final busy = s?.busy ?? false;
 
     final cmds = <_PaletteCmd>[
-      _PaletteCmd(Icons.add_comment_outlined, 'New session', () async => app.newSession()),
+      _PaletteCmd(Icons.add_comment_outlined, 'New session',
+          () async => app.newSession()),
       if (busy)
         _PaletteCmd(Icons.stop_circle_outlined, 'Cancel current turn',
             () async => s?.cancel()),
-      _PaletteCmd(Icons.compress, 'Compact context', () async => s?.api.compact()),
+      _PaletteCmd(
+          Icons.compress, 'Compact context', () async => s?.api.compact()),
       _PaletteCmd(Icons.undo, 'Undo last change', () async => s?.api.undo()),
       _PaletteCmd(app.yolo ? Icons.flash_off : Icons.bolt,
-          app.yolo ? 'Disable YOLO' : 'Enable YOLO', () async => app.setYolo(!app.yolo)),
+          app.yolo ? 'Disable YOLO' : 'Enable YOLO',
+          () async => app.setYolo(!app.yolo)),
       _PaletteCmd(Icons.tune, 'Control center',
           () async => showControlCenter(host, app)),
       _PaletteCmd(Icons.volume_up_outlined, 'Speak last reply', () async {
@@ -57,31 +62,39 @@ class _Palette extends StatelessWidget {
           await voice.play(await s!.api.speak(text));
         } catch (_) {}
       }),
-      _PaletteCmd(Icons.dns_outlined, 'Switch gateway', () async => app.disconnect()),
+      _PaletteCmd(
+          Icons.logout, 'Switch gateway', () async => app.disconnect()),
     ];
 
-    return SafeArea(
-      child: ListView(
-        shrinkWrap: true,
-        padding: const EdgeInsets.only(bottom: 8),
-        children: [
-          Padding(
-            padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
-            child: Text('commands',
-                style: TextStyle(fontWeight: FontWeight.bold, color: cs.primary)),
-          ),
-          for (final c in cmds)
-            ListTile(
-              dense: true,
-              leading: Icon(c.icon, color: cs.secondary),
-              title: Text(c.label),
-              onTap: () {
-                Navigator.pop(context);
-                c.run();
-              },
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        for (final c in cmds)
+          PressableScale(
+            onTap: () {
+              Navigator.of(context).pop();
+              c.run();
+            },
+            child: Padding(
+              padding: const EdgeInsets.symmetric(vertical: 11, horizontal: 2),
+              child: Row(children: [
+                Container(
+                  width: 34,
+                  height: 34,
+                  decoration: BoxDecoration(
+                    color: cs.secondary.withValues(alpha: 0.12),
+                    borderRadius: BorderRadius.circular(t.radiusSm),
+                  ),
+                  child: Icon(c.icon, size: 18, color: cs.secondary),
+                ),
+                const SizedBox(width: 14),
+                Expanded(
+                    child: Text(c.label, style: const TextStyle(fontSize: 15))),
+                Icon(Icons.chevron_right, size: 18, color: t.textMuted),
+              ]),
             ),
-        ],
-      ),
+          ),
+      ],
     );
   }
 }
