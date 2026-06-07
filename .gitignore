@@ -21,3 +21,12 @@ crates/blumi-web/frontend/.vite/
 .idea/
 .vscode/
 *.swp
+
+# Third-party agent skills installed locally (e.g. `skills add …`) — not vendored.
+# The installer scatters adapters across several tool dirs; ignore them all.
+.agents/
+/skills/
+/skills-lock.json
+.claude/skills/
+.crush/
+.pi/
