@@ -1,5 +1,3 @@
-import 'dart:math' as math;
-import 'dart:typed_data' show Float64List;
 import 'dart:ui' as ui;
 import 'package:flutter/material.dart';
 import '../state/app.dart';
@@ -128,7 +126,7 @@ class _DispatchSplashScreenState extends State<DispatchSplashScreen>
                       children: [
                         RotationTransition(
                           turns: _spin,
-                          child: const _BloomFlower(150),
+                          child: const BloomFlower(size: 150),
                         ),
                         const SizedBox(height: 34),
                         Opacity(
@@ -182,95 +180,4 @@ class _BluumLine extends StatelessWidget {
       ],
     );
   }
-}
-
-/// The blumi logo flower — an eight-petal bloom around a cyan nucleus, filled
-/// with the Living-Rose gradient. A faithful port of `assets/blumi-logo.svg`
-/// (4 axis + 4 diagonal petals, each diagonal rotated about its own centre).
-class _BloomFlower extends StatelessWidget {
-  final double size;
-  const _BloomFlower(this.size);
-
-  @override
-  Widget build(BuildContext context) => SizedBox.square(
-        dimension: size,
-        child: CustomPaint(painter: _BloomFlowerPainter()),
-      );
-}
-
-class _BloomFlowerPainter extends CustomPainter {
-  // [cx, cy, rx, ry, degrees] in the SVG's flower-local coordinates.
-  static const _petals = <List<double>>[
-    [0, -36, 19, 33, 0],
-    [0, 36, 19, 33, 0],
-    [-36, 0, 33, 19, 0],
-    [36, 0, 33, 19, 0],
-    [-26, -26, 28, 15, 45],
-    [26, 26, 28, 15, 45],
-    [26, -26, 28, 15, -45],
-    [-26, 26, 28, 15, -45],
-  ];
-
-  @override
-  void paint(Canvas canvas, Size size) {
-    const ext = 70.0; // half-extent: the axis petals reach ±69
-    final scale = size.width / (ext * 2);
-    canvas.save();
-    canvas.translate(size.width / 2, size.height / 2);
-    canvas.scale(scale);
-
-    // One combined path so the gradient sweeps the whole bloom coherently
-    // (rather than rotating per petal).
-    final flower = Path();
-    for (final p in _petals) {
-      final oval = Path()
-        ..addOval(Rect.fromCenter(
-            center: Offset(p[0], p[1]), width: p[2] * 2, height: p[3] * 2));
-      if (p[4] == 0) {
-        flower.addPath(oval, Offset.zero);
-      } else {
-        flower.addPath(
-            oval.transform(_rotateAbout(p[0], p[1], p[4])), Offset.zero);
-      }
-    }
-
-    const rect = Rect.fromLTRB(-ext, -ext, ext, ext);
-    final paint = Paint()
-      ..isAntiAlias = true
-      ..shader = ui.Gradient.linear(
-        rect.topLeft,
-        rect.bottomRight,
-        const [
-          Color(0xFFFF4F87), // rose
-          Color(0xFF9B86FF), // lavender
-          Color(0xFF6B50FF), // violet
-          Color(0xFF68FFD6), // cyan
-        ],
-        const [0.0, 0.45, 0.75, 1.0],
-      );
-    canvas.drawPath(flower, paint);
-
-    // Nucleus ◉ — cyan disc with a dark eye.
-    canvas.drawCircle(Offset.zero, 17, Paint()..color = const Color(0xFF68FFD6));
-    canvas.drawCircle(Offset.zero, 7.5, Paint()..color = const Color(0xFF0E1116));
-    canvas.restore();
-  }
-
-  @override
-  bool shouldRepaint(covariant CustomPainter old) => false;
-}
-
-/// Column-major 4×4 (as `Path.transform` expects) for rotating [deg] degrees
-/// about the pivot ([cx], [cy]) — i.e. translate(c) · rotate · translate(-c).
-Float64List _rotateAbout(double cx, double cy, double deg) {
-  final r = deg * math.pi / 180;
-  final a = math.cos(r), b = math.sin(r);
-  final tx = cx - a * cx + b * cy;
-  final ty = cy - b * cx - a * cy;
-  return Float64List.fromList(<double>[
-    a, b, 0, 0, //
-    -b, a, 0, 0, //
-    0, 0, 1, 0, //
-    tx, ty, 0, 1, //
-  ]);
 }

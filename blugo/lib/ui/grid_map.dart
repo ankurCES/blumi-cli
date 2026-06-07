@@ -111,11 +111,15 @@ class _GridMapState extends State<GridMap>
             final w = c.maxWidth, h = c.maxHeight;
             final center = Offset(w / 2, h / 2);
             final count = ring.length;
-            const hubD = 78.0;
-            final nodeD = count > 6 ? 54.0 : 64.0;
+            // The centre hub is the brand mark — large and prominent; the ring
+            // gateways are smaller satellites around it.
+            const hubD = 108.0;
+            final nodeD = count > 6 ? 44.0 : 52.0;
             const labelPad = 36.0;
+            // Keep the ring clear of the (now larger) hub on every screen size.
+            final ringFloor = hubD / 2 + nodeD / 2 + 16;
             final ringR = (math.min(w, h) / 2 - nodeD / 2 - labelPad - 6)
-                .clamp(nodeD * 1.3, math.max(nodeD * 1.3, h));
+                .clamp(ringFloor, math.max(ringFloor, h));
 
             Offset posFor(int i) {
               final ang = -math.pi / 2 + 2 * math.pi * i / count;

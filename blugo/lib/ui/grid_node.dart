@@ -131,7 +131,7 @@ class GridNode extends StatelessWidget {
           ),
           child: Container(
             decoration: BoxDecoration(shape: BoxShape.circle, color: cs.surface),
-            child: Center(child: FlowerGlyph(size: diameter * 0.6)),
+            child: Center(child: BloomFlower(size: diameter * 0.6)),
           ),
         );
         break;
@@ -148,7 +148,7 @@ class GridNode extends StatelessWidget {
                   color: ringColor.withValues(alpha: 0.28), blurRadius: 12),
             ],
           ),
-          child: Center(child: FlowerGlyph(size: diameter * 0.56)),
+          child: Center(child: BloomFlower(size: diameter * 0.56)),
         );
         break;
       case NodeKind.discovered:
@@ -157,7 +157,7 @@ class GridNode extends StatelessWidget {
           height: diameter,
           child: CustomPaint(
             painter: _DashedRingPainter(color: t.textMuted),
-            child: Center(child: FlowerGlyph(size: diameter * 0.5, dim: true)),
+            child: Center(child: BloomFlower(size: diameter * 0.5, dim: true)),
           ),
         );
         break;
