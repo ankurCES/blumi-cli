@@ -1,9 +1,37 @@
 import { useEffect, useState } from 'react'
 import { api } from '../api'
-import type { CronJob, SettingsView, SkillFull, Usage } from '../types'
+import type {
+  AlwaysOnStatus,
+  CronJob,
+  MemoryEntry,
+  RouteStatus,
+  RouteTier,
+  SettingsView,
+  SkillFull,
+  Usage,
+} from '../types'
 
-type Tab = 'cron' | 'skills' | 'memory' | 'usage' | 'settings'
-const TABS: Tab[] = ['cron', 'skills', 'memory', 'usage', 'settings']
+type Tab =
+  | 'cron'
+  | 'skills'
+  | 'memory'
+  | 'entries'
+  | 'routing'
+  | 'discovery'
+  | 'git'
+  | 'usage'
+  | 'settings'
+const TABS: Tab[] = [
+  'cron',
+  'skills',
+  'memory',
+  'entries',
+  'routing',
+  'discovery',
+  'git',
+  'usage',
+  'settings',
+]
 
 export function ControlCenter({ onClose, onReload }: { onClose: () => void; onReload: () => void }) {
   const [tab, setTab] = useState<Tab>('cron')
@@ -31,6 +59,10 @@ export function ControlCenter({ onClose, onReload }: { onClose: () => void; onRe
           {tab === 'cron' && <CronTab />}
           {tab === 'skills' && <SkillsTab onReload={onReload} />}
           {tab === 'memory' && <MemoryTab onReload={onReload} />}
+          {tab === 'entries' && <MemoryEntriesTab />}
+          {tab === 'routing' && <RoutingTab />}
+          {tab === 'discovery' && <DiscoveryTab />}
+          {tab === 'git' && <GitTab />}
           {tab === 'usage' && <UsageTab />}
           {tab === 'settings' && <SettingsTab />}
         </div>
@@ -216,6 +248,197 @@ function Stat({ label, value }: { label: string; value: string }) {
     <div className="cc-stat">
       <div className="cc-stat-val">{value}</div>
       <div className="cc-stat-lbl">{label}</div>
+    </div>
+  )
+}
+
+function RoutingTab() {
+  const [r, setR] = useState<RouteStatus | null>(null)
+  useEffect(() => {
+    api.route().then(setR).catch(() => {})
+  }, [])
+  if (!r) return <div className="cc-empty">loading…</div>
+  if (r.mode === 'off')
+    return (
+      <div className="cc-pane">
+        <div className="cc-empty">
+          routing is off — enable it in <code>settings.json</code> under <code>router.mode</code>{' '}
+          (heuristic / hybrid / judge).
+        </div>
+      </div>
+    )
+  const usd = (n?: number) => `$${(n || 0).toFixed(3)}`
+  const tiers: [string, RouteTier | undefined][] = [
+    ['light', r.light],
+    ['heavy', r.heavy],
+    ['judge', r.judge],
+  ]
+  const saved = r.saved_usd || 0
+  const pct = r.all_heavy_cost_usd ? (saved / r.all_heavy_cost_usd) * 100 : 0
+  return (
+    <div className="cc-pane">
+      <div className="cc-row">
+        <span className="cc-row-main">
+          mode <strong>{r.mode}</strong>
+        </span>
+        <span className="cc-dim">
+          saved {usd(saved)} ({pct.toFixed(0)}% vs all-heavy)
+        </span>
+      </div>
+      <table className="cc-table">
+        <thead>
+          <tr>
+            <th>tier</th>
+            <th>model</th>
+            <th>turns</th>
+            <th>in</th>
+            <th>out</th>
+            <th>$</th>
+          </tr>
+        </thead>
+        <tbody>
+          {tiers.map(([name, t]) => (
+            <tr key={name}>
+              <td>{name}</td>
+              <td>{t?.model || '—'}</td>
+              <td>{t?.turns || 0}</td>
+              <td>{t?.input || 0}</td>
+              <td>{t?.output || 0}</td>
+              <td>{usd(t?.cost_usd)}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  )
+}
+
+function MemoryEntriesTab() {
+  const [entries, setEntries] = useState<MemoryEntry[]>([])
+  const [editing, setEditing] = useState<number | null>(null)
+  const [draft, setDraft] = useState('')
+  const load = () =>
+    api.memoryList().then((d) => setEntries(d.entries || [])).catch(() => {})
+  useEffect(() => {
+    load()
+  }, [])
+  async function pin(e: MemoryEntry) {
+    await api.memoryPin(e.id, !e.pinned)
+    load()
+  }
+  async function del(e: MemoryEntry) {
+    await api.memoryDelete(e.id)
+    load()
+  }
+  async function saveEdit(id: number) {
+    await api.memoryUpdate(id, draft)
+    setEditing(null)
+    load()
+  }
+  return (
+    <div className="cc-pane">
+      <div className="cc-dim" style={{ marginBottom: 8 }}>
+        Individual memory entries. Pin to protect from eviction; editing re-embeds.
+      </div>
+      {entries.length === 0 && <div className="cc-empty">no memories yet</div>}
+      {entries.map((e) => (
+        <div className="cc-row cc-col" key={e.id}>
+          <div className="cc-row" style={{ alignItems: 'center' }}>
+            <span className="cc-row-main cc-dim">
+              {e.namespace} · {e.kind} · util {e.utility.toFixed(1)} · hits {e.hits}
+              {e.origin ? ` · from ${e.origin}` : ''}
+            </span>
+            <button className="cc-del" style={{ color: 'inherit' }} onClick={() => pin(e)}>
+              {e.pinned ? '★ pinned' : '☆ pin'}
+            </button>
+            <button
+              className="cc-del"
+              style={{ color: 'inherit' }}
+              onClick={() => {
+                setEditing(e.id)
+                setDraft(e.text)
+              }}
+            >
+              edit
+            </button>
+            <button className="cc-del" onClick={() => del(e)}>
+              delete
+            </button>
+          </div>
+          {editing === e.id ? (
+            <>
+              <textarea className="cc-area" value={draft} onChange={(ev) => setDraft(ev.target.value)} />
+              <button className="cc-save" onClick={() => saveEdit(e.id)}>
+                save
+              </button>
+            </>
+          ) : (
+            <div className="cc-clip">{e.text}</div>
+          )}
+        </div>
+      ))}
+    </div>
+  )
+}
+
+function DiscoveryTab() {
+  const [d, setD] = useState<AlwaysOnStatus | null>(null)
+  useEffect(() => {
+    api.alwaysOn().then(setD).catch(() => {})
+  }, [])
+  if (!d) return <div className="cc-empty">loading…</div>
+  if (!d.enabled)
+    return (
+      <div className="cc-pane">
+        <div className="cc-empty">
+          always-on is off — enable it in <code>settings.json</code> under{' '}
+          <code>always_on.enabled</code> + <code>autonomy: "propose"</code>.
+        </div>
+      </div>
+    )
+  return (
+    <div className="cc-pane">
+      <div className="cc-row">
+        <span className="cc-row-main">
+          always-on <strong>on</strong>
+        </span>
+        <span className="cc-dim">autonomy {d.autonomy}</span>
+      </div>
+      <label className="cc-label">Recent discoveries</label>
+      {d.recent.length === 0 && <div className="cc-empty">none yet</div>}
+      {d.recent.map((t, i) => (
+        <div className="cc-row" key={i}>
+          <div className="cc-dim cc-clip">{t}</div>
+        </div>
+      ))}
+      <label className="cc-label">Reports (~/.blumi/reports)</label>
+      {d.reports.length === 0 && <div className="cc-empty">none yet</div>}
+      {d.reports.map((r) => (
+        <div className="cc-row" key={r}>
+          <div className="cc-dim">{r}</div>
+        </div>
+      ))}
+    </div>
+  )
+}
+
+function GitTab() {
+  const [status, setStatus] = useState('')
+  const [log, setLog] = useState('')
+  const [diff, setDiff] = useState('')
+  useEffect(() => {
+    api.gitStatus().then((g) => setStatus(g.text)).catch(() => {})
+    api.gitLog().then((g) => setLog(g.text)).catch(() => {})
+    api.gitDiff().then((g) => setDiff(g.text)).catch(() => {})
+  }, [])
+  return (
+    <div className="cc-pane">
+      <label className="cc-label">status</label>
+      <pre className="cc-pre">{status || '(clean / not a repo)'}</pre>
+      <label className="cc-label">diff --stat</label>
+      <pre className="cc-pre">{diff || '(no changes)'}</pre>
+      <label className="cc-label">recent commits</label>
+      <pre className="cc-pre">{log || '(none)'}</pre>
     </div>
   )
 }

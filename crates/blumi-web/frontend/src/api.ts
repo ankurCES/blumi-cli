@@ -1,8 +1,12 @@
 import type {
+  AlwaysOnStatus,
   Config,
   CronJob,
+  GitView,
+  MemoryEntry,
   ModelOptions,
   Persona,
+  RouteStatus,
   ServerMessage,
   SessionMeta,
   SettingsView,
@@ -95,6 +99,19 @@ export const api = {
     postJSON('/api/approval/respond', { request_id, decision, scope }),
   clarify: (request_id: string, value: string) =>
     postJSON('/api/clarify/respond', { request_id, value }),
+  // Cost-aware routing.
+  route: () => getJSON<RouteStatus>('/api/route'),
+  // White-box memory entries.
+  memoryList: (namespace?: string, status?: string, limit = 200) =>
+    postJSON('/api/memory/list', { namespace, status, limit }) as Promise<{ entries: MemoryEntry[] }>,
+  memoryPin: (id: number, pinned: boolean) => postJSON('/api/memory/pin', { id, pinned }),
+  memoryDelete: (id: number) => postJSON('/api/memory/delete', { id }),
+  memoryUpdate: (id: number, text: string) => postJSON('/api/memory/update', { id, text }),
+  // Always-on discovery + read-only git panel.
+  alwaysOn: () => getJSON<AlwaysOnStatus>('/api/always-on'),
+  gitStatus: () => getJSON<GitView>('/api/git/status'),
+  gitDiff: () => getJSON<GitView>('/api/git/diff'),
+  gitLog: () => getJSON<GitView>('/api/git/log'),
 }
 
 /** All SSE event names the core emits (axum sets `event:` to these). */

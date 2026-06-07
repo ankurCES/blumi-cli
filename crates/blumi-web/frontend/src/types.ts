@@ -114,3 +114,46 @@ export type Config = {
   auth_required: boolean
   voice_enabled: boolean
 }
+
+export interface RouteTier {
+  model: string
+  turns: number
+  input: number
+  output: number
+  cost_usd: number
+}
+export interface RouteStatus {
+  mode: string
+  light?: RouteTier
+  heavy?: RouteTier
+  judge?: RouteTier
+  actual_cost_usd?: number
+  all_heavy_cost_usd?: number
+  saved_usd?: number
+}
+
+export interface MemoryEntry {
+  id: number
+  namespace: string
+  kind: string
+  text: string
+  origin: string
+  created_at: string
+  updated_at: string
+  hits: number
+  utility: number
+  status: string
+  pinned: boolean
+}
+
+export interface AlwaysOnStatus {
+  enabled: boolean
+  autonomy?: string
+  recent: string[]
+  reports: string[]
+}
+
+export interface GitView {
+  ok: boolean
+  text: string
+}

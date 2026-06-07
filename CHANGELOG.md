@@ -10,6 +10,10 @@ The Rust workspace and the blugo app share the version number.
 
 ### Added
 
+- **Web Control Center panels** — the browser/phone Control Center gains four
+  tabs over the new backends: **routing** (tiers + `$ saved`), **entries**
+  (white-box memory: pin / edit / delete), **discovery** (always-on status +
+  reports), and **git** (read-only status / diff / log). One `dist` rebuild.
 - **Workspace create/clone wizard (TUI)** — `/new-workspace <path>` creates a
   folder (+ `git init`) and opens it; `/clone-workspace <url> [dir]` git-clones a
   repo and opens it. Both append to the workspace pane (extends `/open-workspace`).
