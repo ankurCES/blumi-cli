@@ -10,6 +10,37 @@ The Rust workspace and the blugo app share the version number.
 
 ### Added
 
+- **Smart (cost-aware) model routing** (PilotDeck-inspired) — per turn, a fast
+  heuristic (and, on ambiguous turns, a local "judge" model) picks a difficulty
+  **tier** and routes to a light vs flagship model; delegated **sub-agents default
+  to the cheap tier**. Config `router` (`mode` = off|heuristic|hybrid|judge,
+  `light`/`heavy`/`judge` provider+model, `heuristics`, `subagent_tier`,
+  `prefer_grid_light`); default **off**. Live toggle + savings view: TUI `/route`
+  (per-tier counts + `$ saved` vs all-heavy), `GET /api/route`,
+  `Command::SetRouterMode`. Model swaps are gated to tier changes (prompt-cache
+  safe); the judge fails safe to the light tier.
+- **White-box memory editor** — list / view / **pin** / delete / edit individual
+  semantic-memory entries (not just the MEMORY.md/USER.md files). Pinned entries
+  are exempt from SEDM eviction + consolidation; editing re-embeds + resyncs FTS5.
+  `POST /api/memory/{list,pin,delete,update}` (migration `0007` adds a `pinned`
+  column). Editing/pinning a `user`-namespace entry stays local (never diffuses).
+- **Always-on proactive discovery** (PilotDeck-inspired; **off by default**) — the
+  gateway periodically (gated by cadence / rate-limit / board-busy / open-cap)
+  runs one **read-only** turn to surface candidate tasks, adds them to the board as
+  `Discovered:` todos, and lands a redacted markdown report (`~/.blumi/reports/`) +
+  an `agent`-namespace `discovery` memory. Config `always_on`
+  (`enabled`/`autonomy`/`cadence_secs`/…). Surfaced via `GET /api/always-on`, a
+  `blumi serve status` line, and the TUI `/discoveries` overlay. (Autonomous
+  low-risk *execution* in a worktree/snapshot is a planned follow-up.)
+- **Per-task cost telemetry** — each board `Task` now accumulates `input_tokens` /
+  `output_tokens` / `cost_usd` (priced from the model's list price); `blumi loop`
+  records the per-task token delta, surfaced in the TUI `/board` ($/task + total)
+  and `/api/tasks`. The model price map moved to `blumi_config::pricing` so
+  routing, per-task cost, and the TUI meter share one source of truth.
+- **Unified `blumi serve` + web UI** — `blumi serve` already serves the embedded
+  React UI; `blumi web` is now framed as a localhost dev shortcut (+ a `--port`
+  flag), and the Web-UI URL is printed by `serve pair` / `install` / `status`.
+
 - **TUI `/open-workspace`** — a file-browser popup to open any folder as a
   workspace: `↑/↓` move, `→` enter a folder, `←`/backspace go up, **space** opens
   the highlighted folder as a workspace (keep browsing), **enter** opens + closes,

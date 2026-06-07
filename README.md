@@ -289,8 +289,14 @@ turn any of it off in `settings.json`:
 "acceleration": { "mode": "auto" },
 "memory":       { "enabled": true, "diffuse": true, "dedup_threshold": 0.92 },
 "heal":         { "enabled": true, "recovery_budget": 2, "evolve": "auto" },
+"router":       { "mode": "off", "light": { "model": "" }, "heavy": { "model": "" } },
+"always_on":    { "enabled": false, "autonomy": "off", "cadence_secs": 900 },
 "knowledge":    { "enabled": true, "max_file_kb": 256 }
 ```
+
+**Pin what matters; the agent edits the rest.** Memory is now *white-box*: list,
+edit, **pin**, or delete individual entries (TUI Memory tab / `POST /api/memory/*`).
+Pinned entries are exempt from eviction + consolidation; editing one re-embeds it.
 
 Full guide: **[Memory & Knowledge](https://github.com/ankurCES/blumi-cli/wiki/Memory-and-Knowledge)**.
 
@@ -316,6 +322,21 @@ blumi uses your GPU for the bundled embedder when one is detected, and falls bac
 
 The heavy embedder build is **Apple-default + opt-in elsewhere**, so a plain Linux/CI install stays
 lean (FTS5 fallback) and never does a multi-GB native link unless you ask for GPU.
+
+## Cost-aware routing & always-on
+
+Two PilotDeck-inspired controls, both **off by default** — opt in per `settings.json`:
+
+- **Smart routing** — per turn a fast heuristic (and, on ambiguous turns, a local *judge*) picks a
+  difficulty **tier** and routes to a **light vs flagship** model; delegated **sub-agents default to the
+  cheap tier**. Set `router.mode` to `heuristic`/`hybrid`/`judge` and give `router.light`/`heavy` a
+  provider+model. Watch the savings live: TUI **`/route`** (per-tier counts + `$ saved` vs all-heavy),
+  `GET /api/route`. Model swaps are prompt-cache-safe; the judge fails safe to the cheap tier. On a grid,
+  `router.prefer_grid_light` can run the light tier on a peer's local model.
+- **Always-on discovery** — with `always_on.enabled` + `autonomy = "propose"`, the gateway periodically
+  (gated) runs a **read-only** pass that surfaces candidate tasks onto the board (`Discovered: …`) and
+  lands a report in `~/.blumi/reports/`. See it with `blumi serve status`, `GET /api/always-on`, or the
+  TUI **`/discoveries`** overlay. It never mutates anything (autonomous execution is a planned follow-up).
 
 ## Workspace layout
 
