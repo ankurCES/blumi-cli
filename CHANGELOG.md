@@ -45,9 +45,11 @@ tracks its own Flutter version (`x.y.z+build`).
     blumi flower mark (in its own Living-Rose colors) instead of a phone icon
     labelled "this device"; tapping it opens **Dispatch** directly (adding a
     gateway has its own ＋ button). The open plays a short "**Entering bluuuum
-    mode…**" splash — the flower spins on the current theme background while a
-    brand glow blooms out from behind it and washes the screen in the
-    Living-Rose gradient. Tap to skip; bypassed entirely under reduce-motion.
+    mode…**" splash — the eight-petal logo bloom (a faithful port of
+    `blumi-logo.svg`) spins on the current theme background while a brand glow
+    blooms out from behind it and washes the screen in the Living-Rose gradient,
+    which then **recedes back to the dark background** as the text fades in. Tap
+    to skip; bypassed entirely under reduce-motion.
   - **Concurrent dedicated sessions (gateway)** — `/api/chat/send`,
     `/api/messages`, and `/api/chat/stream` accept an optional `session_id` so a
     client can drive a specific session **concurrently** with the active one
