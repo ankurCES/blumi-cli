@@ -5,6 +5,7 @@ import '../data/voice.dart';
 import '../state/app.dart';
 import '../state/session.dart';
 import 'control.dart';
+import 'kit/kit.dart';
 import 'markdown.dart';
 import 'palette.dart';
 import 'thinking.dart';
@@ -25,6 +26,7 @@ class HomeShell extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final session = app.session!;
+    final cs = Theme.of(context).colorScheme;
     return LayoutBuilder(
       builder: (context, c) {
         final wide = c.maxWidth >= _wide;
@@ -38,9 +40,11 @@ class HomeShell extends StatelessWidget {
                 ? Row(
                     children: [
                       SizedBox(width: 260, child: SessionsPane(app)),
-                      const VerticalDivider(width: 1),
+                      VerticalDivider(
+                          width: 1, color: cs.onSurface.withValues(alpha: 0.08)),
                       Expanded(child: ChatPane(session, onCommand: _cmd(context))),
-                      const VerticalDivider(width: 1),
+                      VerticalDivider(
+                          width: 1, color: cs.onSurface.withValues(alpha: 0.08)),
                       SizedBox(width: 320, child: AgentRail(session)),
                     ],
                   )
@@ -63,33 +67,30 @@ class _Header extends StatelessWidget implements PreferredSizeWidget {
   Widget build(BuildContext context) {
     final s = app.session!;
     final cs = Theme.of(context).colorScheme;
+    final t = BlumiTokens.of(context);
     return AppBar(
+      titleSpacing: 12,
       title: Row(children: [
-        Text('✿ blumi', style: TextStyle(color: cs.primary, fontWeight: FontWeight.bold)),
-        const SizedBox(width: 10),
-        if (s.modelName.isNotEmpty)
+        Image.asset('assets/icon/blugo_mark.png',
+            width: 26, height: 26, filterQuality: FilterQuality.medium),
+        const SizedBox(width: 8),
+        const GradientText('blumi',
+            style: TextStyle(fontSize: 19, fontWeight: FontWeight.w800)),
+        if (s.modelName.isNotEmpty) ...[
+          const SizedBox(width: 10),
           Flexible(
             child: Text(s.modelName,
                 overflow: TextOverflow.ellipsis,
-                style: TextStyle(fontSize: 13, color: cs.secondary)),
+                style: TextStyle(fontSize: 12.5, color: t.textMuted)),
           ),
+        ],
         if (app.yolo) ...[
           const SizedBox(width: 8),
-          Container(
-            padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-            decoration: BoxDecoration(
-              color: cs.error.withValues(alpha: 0.2),
-              borderRadius: BorderRadius.circular(6),
-            ),
-            child: Text('⚡ YOLO',
-                style: TextStyle(
-                    fontSize: 10, color: cs.error, fontWeight: FontWeight.bold)),
-          ),
+          BlumiBadge('YOLO', icon: Icons.bolt, color: cs.error),
         ],
         if (s.busy) ...[
           const SizedBox(width: 10),
-          const SizedBox(
-              width: 14, height: 14, child: CircularProgressIndicator(strokeWidth: 2)),
+          const InlineSpinner(size: 14),
         ],
       ]),
       actions: [
@@ -209,7 +210,8 @@ class _ChatPaneState extends State<ChatPane> {
           // Animated flower mascot while the agent is working but hasn't begun
           // streaming the answer (shows reasoning text if any).
           if (s.busy && s.streaming == null) ThinkingMascot(detail: s.thinking),
-          if (s.streaming != null) EntryView(AssistantEntry(s.streaming!), streaming: true),
+          if (s.streaming != null)
+            EntryView(AssistantEntry(s.streaming!), streaming: true),
         ];
         return Column(
           children: [
@@ -220,11 +222,13 @@ class _ChatPaneState extends State<ChatPane> {
                       ? const _EmptyState()
                       : RefreshIndicator(
                           onRefresh: s.refreshTranscript,
-                          child: ListView(
+                          child: ListView.builder(
                             controller: _scroll,
                             physics: const AlwaysScrollableScrollPhysics(),
-                            padding: const EdgeInsets.all(12),
-                            children: items,
+                            padding: const EdgeInsets.fromLTRB(12, 12, 12, 8),
+                            itemCount: items.length,
+                            itemBuilder: (context, i) =>
+                                RepaintBoundary(child: items[i]),
                           ),
                         ),
             ),
@@ -250,13 +254,13 @@ class _EmptyState extends StatelessWidget {
   const _EmptyState();
   @override
   Widget build(BuildContext context) {
-    final cs = Theme.of(context).colorScheme;
+    final t = BlumiTokens.of(context);
     return Center(
       child: Column(mainAxisSize: MainAxisSize.min, children: [
-        Text('✿', style: TextStyle(fontSize: 56, color: cs.primary)),
-        const SizedBox(height: 8),
+        const GradientText('✿', style: TextStyle(fontSize: 60)),
+        const SizedBox(height: 10),
         Text('Ask blumi to build, fix, or explain…',
-            style: TextStyle(color: cs.onSurface.withValues(alpha: 0.6))),
+            style: TextStyle(color: t.textMuted, fontSize: 14)),
       ]),
     );
   }
@@ -271,6 +275,7 @@ class EntryView extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final cs = Theme.of(context).colorScheme;
+    final t = BlumiTokens.of(context);
     return switch (entry) {
       UserEntry(:final text) => _Bubble(
           glyph: '›',
@@ -291,8 +296,7 @@ class EntryView extends StatelessWidget {
           padding: const EdgeInsets.symmetric(vertical: 4),
           child: Text('· $text',
               style: TextStyle(
-                  fontStyle: FontStyle.italic,
-                  color: cs.onSurface.withValues(alpha: 0.5))),
+                  fontStyle: FontStyle.italic, color: t.textMuted)),
         ),
       ToolEntry e => _ToolCard(e),
     };
@@ -313,13 +317,14 @@ class _Bubble extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final cs = Theme.of(context).colorScheme;
+    final t = BlumiTokens.of(context);
     return Container(
       margin: const EdgeInsets.symmetric(vertical: 5),
+      padding: const EdgeInsets.only(left: 12, top: 6, bottom: 6, right: 4),
       decoration: BoxDecoration(
         border: Border(left: BorderSide(color: color, width: 3)),
+        borderRadius: const BorderRadius.horizontal(right: Radius.circular(8)),
       ),
-      padding: const EdgeInsets.only(left: 10, top: 4, bottom: 4),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -331,15 +336,17 @@ class _Bubble extends StatelessWidget {
               const Spacer(),
               InkWell(
                 onTap: onSpeak,
+                borderRadius: BorderRadius.circular(20),
                 child: Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
                   child: Icon(Icons.volume_up_outlined,
-                      size: 16, color: cs.onSurface.withValues(alpha: 0.4)),
+                      size: 16, color: t.textMuted),
                 ),
               ),
             ],
           ]),
-          const SizedBox(height: 2),
+          const SizedBox(height: 3),
           child,
         ],
       ),
@@ -352,37 +359,41 @@ class _ToolCard extends StatelessWidget {
   const _ToolCard(this.e);
   @override
   Widget build(BuildContext context) {
-    final cs = Theme.of(context).colorScheme;
-    final (glyph, color) = switch (e.ok) {
-      null => ('⠿', cs.secondary),
-      true => ('✓', Colors.greenAccent),
-      false => ('×', cs.error),
+    final t = BlumiTokens.of(context);
+    final (icon, color) = switch (e.ok) {
+      null => (Icons.more_horiz, t.info),
+      true => (Icons.check_circle, t.success),
+      false => (Icons.error, t.error),
     };
-    return Card(
-      margin: const EdgeInsets.symmetric(vertical: 5),
-      child: Padding(
-        padding: const EdgeInsets.all(10),
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 5),
+      child: BlumiCard(
+        padding: const EdgeInsets.all(11),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Row(children: [
-              Text('$glyph ', style: TextStyle(color: color)),
-              Text('▸ ${e.name}',
-                  style: const TextStyle(fontWeight: FontWeight.bold, fontFamily: 'monospace')),
+              Icon(icon, size: 15, color: color),
+              const SizedBox(width: 6),
+              Text(e.name,
+                  style: const TextStyle(
+                      fontWeight: FontWeight.bold, fontFamily: 'monospace')),
             ]),
             if (e.summary.isNotEmpty)
               Padding(
-                padding: const EdgeInsets.only(top: 2),
+                padding: const EdgeInsets.only(top: 4),
                 child: Text(e.summary,
-                    style: TextStyle(fontSize: 12, color: cs.onSurface.withValues(alpha: 0.7))),
+                    style: TextStyle(fontSize: 12.5, color: t.textMuted)),
               ),
             if (e.preview.isNotEmpty)
               Padding(
-                padding: const EdgeInsets.only(top: 2),
+                padding: const EdgeInsets.only(top: 4),
                 child: Text(e.preview,
                     maxLines: 6,
                     overflow: TextOverflow.ellipsis,
-                    style: TextStyle(fontSize: 12, color: cs.onSurface.withValues(alpha: 0.5))),
+                    style: TextStyle(
+                        fontSize: 12,
+                        color: t.textMuted.withValues(alpha: 0.85))),
               ),
             if (e.diff != null) _DiffView(e.diff!),
           ],
@@ -398,11 +409,16 @@ class _DiffView extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final cs = Theme.of(context).colorScheme;
+    final t = BlumiTokens.of(context);
     final lines = diff.split('\n').take(40);
     return Container(
-      margin: const EdgeInsets.only(top: 6),
-      padding: const EdgeInsets.all(6),
-      color: Colors.black.withValues(alpha: 0.25),
+      margin: const EdgeInsets.only(top: 8),
+      padding: const EdgeInsets.all(8),
+      decoration: BoxDecoration(
+        color: cs.surface.withValues(alpha: 0.5),
+        borderRadius: BorderRadius.circular(t.radiusSm),
+        border: Border.all(color: cs.onSurface.withValues(alpha: 0.06)),
+      ),
       width: double.infinity,
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -412,13 +428,14 @@ class _DiffView extends StatelessWidget {
                 style: TextStyle(
                   fontFamily: 'monospace',
                   fontSize: 11,
+                  height: 1.35,
                   color: l.startsWith('+') && !l.startsWith('+++')
-                      ? Colors.greenAccent
+                      ? t.success
                       : l.startsWith('-') && !l.startsWith('---')
-                          ? cs.error
+                          ? t.error
                           : l.startsWith('@')
-                              ? cs.secondary
-                              : cs.onSurface.withValues(alpha: 0.6),
+                              ? t.info
+                              : t.textMuted,
                 )),
         ],
       ),
@@ -433,32 +450,48 @@ class ApprovalCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final cs = Theme.of(context).colorScheme;
+    final t = BlumiTokens.of(context);
+    final accent = req.dangerous ? cs.error : cs.primary;
     return Container(
       width: double.infinity,
-      margin: const EdgeInsets.all(8),
-      padding: const EdgeInsets.all(12),
+      margin: const EdgeInsets.fromLTRB(10, 4, 10, 6),
+      padding: const EdgeInsets.all(13),
       decoration: BoxDecoration(
         color: cs.surface,
-        border: Border.all(color: req.dangerous ? cs.error : cs.primary),
-        borderRadius: BorderRadius.circular(10),
+        border: Border.all(color: accent, width: 1.4),
+        borderRadius: BorderRadius.circular(t.radiusMd),
+        boxShadow: [
+          BoxShadow(color: accent.withValues(alpha: 0.18), blurRadius: 14),
+        ],
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text(req.dangerous ? '⚠ permission — dangerous' : 'permission',
+          Row(children: [
+            Icon(req.dangerous ? Icons.warning_amber : Icons.lock_outline,
+                size: 16, color: accent),
+            const SizedBox(width: 6),
+            Text(req.dangerous ? 'permission — dangerous' : 'permission',
+                style:
+                    TextStyle(fontWeight: FontWeight.bold, color: accent)),
+          ]),
+          const SizedBox(height: 6),
+          Text(req.tool,
               style: TextStyle(
-                  fontWeight: FontWeight.bold,
-                  color: req.dangerous ? cs.error : cs.primary)),
-          const SizedBox(height: 4),
-          Text(req.tool, style: TextStyle(color: cs.secondary)),
-          if (req.summary.isNotEmpty) Text(req.summary),
+                  color: cs.secondary, fontFamily: 'monospace', fontSize: 13)),
+          if (req.summary.isNotEmpty)
+            Padding(
+              padding: const EdgeInsets.only(top: 2),
+              child: Text(req.summary),
+            ),
           if (req.advice != null)
             Padding(
               padding: const EdgeInsets.only(top: 4),
-              child: Text(req.advice!, style: TextStyle(color: cs.secondary, fontSize: 12)),
+              child: Text(req.advice!,
+                  style: TextStyle(color: t.textMuted, fontSize: 12.5)),
             ),
-          const SizedBox(height: 10),
-          Wrap(spacing: 8, children: [
+          const SizedBox(height: 12),
+          Wrap(spacing: 8, runSpacing: 8, children: [
             FilledButton(
                 onPressed: () => session.approve(allow: true),
                 child: const Text('Allow once')),
@@ -482,22 +515,31 @@ class ClarifyCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final cs = Theme.of(context).colorScheme;
+    final t = BlumiTokens.of(context);
     return Container(
       width: double.infinity,
-      margin: const EdgeInsets.all(8),
-      padding: const EdgeInsets.all(12),
+      margin: const EdgeInsets.fromLTRB(10, 4, 10, 6),
+      padding: const EdgeInsets.all(13),
       decoration: BoxDecoration(
         color: cs.surface,
-        border: Border.all(color: cs.primary),
-        borderRadius: BorderRadius.circular(10),
+        border: Border.all(color: cs.primary.withValues(alpha: 0.8)),
+        borderRadius: BorderRadius.circular(t.radiusMd),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text(req.question, style: const TextStyle(fontWeight: FontWeight.bold)),
-          const SizedBox(height: 8),
+          Row(children: [
+            Icon(Icons.help_outline, size: 16, color: cs.primary),
+            const SizedBox(width: 6),
+            Expanded(
+              child: Text(req.question,
+                  style: const TextStyle(fontWeight: FontWeight.bold)),
+            ),
+          ]),
+          const SizedBox(height: 10),
           Wrap(
             spacing: 8,
+            runSpacing: 8,
             children: [
               for (final c in req.choices)
                 OutlinedButton(
@@ -520,35 +562,39 @@ class PlanCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final cs = Theme.of(context).colorScheme;
-    return Container(
-      width: double.infinity,
-      margin: const EdgeInsets.all(8),
-      padding: const EdgeInsets.all(12),
-      decoration: BoxDecoration(
-        color: cs.surface,
-        border: Border.all(color: cs.primary),
-        borderRadius: BorderRadius.circular(10),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text('✿ plan review',
-              style: TextStyle(fontWeight: FontWeight.bold, color: cs.primary)),
-          const SizedBox(height: 6),
-          ConstrainedBox(
-            constraints: const BoxConstraints(maxHeight: 340),
-            child: SingleChildScrollView(child: BlumiMarkdown(req.plan)),
-          ),
-          const SizedBox(height: 10),
-          Wrap(spacing: 8, children: [
-            FilledButton(
-                onPressed: () => session.answerPlan(true),
-                child: const Text('Approve')),
-            OutlinedButton(
-                onPressed: () => session.answerPlan(false),
-                child: const Text('Revise')),
-          ]),
-        ],
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(10, 4, 10, 6),
+      child: BlumiCard(
+        gradientBorder: true,
+        padding: const EdgeInsets.all(13),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(children: [
+              const GradientText('✿',
+                  style: TextStyle(
+                      fontSize: 15, fontWeight: FontWeight.bold)),
+              const SizedBox(width: 6),
+              Text('plan review',
+                  style: TextStyle(
+                      fontWeight: FontWeight.bold, color: cs.primary)),
+            ]),
+            const SizedBox(height: 8),
+            ConstrainedBox(
+              constraints: const BoxConstraints(maxHeight: 340),
+              child: SingleChildScrollView(child: BlumiMarkdown(req.plan)),
+            ),
+            const SizedBox(height: 12),
+            Wrap(spacing: 8, runSpacing: 8, children: [
+              FilledButton(
+                  onPressed: () => session.answerPlan(true),
+                  child: const Text('Approve')),
+              OutlinedButton(
+                  onPressed: () => session.answerPlan(false),
+                  child: const Text('Revise')),
+            ]),
+          ],
+        ),
       ),
     );
   }
@@ -573,8 +619,13 @@ class _Composer extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(8, 4, 8, 8),
+    final cs = Theme.of(context).colorScheme;
+    return Container(
+      decoration: BoxDecoration(
+        border:
+            Border(top: BorderSide(color: cs.onSurface.withValues(alpha: 0.08))),
+      ),
+      padding: const EdgeInsets.fromLTRB(8, 8, 8, 8),
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.end,
         children: [
@@ -583,7 +634,7 @@ class _Composer extends StatelessWidget {
               tooltip: recording ? 'Stop recording' : 'Voice input',
               onPressed: onMic,
               icon: Icon(recording ? Icons.mic : Icons.mic_none,
-                  color: recording ? Theme.of(context).colorScheme.error : null),
+                  color: recording ? cs.error : null),
             ),
           Expanded(
             child: TextField(
@@ -599,18 +650,23 @@ class _Composer extends StatelessWidget {
                   onCommand!();
                 }
               },
-              decoration: const InputDecoration(
-                hintText: 'Ask blumi…  (/ for commands)',
-                border: OutlineInputBorder(),
-                isDense: true,
-              ),
+              decoration:
+                  const InputDecoration(hintText: 'Ask blumi…  (/ for commands)'),
             ),
           ),
           const SizedBox(width: 8),
-          busy
-              ? IconButton.filledTonal(
-                  onPressed: onStop, icon: const Icon(Icons.stop))
-              : IconButton.filled(onPressed: onSend, icon: const Icon(Icons.send)),
+          AnimatedSwitcher(
+            duration: Motion.fast,
+            child: busy
+                ? IconButton.filledTonal(
+                    key: const ValueKey('stop'),
+                    onPressed: onStop,
+                    icon: const Icon(Icons.stop))
+                : IconButton.filled(
+                    key: const ValueKey('send'),
+                    onPressed: onSend,
+                    icon: const Icon(Icons.send)),
+          ),
         ],
       ),
     );
@@ -623,54 +679,83 @@ class AgentRail extends StatelessWidget {
   const AgentRail(this.session, {super.key});
   @override
   Widget build(BuildContext context) {
-    final cs = Theme.of(context).colorScheme;
+    final t = BlumiTokens.of(context);
     return AnimatedBuilder(
       animation: session,
       builder: (context, _) {
         final s = session;
         return ListView(
-          padding: const EdgeInsets.all(12),
+          padding: const EdgeInsets.fromLTRB(12, 4, 12, 12),
           children: [
-            Text('● agent',
-                style: TextStyle(fontWeight: FontWeight.bold, color: cs.primary)),
-            const SizedBox(height: 8),
-            _meter(context, 'context', s.contextFrac,
-                '${(s.contextFrac * 100).round()}%'),
-            const SizedBox(height: 8),
-            _kv('tokens', '↑${s.inputTokens} ↓${s.outputTokens}'),
-            if (s.costUsd > 0) _kv('cost', '\$${s.costUsd.toStringAsFixed(4)}'),
-            const Divider(),
-            Text('tasks', style: TextStyle(fontWeight: FontWeight.bold, color: cs.secondary)),
+            Row(children: [
+              StatusDot(s.busy ? BlumiStatus.busy : BlumiStatus.ok, size: 8),
+              const SizedBox(width: 6),
+              Text('agent',
+                  style: TextStyle(
+                      fontWeight: FontWeight.w700,
+                      letterSpacing: 1.1,
+                      fontSize: 11,
+                      color: t.textMuted)),
+            ]),
+            const SizedBox(height: 10),
+            _Meter(
+                label: 'context',
+                frac: s.contextFrac,
+                pct: '${(s.contextFrac * 100).round()}%'),
+            const SizedBox(height: 10),
+            _kv('tokens', '↑${s.inputTokens} ↓${s.outputTokens}', t),
+            if (s.costUsd > 0)
+              _kv('cost', '\$${s.costUsd.toStringAsFixed(4)}', t),
+            const SizedBox(height: 4),
+            const SectionHeader('Tasks', icon: Icons.checklist),
             if (s.todos.isEmpty)
-              Text('(none yet)',
-                  style: TextStyle(color: cs.onSurface.withValues(alpha: 0.5))),
-            for (final t in s.todos)
+              const EmptyState(
+                  icon: Icons.checklist_rtl, message: 'No tasks yet'),
+            for (final todo in s.todos)
               Padding(
-                padding: const EdgeInsets.symmetric(vertical: 2),
-                child: Row(children: [
-                  Text(switch (t.status) {
-                    TodoStatus.completed => '✓ ',
-                    TodoStatus.inProgress => '◐ ',
-                    TodoStatus.pending => '• ',
-                  }),
-                  Expanded(child: Text(t.content, style: const TextStyle(fontSize: 13))),
+                padding: const EdgeInsets.symmetric(vertical: 3),
+                child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                  Icon(
+                    switch (todo.status) {
+                      TodoStatus.completed => Icons.check_circle,
+                      TodoStatus.inProgress => Icons.timelapse,
+                      TodoStatus.pending => Icons.circle_outlined,
+                    },
+                    size: 15,
+                    color: switch (todo.status) {
+                      TodoStatus.completed => t.success,
+                      TodoStatus.inProgress => t.info,
+                      TodoStatus.pending => t.textMuted,
+                    },
+                  ),
+                  const SizedBox(width: 8),
+                  Expanded(
+                      child:
+                          Text(todo.content, style: const TextStyle(fontSize: 13))),
                 ]),
               ),
             if (s.agents.isNotEmpty) ...[
-              const Divider(),
-              Text('active agents',
-                  style: TextStyle(fontWeight: FontWeight.bold, color: cs.secondary)),
+              const SectionHeader('Active agents', icon: Icons.account_tree),
               for (final a in s.agents)
                 ListTile(
                   dense: true,
                   contentPadding: EdgeInsets.zero,
-                  leading: Text(switch (a.status) {
-                    AgentStatus.working => '⠿',
-                    AgentStatus.done => '✓',
-                    AgentStatus.failed => '×',
-                  }),
+                  leading: Icon(
+                    switch (a.status) {
+                      AgentStatus.working => Icons.more_horiz,
+                      AgentStatus.done => Icons.check_circle,
+                      AgentStatus.failed => Icons.error,
+                    },
+                    size: 18,
+                    color: switch (a.status) {
+                      AgentStatus.working => t.info,
+                      AgentStatus.done => t.success,
+                      AgentStatus.failed => t.error,
+                    },
+                  ),
                   title: Text(a.role),
-                  subtitle: Text(a.task, maxLines: 1, overflow: TextOverflow.ellipsis),
+                  subtitle:
+                      Text(a.task, maxLines: 1, overflow: TextOverflow.ellipsis),
                 ),
             ],
           ],
@@ -679,24 +764,40 @@ class AgentRail extends StatelessWidget {
     );
   }
 
-  Widget _kv(String k, String v) => Padding(
+  Widget _kv(String k, String v, BlumiTokens t) => Padding(
         padding: const EdgeInsets.symmetric(vertical: 2),
         child: Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
-          Text(k, style: const TextStyle(fontSize: 13)),
+          Text(k, style: TextStyle(fontSize: 13, color: t.textMuted)),
           Text(v, style: const TextStyle(fontSize: 13, fontFamily: 'monospace')),
         ]),
       );
+}
 
-  Widget _meter(BuildContext context, String label, double frac, String pct) {
+/// An animated capacity meter (context window usage) — fills smoothly on change.
+class _Meter extends StatelessWidget {
+  final String label;
+  final double frac;
+  final String pct;
+  const _Meter({required this.label, required this.frac, required this.pct});
+
+  @override
+  Widget build(BuildContext context) {
+    final t = BlumiTokens.of(context);
     return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
       Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
-        Text(label, style: const TextStyle(fontSize: 13)),
+        Text(label, style: TextStyle(fontSize: 13, color: t.textMuted)),
         Text(pct, style: const TextStyle(fontSize: 13)),
       ]),
-      const SizedBox(height: 3),
+      const SizedBox(height: 5),
       ClipRRect(
-        borderRadius: BorderRadius.circular(4),
-        child: LinearProgressIndicator(value: frac, minHeight: 6),
+        borderRadius: BorderRadius.circular(5),
+        child: TweenAnimationBuilder<double>(
+          tween: Tween(begin: 0, end: frac.clamp(0.0, 1.0)),
+          duration: Motion.med,
+          curve: Motion.curve,
+          builder: (context, v, _) =>
+              LinearProgressIndicator(value: v, minHeight: 7),
+        ),
       ),
     ]);
   }
@@ -708,17 +809,25 @@ class SessionsPane extends StatelessWidget {
   const SessionsPane(this.app, {super.key});
   @override
   Widget build(BuildContext context) {
-    final cs = Theme.of(context).colorScheme;
+    final t = BlumiTokens.of(context);
     return AnimatedBuilder(
       animation: app,
       builder: (context, _) => Column(
         children: [
           Padding(
-            padding: const EdgeInsets.fromLTRB(12, 12, 8, 4),
+            padding: const EdgeInsets.fromLTRB(14, 12, 8, 4),
             child: Row(children: [
-              Text('explorer',
-                  style: TextStyle(fontWeight: FontWeight.bold, color: cs.primary)),
+              Text('EXPLORER',
+                  style: TextStyle(
+                      fontWeight: FontWeight.w700,
+                      letterSpacing: 1.1,
+                      fontSize: 11,
+                      color: t.textMuted)),
               const Spacer(),
+              IconButton(
+                  tooltip: 'New session',
+                  onPressed: app.newSession,
+                  icon: const Icon(Icons.add_comment_outlined, size: 18)),
               IconButton(
                   tooltip: 'Refresh',
                   onPressed: app.refreshSessions,
@@ -727,28 +836,33 @@ class SessionsPane extends StatelessWidget {
           ),
           Expanded(
             child: app.sessions.isEmpty
-                ? Center(
-                    child: Text('(no sessions)',
-                        style: TextStyle(color: cs.onSurface.withValues(alpha: 0.5))))
-                : ListView(
-                    children: [
-                      for (final sess in app.sessions)
-                        ListTile(
-                          dense: true,
-                          title: Text(
-                            sess.title.isEmpty ? '(untitled)' : sess.title,
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                          ),
-                          subtitle: Text('${sess.messageCount} msgs',
-                              style: const TextStyle(fontSize: 11)),
-                          onTap: () {
-                            final sc = Scaffold.maybeOf(context);
-                            if (sc?.isDrawerOpen ?? false) sc!.closeDrawer();
-                            app.resumeSession(sess.id);
-                          },
+                ? const EmptyState(
+                    icon: Icons.forum_outlined, message: 'No sessions yet')
+                : ListView.builder(
+                    padding: const EdgeInsets.symmetric(horizontal: 6),
+                    itemCount: app.sessions.length,
+                    itemBuilder: (context, i) {
+                      final sess = app.sessions[i];
+                      return ListTile(
+                        dense: true,
+                        shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(t.radiusSm)),
+                        leading: Icon(Icons.chat_bubble_outline,
+                            size: 16, color: t.textMuted),
+                        title: Text(
+                          sess.title.isEmpty ? '(untitled)' : sess.title,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
                         ),
-                    ],
+                        subtitle: Text('${sess.messageCount} msgs',
+                            style: const TextStyle(fontSize: 11)),
+                        onTap: () {
+                          final sc = Scaffold.maybeOf(context);
+                          if (sc?.isDrawerOpen ?? false) sc!.closeDrawer();
+                          app.resumeSession(sess.id);
+                        },
+                      );
+                    },
                   ),
           ),
         ],

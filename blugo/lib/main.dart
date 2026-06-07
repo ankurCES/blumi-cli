@@ -3,6 +3,7 @@ import 'data/notifications.dart';
 import 'state/app.dart';
 import 'ui/connect.dart';
 import 'ui/home.dart';
+import 'ui/kit/kit.dart';
 import 'ui/theme.dart';
 
 Future<void> main() async {
@@ -42,7 +43,12 @@ class _BlugoAppState extends State<BlugoApp> {
         title: 'blugo',
         debugShowCheckedModeBanner: false,
         theme: themeByName(app.themeName).toThemeData(),
-        home: app.connected ? HomeShell(app) : ConnectScreen(app),
+        home: FadeSwitcher(
+          child: app.connected
+              ? KeyedSubtree(key: const ValueKey('home'), child: HomeShell(app))
+              : KeyedSubtree(
+                  key: const ValueKey('connect'), child: ConnectScreen(app)),
+        ),
       ),
     );
   }
