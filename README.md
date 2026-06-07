@@ -56,7 +56,8 @@ Flutter **phone app** that's a 1:1 mirror of the TUI, optimized for foldables.
   <a href="https://github.com/ankurCES/blumi-cli/wiki/Memory-and-Knowledge">Memory</a> ·
   <a href="https://github.com/ankurCES/blumi-cli/wiki/Voice">Voice</a> ·
   <a href="https://github.com/ankurCES/blumi-cli/wiki/Self-Management">Self-Management</a> ·
-  <a href="https://github.com/ankurCES/blumi-cli/wiki/Troubleshooting">Troubleshooting</a>
+  <a href="https://github.com/ankurCES/blumi-cli/wiki/Troubleshooting">Troubleshooting</a> ·
+  <a href="https://github.com/ankurCES/blumi-cli/wiki/FAQ">FAQ</a>
   <br>
   <sub>Full setup &amp; step-by-step guides → <a href="https://github.com/ankurCES/blumi-cli/wiki">the Wiki</a></sub>
 </p>
