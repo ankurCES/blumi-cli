@@ -8,6 +8,8 @@
     <uses-permission android:name="android.permission.RECORD_AUDIO"/>
     <!-- Completion notifications (#209c) — runtime-requested on Android 13+. -->
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS"/>
+    <!-- The "blumi Bloom" live wallpaper (optional — non-live-wallpaper devices still install). -->
+    <uses-feature android:name="android.software.live_wallpaper" android:required="false"/>
     <application
         android:label="blugo"
         android:name="${applicationName}"
@@ -45,6 +47,21 @@
         <meta-data
             android:name="com.google.firebase.messaging.default_notification_color"
             android:resource="@color/blumi_notification_accent" />
+        <!-- "blumi Bloom" live wallpaper — the flower blooms into the logo on
+             unfold (hinge-angle triggered). Pure-native; rides along in the APK
+             and appears in the system live-wallpaper picker. -->
+        <service
+            android:name=".BloomWallpaperService"
+            android:exported="true"
+            android:label="@string/bloom_wallpaper_label"
+            android:permission="android.permission.BIND_WALLPAPER">
+            <intent-filter>
+                <action android:name="android.service.wallpaper.WallpaperService" />
+            </intent-filter>
+            <meta-data
+                android:name="android.service.wallpaper"
+                android:resource="@xml/bloom_wallpaper" />
+        </service>
         <!-- Don't delete the meta-data below.
              This is used by the Flutter tool to generate GeneratedPluginRegistrant.java -->
         <meta-data
