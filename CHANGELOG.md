@@ -19,6 +19,11 @@ The Rust workspace and the blugo app share the version number.
   state + which transports are configured; logs at `~/.blumi/gateway.log`. The
   existing single-transport commands (`blumi gateway telegram`, …) still work for
   foreground use.
+- **Duplicate-bot guard (Telegram)** — the Telegram gateway now detects a **409
+  Conflict** (another consumer polling the same token — e.g. a stray bot on a grid
+  peer) and logs a **loud warning** to `gateway.log`, then backs off and keeps
+  retrying. Previously a 409 parsed as an empty update batch and was *invisible* —
+  the cause of silent double-replies when two nodes ran the same token.
 - **Telegram voice toggle** — `gateway.telegram.voice` (**off by default**) gates the
   Telegram bot's voice handling: inbound voice-note transcription **and** spoken
   (TTS) replies. With it off, a voice note gets a short "voice is off" reply and the

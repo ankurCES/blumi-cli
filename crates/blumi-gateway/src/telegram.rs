@@ -27,6 +27,15 @@ struct ApiResponse<T> {
     // Missing `Option` fields deserialize to `None` without a `Default` bound on T.
     result: Option<T>,
     description: Option<String>,
+    #[serde(default)]
+    error_code: Option<i64>,
+}
+
+/// Result of one long-poll: fresh updates, or a 409 telling us another consumer
+/// is already polling this token (the silent-double-reply footgun on a grid).
+enum PollOutcome {
+    Updates(Vec<Update>),
+    Conflict(String),
 }
 
 #[derive(Deserialize)]
@@ -75,9 +84,32 @@ pub async fn run_telegram(core: Arc<GatewayCore>, opts: TelegramOptions) -> anyh
     }
 
     let mut offset: i64 = 0;
+    let mut conflicts: u32 = 0;
     loop {
         let updates = match get_updates(&client, &base, offset).await {
-            Ok(u) => u,
+            Ok(PollOutcome::Updates(u)) => {
+                conflicts = 0;
+                u
+            }
+            Ok(PollOutcome::Conflict(desc)) => {
+                // Another consumer holds this token — the silent-double-reply cause.
+                // Shout once, then remind periodically; back off so we don't hammer.
+                conflicts += 1;
+                if conflicts == 1 {
+                    tracing::error!(
+                        "⚠ Telegram 409 Conflict — another bot is already polling this token \
+                         ({desc}). Run only ONE blumi gateway per bot token; check your other \
+                         machines / grid peers (`blumi gateway status`). Retrying with backoff."
+                    );
+                } else if conflicts % 20 == 0 {
+                    tracing::warn!(
+                        "telegram: still seeing 409 Conflict ({conflicts}×) — a duplicate \
+                         consumer is still running on this token"
+                    );
+                }
+                tokio::time::sleep(Duration::from_secs(5)).await;
+                continue;
+            }
             Err(e) => {
                 tracing::warn!("telegram getUpdates failed: {e}; retrying");
                 tokio::time::sleep(Duration::from_secs(3)).await;
@@ -277,7 +309,7 @@ async fn get_updates(
     client: &reqwest::Client,
     base: &str,
     offset: i64,
-) -> anyhow::Result<Vec<Update>> {
+) -> anyhow::Result<PollOutcome> {
     let resp: ApiResponse<Vec<Update>> = client
         .get(format!("{base}/getUpdates"))
         .query(&[
@@ -289,7 +321,21 @@ async fn get_updates(
         .await?
         .json()
         .await?;
-    Ok(resp.result.unwrap_or_default())
+    if !resp.ok {
+        let desc = resp.description.unwrap_or_else(|| "unknown error".into());
+        // 409 ⇒ another getUpdates consumer (or an active webhook) holds this token.
+        if is_conflict(resp.error_code, &desc) {
+            return Ok(PollOutcome::Conflict(desc));
+        }
+        anyhow::bail!("telegram API error: {desc}");
+    }
+    Ok(PollOutcome::Updates(resp.result.unwrap_or_default()))
+}
+
+/// Does an `ok:false` getUpdates response mean another consumer owns this token?
+/// Telegram signals this as HTTP/error_code 409 with a "Conflict: …" description.
+fn is_conflict(error_code: Option<i64>, description: &str) -> bool {
+    error_code == Some(409) || description.to_ascii_lowercase().contains("conflict")
 }
 
 async fn send_message(
@@ -340,5 +386,32 @@ mod tests {
         let resp: ApiResponse<Vec<Update>> = serde_json::from_str(json).unwrap();
         let updates = resp.result.unwrap();
         assert!(updates[0].message.as_ref().unwrap().text.is_none());
+    }
+
+    #[test]
+    fn detects_409_duplicate_consumer() {
+        // By error_code …
+        assert!(is_conflict(Some(409), ""));
+        // … or by description (Telegram's real message), case-insensitively.
+        assert!(is_conflict(
+            None,
+            "Conflict: terminated by other getUpdates request; make sure that only one bot instance is running"
+        ));
+        // Other API errors are NOT conflicts.
+        assert!(!is_conflict(Some(400), "Bad Request: chat not found"));
+        assert!(!is_conflict(Some(401), "Unauthorized"));
+        assert!(!is_conflict(None, "unknown error"));
+    }
+
+    #[test]
+    fn parses_409_error_response() {
+        let json = r#"{"ok":false,"error_code":409,"description":"Conflict: terminated by other getUpdates request"}"#;
+        let resp: ApiResponse<Vec<Update>> = serde_json::from_str(json).unwrap();
+        assert!(!resp.ok);
+        assert_eq!(resp.error_code, Some(409));
+        assert!(is_conflict(
+            resp.error_code,
+            resp.description.as_deref().unwrap_or("")
+        ));
     }
 }
