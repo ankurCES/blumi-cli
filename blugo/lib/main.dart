@@ -34,7 +34,9 @@ class _BlugoAppState extends State<BlugoApp> {
   @override
   void initState() {
     super.initState();
-    app.tryAutoConnect();
+    // Cold start lands on the network-diagram menu (load servers, don't connect).
+    // A warm resume keeps the live widget tree, so it shows the last state.
+    app.loadForMenu();
     _initPush();
   }
 

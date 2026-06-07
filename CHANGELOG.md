@@ -36,6 +36,11 @@ tracks its own Flutter version (`x.y.z+build`).
     and the local-notifications plugin. Android masks small icons to their alpha
     channel, so the full-colour launcher icon previously collapsed to a white
     blob; it now shows the blumi flower.
+  - **Launch behaviour** — a cold start (after the app is killed) now lands on
+    the **network-diagram menu** instead of silently reconnecting to the last
+    gateway; a warm resume (background→foreground) keeps the live state and
+    returns you to the last screen. Tapping a saved node still reconnects
+    instantly via its stored token.
   - **Concurrent dedicated sessions (gateway)** — `/api/chat/send`,
     `/api/messages`, and `/api/chat/stream` accept an optional `session_id` so a
     client can drive a specific session **concurrently** with the active one

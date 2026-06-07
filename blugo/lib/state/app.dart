@@ -113,19 +113,16 @@ class AppController extends ChangeNotifier {
 
   // --- connect flows ---------------------------------------------------------
 
-  /// On launch: load saved servers and silently reconnect to the last one if it
-  /// still has a usable token. Returns true once a session is live.
-  Future<bool> tryAutoConnect() async {
+  /// On a cold start we deliberately land on the network-diagram menu instead of
+  /// reconnecting: load the cache + saved servers (so the diagram can draw them)
+  /// but do **not** open a session. A warm resume (background→foreground) keeps
+  /// the live widget tree and never re-runs this, so the last screen/session is
+  /// preserved. Tapping a node still reconnects instantly via its saved token
+  /// (see [connectToSaved]).
+  Future<void> loadForMenu() async {
     await cache.init();
     await _loadServers();
     notifyListeners();
-    if (servers.isEmpty) return false;
-    final p = await SharedPreferences.getInstance();
-    final lastId = p.getString(_kLast);
-    final srv = _byId(lastId) ?? servers.first;
-    if (srv.token == null) return false;
-    await connectToSaved(srv);
-    return connected;
   }
 
   /// Connect to a saved server using its stored token. If the token is missing
