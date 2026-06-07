@@ -143,6 +143,10 @@ pub struct TuiConfig {
     /// Pre-rendered accelerator + embeddings line for the `/accel` command (the
     /// host detects it via blumi-llm, which the TUI crate doesn't depend on).
     pub accel: String,
+    /// Semantic memory store for the `/memories` overlay (None when memory is off).
+    pub mem_store: Option<std::sync::Arc<blumi_persist::SemanticMemoryImpl>>,
+    /// Code knowledge base for the `/knowledge` overlay (None when knowledge is off).
+    pub knowledge_store: Option<std::sync::Arc<blumi_knowledge::KnowledgeStore>>,
 }
 
 /// Run the interactive TUI, sourcing sessions from `factory`. Restores the
@@ -200,6 +204,9 @@ async fn run_loop(
     model.brain_mode = cfg.brain_mode;
     model.accel = cfg.accel;
     model.auto_continue = cfg.auto_continue;
+    // Knowledge + semantic-memory stores for the `/knowledge` + `/memories` overlays.
+    model.mem_store = cfg.mem_store;
+    model.knowledge_store = cfg.knowledge_store;
     // Plan history (`/plans`): open the shared store, load past plans, and keep
     // the handle so resolved plans persist + reach the gateway/blugo.
     if let Ok(store) = blumi_persist::Store::open(&cfg.db_path).await {

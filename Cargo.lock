@@ -802,6 +802,7 @@ dependencies = [
  "async-trait",
  "blumi-config",
  "blumi-core",
+ "blumi-knowledge",
  "blumi-persist",
  "blumi-protocol",
  "blumi-task",

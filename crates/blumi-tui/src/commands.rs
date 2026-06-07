@@ -77,6 +77,14 @@ pub const COMMANDS: &[CommandDef] = &[
         desc: "tasks the always-on pass proposed (+ where reports land)",
     },
     CommandDef {
+        name: "/memories",
+        desc: "browse semantic long-term memory (namespace/kind/utility/pinned)",
+    },
+    CommandDef {
+        name: "/knowledge",
+        desc: "code knowledge base: indexed files/symbols + sources",
+    },
+    CommandDef {
         name: "/loop",
         desc: "start/pause the autonomous task loop (/loop review to toggle gate)",
     },
@@ -345,6 +353,45 @@ fn format_heal(v: &serde_json::Value) -> String {
     s
 }
 
+/// Format the `/knowledge` overlay from a `KnowledgeStatus` (counts + sources).
+fn format_knowledge(s: &blumi_knowledge::KnowledgeStatus) -> String {
+    let mut out = format!(
+        "indexed: {} files   ·   {} symbols   ·   {} vectors",
+        s.files, s.symbols, s.vectors
+    );
+    if s.sources.is_empty() {
+        out.push_str("\nNo sources indexed yet — add code with the knowledge tools.");
+    } else {
+        out.push_str("\nSources");
+        for src in &s.sources {
+            out.push_str(&format!(
+                "\n  {} — {} files, {} symbols",
+                src.source, src.files, src.symbols
+            ));
+        }
+    }
+    out
+}
+
+/// Format the `/memories` overlay from semantic-memory entries.
+fn format_memories(entries: &[blumi_persist::MemoryEntry]) -> String {
+    if entries.is_empty() {
+        return "No semantic memories yet.\n(They accrue as the agent learns; the `user` \
+                namespace stays local.)"
+            .to_string();
+    }
+    let mut out = format!("{} active memories (pinned ★)", entries.len());
+    for e in entries {
+        let pin = if e.pinned { "★ " } else { "" };
+        let text: String = e.text.replace('\n', " ").chars().take(80).collect();
+        out.push_str(&format!(
+            "\n  {pin}[{}/{}] u{:.2} ×{} — {}",
+            e.namespace, e.kind, e.utility, e.hits, text
+        ));
+    }
+    out
+}
+
 /// Run a slash command line (e.g. "/model claude-x").
 pub async fn run(model: &mut Model, session: &SessionHandle, line: &str) {
     let line = line.trim().to_string();
@@ -419,6 +466,24 @@ pub async fn run(model: &mut Model, session: &SessionHandle, line: &str) {
             }
             None => model.entries.push(Entry::Notice(
                 "self-healing summary needs the local DB".into(),
+            )),
+        },
+        "/memories" => match model.mem_store.clone() {
+            Some(mem) => {
+                let entries = mem.list_memories(None, Some("active"), 40).await;
+                model.memories_view = Some(format_memories(&entries));
+            }
+            None => model.entries.push(Entry::Notice(
+                "semantic memory is off (set memory.enabled in settings.json)".into(),
+            )),
+        },
+        "/knowledge" => match model.knowledge_store.clone() {
+            Some(ks) => {
+                let status = ks.status().await;
+                model.knowledge_view = Some(format_knowledge(&status));
+            }
+            None => model.entries.push(Entry::Notice(
+                "knowledge base is off (set knowledge.enabled in settings.json)".into(),
             )),
         },
         "/route" => {

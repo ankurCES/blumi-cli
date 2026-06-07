@@ -10,6 +10,13 @@ The Rust workspace and the blugo app share the version number.
 
 ### Added
 
+- **TUI `/knowledge` + `/memories` overlays** — the terminal UI reaches parity with
+  the web Control Center's knowledge/memory views. **`/knowledge`** shows the code
+  knowledge base (indexed files / symbols / vectors + per-source counts);
+  **`/memories`** browses semantic long-term memory entries (namespace / kind /
+  utility / hit-count, pinned marked ★). Both are read-only, any-key-to-close popups
+  (mirroring `/heal`); they degrade to a notice when `knowledge`/`memory` is disabled.
+  (The existing `/memory` still views the MEMORY.md / USER.md files.)
 - **Messaging gateway as a managed service** — `blumi gateway` now mirrors
   `blumi serve`'s service layer. **`blumi gateway run`** launches every *configured*
   transport (Telegram / Discord / Slack / WhatsApp) concurrently in one process; and

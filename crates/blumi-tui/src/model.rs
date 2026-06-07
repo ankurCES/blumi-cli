@@ -463,6 +463,14 @@ pub struct Model {
     pub route_view: Option<String>,
     /// Rendered always-on discovery summary when `/discoveries` is open.
     pub discoveries_view: Option<String>,
+    /// Rendered semantic-memory summary when `/memories` is open (entries).
+    pub memories_view: Option<String>,
+    /// Rendered knowledge-base summary when `/knowledge` is open (counts + sources).
+    pub knowledge_view: Option<String>,
+    /// Semantic memory store for the `/memories` overlay; None when memory is off.
+    pub mem_store: Option<std::sync::Arc<blumi_persist::SemanticMemoryImpl>>,
+    /// Code knowledge base for the `/knowledge` overlay; None when knowledge is off.
+    pub knowledge_store: Option<std::sync::Arc<blumi_knowledge::KnowledgeStore>>,
     /// File-browser popup state when `/open-workspace` is open.
     pub fs_browser: Option<FsBrowser>,
     /// Path to the persistent task board (`<project>/.blumi/tasks.json`).
@@ -595,6 +603,10 @@ impl Model {
             heal_view: None,
             route_view: None,
             discoveries_view: None,
+            memories_view: None,
+            knowledge_view: None,
+            mem_store: None,
+            knowledge_store: None,
             fs_browser: None,
             remotes: Vec::new(),
             tabs: vec![("local".to_string(), false)],
@@ -945,6 +957,8 @@ impl Model {
         self.heal_view = None;
         self.route_view = None;
         self.discoveries_view = None;
+        self.memories_view = None;
+        self.knowledge_view = None;
         self.help_modal = false;
         self.plans_view = false;
         self.agents.clear();

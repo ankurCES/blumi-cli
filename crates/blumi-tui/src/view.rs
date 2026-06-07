@@ -135,6 +135,12 @@ pub fn render(model: &mut Model, f: &mut Frame) {
     if model.discoveries_view.is_some() {
         render_discoveries(model, f, area, &theme);
     }
+    if model.memories_view.is_some() {
+        render_memories(model, f, area, &theme);
+    }
+    if model.knowledge_view.is_some() {
+        render_knowledge(model, f, area, &theme);
+    }
     if model.fs_browser.is_some() {
         render_fs_browser(model, f, area, &theme);
     }
@@ -1220,6 +1226,68 @@ fn render_heal(model: &Model, f: &mut Frame, area: Rect, theme: &Theme) {
             theme.body()
         } else {
             theme.accent() // section headers / count line
+        };
+        lines.push(Line::from(Span::styled(truncate(raw, width), style)));
+    }
+    f.render_widget(Paragraph::new(lines), inner);
+}
+
+/// The `/memories` overlay: semantic long-term memory entries.
+fn render_memories(model: &Model, f: &mut Frame, area: Rect, theme: &Theme) {
+    let Some(text) = &model.memories_view else {
+        return;
+    };
+    let popup = centered_rect(72, 64, area);
+    f.render_widget(Clear, popup);
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .border_type(BorderType::Rounded)
+        .border_style(Style::default().fg(theme.primary))
+        .title(Span::styled(
+            " semantic memory — any key to close ",
+            theme.bold_primary(),
+        ));
+    let inner = block.inner(popup);
+    f.render_widget(block, popup);
+
+    let width = inner.width.saturating_sub(1) as usize;
+    let mut lines: Vec<Line> = Vec::new();
+    for raw in text.lines() {
+        let style = if raw.starts_with("  ") {
+            theme.body()
+        } else {
+            theme.accent() // header / count line
+        };
+        lines.push(Line::from(Span::styled(truncate(raw, width), style)));
+    }
+    f.render_widget(Paragraph::new(lines), inner);
+}
+
+/// The `/knowledge` overlay: code knowledge base counts + sources.
+fn render_knowledge(model: &Model, f: &mut Frame, area: Rect, theme: &Theme) {
+    let Some(text) = &model.knowledge_view else {
+        return;
+    };
+    let popup = centered_rect(70, 64, area);
+    f.render_widget(Clear, popup);
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .border_type(BorderType::Rounded)
+        .border_style(Style::default().fg(theme.primary))
+        .title(Span::styled(
+            " knowledge base — any key to close ",
+            theme.bold_primary(),
+        ));
+    let inner = block.inner(popup);
+    f.render_widget(block, popup);
+
+    let width = inner.width.saturating_sub(1) as usize;
+    let mut lines: Vec<Line> = Vec::new();
+    for raw in text.lines() {
+        let style = if raw.starts_with("  ") {
+            theme.body()
+        } else {
+            theme.accent() // header / count line
         };
         lines.push(Line::from(Span::styled(truncate(raw, width), style)));
     }

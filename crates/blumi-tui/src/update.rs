@@ -141,6 +141,16 @@ async fn handle_term(model: &mut Model, ev: TermEvent, session: &SessionHandle) 
                 model.mark_dirty();
                 return;
             }
+            if model.memories_view.is_some() {
+                model.memories_view = None;
+                model.mark_dirty();
+                return;
+            }
+            if model.knowledge_view.is_some() {
+                model.knowledge_view = None;
+                model.mark_dirty();
+                return;
+            }
 
             // /open-workspace file browser: ↑/↓ move, → descend, ← (or backspace)
             // up a level, space opens the folder as a workspace (keeps browsing),

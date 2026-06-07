@@ -265,6 +265,29 @@ pub async fn run(config: BlumiConfig) -> anyhow::Result<()> {
 
     let store = Store::open(&config.paths.db).await.ok().map(Arc::new);
 
+    // Knowledge + semantic-memory handles for the TUI's `/knowledge` + `/memories`
+    // overlays (mirrors the web gateway). Both stay None unless enabled in config.
+    let embedder = crate::engine::shared_embedder(&config);
+    let mem_store = if config.memory.enabled {
+        store.clone().map(|s| {
+            Arc::new(blumi_persist::SemanticMemoryImpl::new(
+                s,
+                embedder.clone(),
+                blumi_persist::MemoryParams::default(),
+            ))
+        })
+    } else {
+        None
+    };
+    let knowledge_store = if config.knowledge.enabled {
+        blumi_knowledge::KnowledgeStore::open(&config.paths.knowledge_db, embedder.clone())
+            .await
+            .ok()
+            .map(Arc::new)
+    } else {
+        None
+    };
+
     // Skills listing for the `/skills` command + dashboard.
     let skills = blumi_skills::SkillCatalog::load(&[
         config.paths.skills.clone(),
@@ -341,6 +364,8 @@ pub async fn run(config: BlumiConfig) -> anyhow::Result<()> {
         themes: blumi_tui::theme::load_user_themes(&config.paths.home.join("themes")),
         db_path: config.paths.db.clone(),
         accel: accel_line,
+        mem_store,
+        knowledge_store,
     };
 
     let factory = Arc::new(TuiSessionFactory { config, store });
