@@ -1,6 +1,8 @@
 import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import '../state/app.dart';
+import 'dispatch_inbox.dart';
+import 'dispatch_splash.dart';
 import 'grid_node.dart';
 import 'kit/kit.dart';
 import 'node_sheets.dart';
@@ -51,7 +53,16 @@ class _GridMapState extends State<GridMap>
   void _tap(GridNodeVM vm) {
     switch (vm.kind) {
       case NodeKind.hub:
-        showAddNodeSheet(context, widget.app);
+        // The centre flower opens Dispatch directly (adding a gateway has its
+        // own ＋ button). Play the "bluuuum mode" splash first, unless the user
+        // prefers reduced motion — then jump straight in.
+        Navigator.of(context).push(
+          MaterialPageRoute(
+            builder: (_) => reducedMotion(context)
+                ? DispatchInboxScreen(widget.app)
+                : DispatchSplashScreen(widget.app),
+          ),
+        );
         break;
       case NodeKind.saved:
         showSavedNodeSheet(context, widget.app, vm.server!);
@@ -91,8 +102,8 @@ class _GridMapState extends State<GridMap>
         ];
         const hub = GridNodeVM(
           kind: NodeKind.hub,
-          label: 'this device',
-          sublabel: 'blugo',
+          label: 'blumi',
+          sublabel: 'tap to dispatch',
         );
 
         return LayoutBuilder(
@@ -198,7 +209,7 @@ class _GridMapState extends State<GridMap>
                             style:
                                 TextStyle(color: t.textMuted, fontSize: 13)),
                         const SizedBox(height: 4),
-                        Text('Tap the flower to add one by address.',
+                        Text('Use ＋ Add to add one by address.',
                             style: TextStyle(
                                 color: t.textMuted.withValues(alpha: 0.7),
                                 fontSize: 12)),

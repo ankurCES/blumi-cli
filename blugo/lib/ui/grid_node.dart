@@ -113,9 +113,12 @@ class GridNode extends StatelessWidget {
     Widget disc;
     switch (vm.kind) {
       case NodeKind.hub:
+        // The blumi flower as the hub: a brand-gradient rim around a surface
+        // disc holding the flower in its own (unaltered) Living-Rose colors.
         disc = Container(
           width: diameter,
           height: diameter,
+          padding: const EdgeInsets.all(3),
           decoration: BoxDecoration(
             shape: BoxShape.circle,
             gradient: t.brandGradient,
@@ -126,8 +129,10 @@ class GridNode extends StatelessWidget {
                   spreadRadius: 1),
             ],
           ),
-          child: Icon(Icons.smartphone,
-              color: Colors.white, size: diameter * 0.42),
+          child: Container(
+            decoration: BoxDecoration(shape: BoxShape.circle, color: cs.surface),
+            child: Center(child: FlowerGlyph(size: diameter * 0.6)),
+          ),
         );
         break;
       case NodeKind.saved:

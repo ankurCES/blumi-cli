@@ -41,6 +41,13 @@ tracks its own Flutter version (`x.y.z+build`).
     gateway; a warm resume (background→foreground) keeps the live state and
     returns you to the last screen. Tapping a saved node still reconnects
     instantly via its stored token.
+  - **Welcome hub = the blumi flower → Dispatch.** The centre node is now the
+    blumi flower mark (in its own Living-Rose colors) instead of a phone icon
+    labelled "this device"; tapping it opens **Dispatch** directly (adding a
+    gateway has its own ＋ button). The open plays a short "**Entering bluuuum
+    mode…**" splash — the flower spins on the current theme background while a
+    brand glow blooms out from behind it and washes the screen in the
+    Living-Rose gradient. Tap to skip; bypassed entirely under reduce-motion.
   - **Concurrent dedicated sessions (gateway)** — `/api/chat/send`,
     `/api/messages`, and `/api/chat/stream` accept an optional `session_id` so a
     client can drive a specific session **concurrently** with the active one
