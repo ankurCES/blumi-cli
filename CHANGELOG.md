@@ -9,6 +9,8 @@ tracks its own Flutter version (`x.y.z+build`).
 
 ## [Unreleased]
 
+## [0.4.0] — 2026-06-07
+
 ### Added
 
 - **blugo Dispatch + FCM push** — a Telegram-style way to chat with each node
@@ -301,6 +303,8 @@ messaging gateways, the distributed grid, durable execution, graph-SEDM semantic
 memory, the native code knowledge base, and the blugo phone app. See the git
 history for details.
 
-[Unreleased]: https://github.com/ankurCES/blumi-cli/compare/v0.2.0...HEAD
+[Unreleased]: https://github.com/ankurCES/blumi-cli/compare/v0.4.0...HEAD
+[0.4.0]: https://github.com/ankurCES/blumi-cli/releases/tag/v0.4.0
+[0.3.0]: https://github.com/ankurCES/blumi-cli/releases/tag/v0.3.0
 [0.2.0]: https://github.com/ankurCES/blumi-cli/releases/tag/v0.2.0
 [0.1.0]: https://github.com/ankurCES/blumi-cli/commits/main
