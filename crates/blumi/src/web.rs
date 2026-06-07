@@ -32,6 +32,15 @@ impl blumi_web::SessionProvider for WebSessionProvider {
         build_session(&self.config, false, None).await
     }
 
+    async fn create_with_id(&self, id: &str) -> anyhow::Result<SessionHandle> {
+        // A fresh session pinned to a caller-chosen id (blugo dispatch threads).
+        let state = SessionState::new(
+            SessionId::from(id.to_string()),
+            self.config.llm.model.clone(),
+        );
+        build_session(&self.config, false, Some(state)).await
+    }
+
     async fn resume(&self, id: &str) -> anyhow::Result<SessionHandle> {
         let store = self
             .store

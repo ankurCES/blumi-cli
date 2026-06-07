@@ -7,7 +7,7 @@
 //! re-points `AppState` and clients re-subscribe.
 
 use crate::AppState;
-use axum::extract::State;
+use axum::extract::{Query, State};
 use axum::http::header::CONTENT_TYPE;
 use axum::http::{HeaderMap, StatusCode};
 use axum::response::sse::{Event as SseEvent, KeepAlive, Sse};
@@ -160,9 +160,22 @@ pub async fn session_reload(State(state): State<AppState>) -> Json<Value> {
     }
 }
 
+/// Optional `?session_id=` selecting a dedicated (dispatch) session instead of
+/// the active one. Absent/empty ⇒ the active workbench session.
+#[derive(Deserialize, Default)]
+pub struct SessionQuery {
+    #[serde(default)]
+    pub session_id: Option<String>,
+}
+
 /// The current session's transcript (for restore-on-load and after a switch).
-pub async fn messages(State(state): State<AppState>) -> Json<Value> {
-    let snap = state.current().await.snapshot().await;
+/// With `?session_id=`, returns that dedicated session's transcript instead.
+pub async fn messages(State(state): State<AppState>, Query(q): Query<SessionQuery>) -> Json<Value> {
+    let handle = match state.resolve_or_open(q.session_id.as_deref()).await {
+        Ok(h) => h,
+        Err(_) => state.current().await,
+    };
+    let snap = handle.snapshot().await;
     let arr: Vec<Value> = snap
         .messages
         .iter()
@@ -188,12 +201,19 @@ pub async fn messages(State(state): State<AppState>) -> Json<Value> {
 #[derive(Deserialize)]
 pub struct SendBody {
     pub text: String,
+    /// Optional dedicated (dispatch) session to drive concurrently with the
+    /// active one. Absent ⇒ the active workbench session.
+    #[serde(default)]
+    pub session_id: Option<String>,
 }
 
 pub async fn chat_send(State(state): State<AppState>, Json(body): Json<SendBody>) -> Json<Value> {
-    let ok = state
-        .current()
-        .await
+    let handle = match state.resolve_or_open(body.session_id.as_deref()).await {
+        Ok(h) => h,
+        Err(e) => return Json(json!({ "ok": false, "error": e.to_string() })),
+    };
+    let session_id = handle.id().as_str().to_string();
+    let ok = handle
         .send(Command::UserMessage {
             text: body.text,
             attachments: vec![],
@@ -201,7 +221,7 @@ pub async fn chat_send(State(state): State<AppState>, Json(body): Json<SendBody>
         })
         .await
         .is_ok();
-    Json(json!({ "ok": ok }))
+    Json(json!({ "ok": ok, "session_id": session_id }))
 }
 
 pub async fn chat_cancel(State(state): State<AppState>) -> Json<Value> {
@@ -356,6 +376,7 @@ pub async fn clarify_respond(
 /// SSE: replay missed events (`Last-Event-ID`) then stream live ones.
 pub async fn chat_stream(
     State(state): State<AppState>,
+    Query(q): Query<SessionQuery>,
     headers: HeaderMap,
 ) -> Sse<impl Stream<Item = Result<SseEvent, Infallible>>> {
     // A present `Last-Event-ID` means "reconnect — replay the gap to heal".
@@ -367,52 +388,86 @@ pub async fn chat_stream(
         .and_then(|v| v.to_str().ok())
         .and_then(|s| s.parse::<u64>().ok());
 
+    // A `?session_id=` pins this stream to a dedicated (dispatch) session that
+    // never follows active-session swaps — keeping a phone's dispatch thread
+    // isolated from the workbench. Absent ⇒ the active session (swap-following).
+    let pinned = q.session_id.filter(|s| !s.is_empty());
     let stream = async_stream::stream! {
-        // Follow session swaps within this one connection: when the gateway
-        // swaps the current session (new/resume/reload), re-subscribe to it so a
-        // phone/web client that holds a single long-lived SSE doesn't go silent
-        // on the detached old session (no tokens, no approval prompts).
-        let mut swaps = state.session_changes();
-        let mut session = state.current().await;
-        // Subscribe before reading the backlog so nothing slips through the gap.
-        let mut rx = session.subscribe();
-        let backlog = session.events_since(last.unwrap_or(0));
-        let head = backlog.last().map(|e| e.seq).unwrap_or(0);
-        // A `Last-Event-ID` ABOVE the current head is stale — it came from a
-        // previous session before a swap — so treat it as a fresh connect rather
-        // than suppressing every (lower-seq) event of the new session forever.
-        let replay = matches!(last, Some(l) if l <= head);
-        let mut high = if replay { last.unwrap_or(head) } else { head };
-        if replay {
-            for env in backlog {
-                if env.seq > high {
-                    high = env.seq;
-                    yield Ok(to_sse(&env));
-                }
-            }
-        }
-        loop {
-            tokio::select! {
-                changed = swaps.changed() => {
-                    if changed.is_err() {
-                        break; // server shutting down
+        if let Some(sid) = pinned {
+            if let Ok(session) = state.resolve_or_open(Some(&sid)).await {
+                let mut rx = session.subscribe();
+                let backlog = session.events_since(last.unwrap_or(0));
+                let head = backlog.last().map(|e| e.seq).unwrap_or(0);
+                let replay = matches!(last, Some(l) if l <= head);
+                let mut high = if replay { last.unwrap_or(head) } else { head };
+                if replay {
+                    for env in backlog {
+                        if env.seq > high {
+                            high = env.seq;
+                            yield Ok(to_sse(&env));
+                        }
                     }
-                    // Re-point to the swapped-in session, live-only from its head
-                    // (the client reloads the transcript via /api/messages).
-                    session = state.current().await;
-                    rx = session.subscribe();
-                    high = session.events_since(0).last().map(|e| e.seq).unwrap_or(0);
                 }
-                ev = rx.recv() => {
-                    match ev {
+                loop {
+                    match rx.recv().await {
                         Ok(env) => {
                             if env.seq > high {
                                 high = env.seq;
                                 yield Ok(to_sse(&env));
                             }
                         }
-                        Err(RecvError::Lagged(_)) => continue, // healed by seq dedup
-                        Err(RecvError::Closed) => break, // session ended; client reconnects
+                        Err(RecvError::Lagged(_)) => continue,
+                        Err(RecvError::Closed) => break,
+                    }
+                }
+            }
+        } else {
+            // Follow session swaps within this one connection: when the gateway
+            // swaps the current session (new/resume/reload), re-subscribe to it so a
+            // phone/web client that holds a single long-lived SSE doesn't go silent
+            // on the detached old session (no tokens, no approval prompts).
+            let mut swaps = state.session_changes();
+            let mut session = state.current().await;
+            // Subscribe before reading the backlog so nothing slips through the gap.
+            let mut rx = session.subscribe();
+            let backlog = session.events_since(last.unwrap_or(0));
+            let head = backlog.last().map(|e| e.seq).unwrap_or(0);
+            // A `Last-Event-ID` ABOVE the current head is stale — it came from a
+            // previous session before a swap — so treat it as a fresh connect rather
+            // than suppressing every (lower-seq) event of the new session forever.
+            let replay = matches!(last, Some(l) if l <= head);
+            let mut high = if replay { last.unwrap_or(head) } else { head };
+            if replay {
+                for env in backlog {
+                    if env.seq > high {
+                        high = env.seq;
+                        yield Ok(to_sse(&env));
+                    }
+                }
+            }
+            loop {
+                tokio::select! {
+                    changed = swaps.changed() => {
+                        if changed.is_err() {
+                            break; // server shutting down
+                        }
+                        // Re-point to the swapped-in session, live-only from its head
+                        // (the client reloads the transcript via /api/messages).
+                        session = state.current().await;
+                        rx = session.subscribe();
+                        high = session.events_since(0).last().map(|e| e.seq).unwrap_or(0);
+                    }
+                    ev = rx.recv() => {
+                        match ev {
+                            Ok(env) => {
+                                if env.seq > high {
+                                    high = env.seq;
+                                    yield Ok(to_sse(&env));
+                                }
+                            }
+                            Err(RecvError::Lagged(_)) => continue, // healed by seq dedup
+                            Err(RecvError::Closed) => break, // session ended; client reconnects
+                        }
                     }
                 }
             }

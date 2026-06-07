@@ -14,6 +14,7 @@ pub use auth::Auth;
 use axum::routing::{get, post};
 use axum::Router;
 use blumi_core::SessionHandle;
+use std::collections::HashMap;
 use std::net::SocketAddr;
 use std::sync::Arc;
 use tokio::sync::RwLock;
@@ -48,6 +49,11 @@ pub struct SessionInfo {
 pub trait SessionProvider: Send + Sync {
     async fn create(&self) -> anyhow::Result<SessionHandle>;
     async fn resume(&self, id: &str) -> anyhow::Result<SessionHandle>;
+    /// Create a fresh session bound to a caller-chosen id (for dedicated dispatch
+    /// threads addressed by a stable id). Default: unsupported.
+    async fn create_with_id(&self, _id: &str) -> anyhow::Result<SessionHandle> {
+        anyhow::bail!("create_with_id not supported")
+    }
     /// Rebuild the agent in place (self-evolution): re-read config + re-scan
     /// skills, seeded with the live snapshot so the conversation is preserved.
     async fn reload(&self, snapshot: blumi_core::SessionSnapshot) -> anyhow::Result<SessionHandle>;
@@ -461,12 +467,83 @@ pub struct AppState {
     /// Bumped on every session swap so a live SSE stream re-points to the new
     /// session instead of going silent on the old (now-detached) one.
     swaps: Arc<tokio::sync::watch::Sender<u64>>,
+    /// Live **dedicated** sessions (blugo dispatch threads), keyed by session id.
+    /// Kept apart from `session` (the active workbench session) so a client can
+    /// drive a specific session concurrently without swapping the active one.
+    dispatch: Arc<RwLock<HashMap<String, SessionHandle>>>,
 }
 
 impl AppState {
     /// A clone of the current session handle.
     pub(crate) async fn current(&self) -> SessionHandle {
         self.session.read().await.clone()
+    }
+
+    /// Resolve a session by id for concurrent (dispatch) use. `None`/empty or the
+    /// active id ⇒ the active session. Otherwise a dedicated session from the
+    /// dispatch registry, opened on demand (resume if it exists on disk, else
+    /// create a fresh session pinned to `id`) and given a turn-complete watcher.
+    /// Never changes the active session.
+    pub(crate) async fn resolve_or_open(&self, id: Option<&str>) -> anyhow::Result<SessionHandle> {
+        let id = match id {
+            Some(i) if !i.is_empty() => i,
+            _ => return Ok(self.current().await),
+        };
+        if self.current().await.id().as_str() == id {
+            return Ok(self.current().await);
+        }
+        if let Some(h) = self.dispatch.read().await.get(id).cloned() {
+            return Ok(h);
+        }
+        let handle = match self.provider.resume(id).await {
+            Ok(h) => h,
+            Err(_) => self.provider.create_with_id(id).await?,
+        };
+        self.spawn_dispatch_watcher(handle.clone());
+        self.dispatch
+            .write()
+            .await
+            .insert(id.to_string(), handle.clone());
+        Ok(handle)
+    }
+
+    /// Watch a dedicated dispatch session: on each turn completion, FCM the phone
+    /// with a reply preview (tagged `kind: "dispatch"`) and persist the thread.
+    fn spawn_dispatch_watcher(&self, handle: SessionHandle) {
+        let st = self.clone();
+        tokio::spawn(async move {
+            let mut rx = handle.subscribe();
+            loop {
+                match rx.recv().await {
+                    Ok(env) => {
+                        if matches!(env.event, blumi_protocol::Event::TurnDone { .. }) {
+                            let snap = handle.snapshot().await;
+                            let preview = snap
+                                .messages
+                                .iter()
+                                .rev()
+                                .find(|m| {
+                                    matches!(m.role, blumi_protocol::Role::Assistant)
+                                        && !m.text().trim().is_empty()
+                                })
+                                .map(|m| m.text())
+                                .unwrap_or_default();
+                            let host = whoami::fallible::hostname()
+                                .unwrap_or_else(|_| "blumi".to_string());
+                            let data = serde_json::json!({
+                                "session_id": handle.id().as_str(),
+                                "node": host,
+                                "kind": "dispatch",
+                            });
+                            st.mgmt().notify_turn(&host, &preview, data).await;
+                            st.provider.save(&handle).await;
+                        }
+                    }
+                    Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => continue,
+                    Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
+                }
+            }
+        });
     }
 
     /// Persist the current session, then make `next` current.
@@ -645,6 +722,7 @@ pub async fn serve(
         loop_status: Arc::new(RwLock::new(LoopStatus::default())),
         grid_secret: grid_secret.map(Arc::new),
         swaps: Arc::new(tokio::sync::watch::channel(0u64).0),
+        dispatch: Arc::new(RwLock::new(HashMap::new())),
     };
     // Self-management: react to the agent's Reload/Restart events server-side, so
     // `reload_self` / `restart_gateway` work for every client (incl. the phone)
