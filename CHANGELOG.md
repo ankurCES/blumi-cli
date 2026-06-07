@@ -4,9 +4,12 @@ All notable changes to **blumi** (and the **blugo** companion app) are documente
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
-The Rust workspace and the blugo app share the version number.
+The Rust workspace shares one version (the `blumi` CLI + `v*` tags); the **blugo** app
+tracks its own Flutter version (`x.y.z+build`).
 
 ## [Unreleased]
+
+## [0.3.0] — 2026-06-07
 
 ### Added
 
