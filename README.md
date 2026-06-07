@@ -451,11 +451,11 @@ Open an [issue or discussion](https://github.com/ankurCES/blumi-cli/issues) — 
 ### Star history
 
 <p align="center">
-  <a href="https://star-history.com/#ankurCES/blumi-cli&Date">
+  <a href="https://www.star-history.com/?type=date&repos=ankurCES%2Fblumi-cli">
     <picture>
-      <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/svg?repos=ankurCES/blumi-cli&type=Date&theme=dark" />
-      <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/svg?repos=ankurCES/blumi-cli&type=Date" />
-      <img alt="blumi star history" src="https://api.star-history.com/svg?repos=ankurCES/blumi-cli&type=Date" width="640" />
+      <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/chart?repos=ankurCES/blumi-cli&type=date&theme=dark&legend=top-left" />
+      <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/chart?repos=ankurCES/blumi-cli&type=date&legend=top-left" />
+      <img alt="Star History Chart" src="https://api.star-history.com/chart?repos=ankurCES/blumi-cli&type=date&legend=top-left" width="640" />
     </picture>
   </a>
 </p>
