@@ -386,10 +386,15 @@ pub async fn build_session(
             brain_mode.label()
         );
     }
-    let perms = Arc::new(perm_engine.with_brain(
-        Arc::new(blumi_core::LocalBrain::new(brain_llm, brain_model)),
-        brain_mode,
-    ));
+    let perms = Arc::new(
+        perm_engine
+            .with_brain(
+                Arc::new(blumi_core::LocalBrain::new(brain_llm, brain_model)),
+                brain_mode,
+            )
+            // PreToolUse guardrails: shell hooks that can block a tool before policy.
+            .with_tool_hooks(config.hooks.pre_tool_use.clone(), work_dir.clone()),
+    );
 
     // Cost-aware routing: resolve a client per tier (reusing the main client +
     // model when a tier leaves provider/model blank — same fallback as the brain

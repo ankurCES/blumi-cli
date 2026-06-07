@@ -8,10 +8,11 @@
 
 use crate::brain::{Brain, BrainDecision, BrainMode};
 use crate::emit::{EventEmitter, Interactor};
-use blumi_config::PermissionConfig;
+use blumi_config::{HookDef, PermissionConfig};
 use blumi_protocol::{ApprovalScope, Decision, Event};
 use serde_json::Value;
 use std::collections::HashSet;
+use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, AtomicU8, Ordering};
 use std::sync::{Arc, Mutex};
 
@@ -44,6 +45,10 @@ pub struct PermissionEngine {
     /// Planning mode: block mutating tools so the agent researches read-only
     /// and proposes a plan (via `ExitPlanMode`) before changing anything.
     plan_mode: AtomicBool,
+    /// PreToolUse hooks: user-configured shell guardrails that can block a tool
+    /// call before policy runs. Empty = none (default). Run in `hooks_dir`.
+    tool_hooks: Vec<HookDef>,
+    hooks_dir: PathBuf,
 }
 
 impl PermissionEngine {
@@ -56,6 +61,8 @@ impl PermissionEngine {
             brain: None,
             brain_mode: AtomicU8::new(BrainMode::Off.as_u8()),
             plan_mode: AtomicBool::new(false),
+            tool_hooks: Vec::new(),
+            hooks_dir: PathBuf::from("."),
         }
     }
 
@@ -63,6 +70,14 @@ impl PermissionEngine {
     pub fn with_brain(mut self, brain: Arc<dyn Brain>, mode: BrainMode) -> Self {
         self.brain = Some(brain);
         self.brain_mode = AtomicU8::new(mode.as_u8());
+        self
+    }
+
+    /// Attach PreToolUse hooks (run in `dir`) — user-configured guardrails that
+    /// can block a tool call before policy. Empty = no-op.
+    pub fn with_tool_hooks(mut self, hooks: Vec<HookDef>, dir: PathBuf) -> Self {
+        self.tool_hooks = hooks;
+        self.hooks_dir = dir;
         self
     }
 
@@ -112,6 +127,20 @@ impl PermissionEngine {
         interactor: &Interactor,
         events: &EventEmitter,
     ) -> PermissionOutcome {
+        // PreToolUse hooks: a user-configured guardrail can block any tool before
+        // policy runs — it holds even under yolo. Fail-open on infra errors (only
+        // a clean non-zero exit blocks), so a broken hook can't brick the agent.
+        if !self.tool_hooks.is_empty() {
+            if let Some(reason) =
+                crate::hooks::run_tool_hooks(&self.tool_hooks, tool_name, input, &self.hooks_dir)
+                    .await
+            {
+                events.emit(Event::Notice {
+                    message: format!("⛔ pre-tool hook blocked {tool_name}: {reason}"),
+                });
+                return PermissionOutcome::Deny(format!("pre_tool_use hook: {reason}"));
+            }
+        }
         match self.classify(tool_name, is_read_only, input) {
             Class::Allow => PermissionOutcome::Allow,
             Class::Deny(reason) => PermissionOutcome::Deny(reason),
@@ -671,5 +700,58 @@ mod tests {
             .await;
         assert!(matches!(out, PermissionOutcome::Allow));
         actor.await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn pre_tool_hook_blocks_before_policy() {
+        let (tx, mut rx) = mpsc::unbounded_channel();
+        let interactor = Interactor::new(tx);
+        let (events, _erx) = mock_events();
+        let e = engine().with_tool_hooks(
+            vec![blumi_config::HookDef {
+                command: "echo blocked >&2; exit 1".into(),
+                matcher: String::new(),
+                timeout_secs: 5,
+            }],
+            std::env::temp_dir(),
+        );
+        let out = e
+            .check(
+                "Bash",
+                false,
+                &json!({ "command": "ls" }),
+                &interactor,
+                &events,
+            )
+            .await;
+        assert!(matches!(out, PermissionOutcome::Deny(_)));
+        // Blocked before policy — no approval prompt was emitted.
+        assert!(rx.try_recv().is_err());
+    }
+
+    #[tokio::test]
+    async fn pre_tool_hook_exit_zero_falls_through_to_policy() {
+        let (tx, _rx) = mpsc::unbounded_channel();
+        let interactor = Interactor::new(tx);
+        let (events, _erx) = mock_events();
+        let e = engine().with_tool_hooks(
+            vec![blumi_config::HookDef {
+                command: "exit 0".into(),
+                matcher: String::new(),
+                timeout_secs: 5,
+            }],
+            std::env::temp_dir(),
+        );
+        // exit 0 → allow → a safe read-only command still auto-allows via policy.
+        let out = e
+            .check(
+                "Bash",
+                false,
+                &json!({ "command": "ls" }),
+                &interactor,
+                &events,
+            )
+            .await;
+        assert!(matches!(out, PermissionOutcome::Allow));
     }
 }
