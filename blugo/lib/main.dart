@@ -56,17 +56,21 @@ class _BlugoAppState extends State<BlugoApp> {
     app.addListener(_maybeRoutePush);
   }
 
-  /// Consume a pending dispatch route from a tapped push → open the node thread.
+  /// Consume a pending dispatch route from a tapped push → open the inbox, then
+  /// the matching node's thread (the inbox is a fallback when the pushed node
+  /// name — the gateway hostname — doesn't match a saved server's name/host).
   void _maybeRoutePush() {
     final node = app.pendingDispatchNode;
     if (node == null) return;
     app.pendingDispatchNode = null;
-    final server = app.serverByNodeName(node);
     final nav = navigatorKey.currentState;
-    if (server == null || nav == null) return;
+    if (nav == null) return;
     nav.push(MaterialPageRoute(builder: (_) => DispatchInboxScreen(app)));
-    nav.push(
-        MaterialPageRoute(builder: (_) => DispatchThreadScreen(app, server)));
+    final server = app.serverByNodeName(node);
+    if (server != null) {
+      nav.push(
+          MaterialPageRoute(builder: (_) => DispatchThreadScreen(app, server)));
+    }
   }
 
   @override

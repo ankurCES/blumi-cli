@@ -9,6 +9,33 @@ tracks its own Flutter version (`x.y.z+build`).
 
 ## [Unreleased]
 
+### Added
+
+- **blugo Dispatch + FCM push** — a Telegram-style way to chat with each node
+  and get pinged when it replies, even with the app backgrounded. On by default
+  on the LAN; zero config beyond dropping the Firebase files in place.
+  - **Dispatch surface** — a `Dispatch` entry on the welcome diagram (per-node
+    action) and a dedicated **inbox** screen (a row per saved gateway + a
+    **Broadcast** channel). Each per-node thread is a **dedicated, isolated
+    session** (separate from the workbench chat), reusing the full chat UI
+    (markdown, tool/approval/plan cards, voice). **Broadcast** fans one message
+    to every saved gateway and shows each node's reply card.
+  - **FCM (Firebase Cloud Messaging), HTTP v1** — the gateway pushes a reply
+    preview to the phone on turn completion (dispatch *and* the main chat), so a
+    backgrounded/killed app still gets notified. **Gateway:** a device-token
+    registry (`~/.blumi/fcm.json`), `POST /api/push/fcm/register|unregister`, and
+    an FCM v1 sender that mints a Google OAuth2 token from a service account
+    (RS256 JWT, cached) — enabled automatically when
+    `~/.blumi/fcm-service-account.json` is present, a silent no-op otherwise.
+    **blugo:** `firebase_messaging` integration that registers its token with
+    every gateway and routes a notification tap to the right dispatch thread
+    (graceful no-op without Firebase config, falling back to local notifications).
+  - **Concurrent dedicated sessions (gateway)** — `/api/chat/send`,
+    `/api/messages`, and `/api/chat/stream` accept an optional `session_id` so a
+    client can drive a specific session **concurrently** with the active one
+    (a small dispatch-session registry); the dispatch SSE is pinned and never
+    follows workbench swaps. The `session_id`-less paths are unchanged.
+
 ### Changed
 
 - **blugo — full UI/UX redesign.** The phone app is rebuilt on a proper design

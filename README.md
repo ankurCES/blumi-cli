@@ -430,6 +430,20 @@ a **Grid tab** that delegates a task across your LAN grid and shows each machine
 any model), LAN auto-discovery of gateways, multiple saved instances, and voice (ElevenLabs /
 OpenAI TTS + Whisper STT).
 
+### Dispatch — Telegram-style chat with each node + push
+
+| Dispatch inbox | Thread + push | Broadcast · all nodes |
+|---|---|---|
+| <img src="docs/screenshots/app-dispatch.png" alt="blugo Dispatch inbox — a Broadcast channel + a row per saved gateway" width="220"> | <img src="docs/screenshots/app-dispatch-thread.png" alt="a dispatch thread with an FCM completion notification banner" width="220"> | <img src="docs/screenshots/app-dispatch-broadcast.png" alt="Broadcast — one message fanned to every node, per-node reply cards" width="220"> |
+
+**Dispatch** is a lightweight inbox: a row per saved gateway (each its own isolated quick-chat
+thread) plus a **Broadcast** channel that fans one message to *every* node and shows each one's reply.
+Fire-and-forget — send, background the app, and a **push notification** (FCM) brings the reply back,
+then a tap drops you into that thread. On by default on the LAN with **zero config**; drop a Firebase
+service account on the gateway (`~/.blumi/fcm-service-account.json`) to turn push on (it's a silent
+no-op without it). Reachable from the welcome diagram (a node's **Dispatch** action) and a Dispatch
+icon on every screen.
+
 ## Connect it
 
 1. On your machine: `blumi serve pair` then `blumi serve install --host <LAN-ip>`.
