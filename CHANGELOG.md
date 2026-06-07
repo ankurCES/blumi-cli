@@ -31,8 +31,10 @@ The Rust workspace and the blugo app share the version number.
   when `notify` is off. Second wave (live-stream surface, needs no config): a
   **browser in-tab alert** — when a turn you started finishes while the web tab is
   **backgrounded**, blumi flashes the title, badges the favicon, plays a short ping,
-  and drops a click-to-focus toast (silent while the tab is focused). (Phone +
-  Web Push surfaces follow.)
+  and drops a click-to-focus toast (silent while the tab is focused); and a **blugo
+  phone notification** (`flutter_local_notifications`) — a heads-up local
+  notification when a turn completes while the app is **backgrounded** (Android 13+
+  runtime permission requested on first launch). (Web Push surface follows.)
 - **Web Control Center panels** — the browser/phone Control Center gains four
   tabs over the new backends: **routing** (tiers + `$ saved`), **entries**
   (white-box memory: pin / edit / delete), **discovery** (always-on status +

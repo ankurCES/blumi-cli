@@ -3,6 +3,7 @@ import 'package:flutter/foundation.dart';
 import '../data/api.dart';
 import '../data/events.dart';
 import '../data/models.dart';
+import '../data/notifications.dart';
 import '../data/sse.dart';
 
 enum AgentStatus { working, done, failed }
@@ -158,6 +159,8 @@ class BlumiSession extends ChangeNotifier {
     switch (ev) {
       case TurnStarted():
         busy = true;
+        // Arm a completion notification for when this turn finishes (#209c).
+        NotificationService.instance.arm();
       case AssistantStarted():
         streaming = '';
       case TokenEvent(:final text):
@@ -204,6 +207,9 @@ class BlumiSession extends ChangeNotifier {
         busy = false;
         streaming = null;
         thinking = null;
+        // Notify only if blugo is backgrounded (no-op in the foreground).
+        unawaited(NotificationService.instance
+            .notifyCompletionIfBackground('blumi', 'Turn complete'));
         _scheduleRefresh();
       case NoticeEvent(:final message):
         entries.add(NoticeEntry(message));

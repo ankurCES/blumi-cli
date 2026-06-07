@@ -1,10 +1,17 @@
 import 'package:flutter/material.dart';
+import 'data/notifications.dart';
 import 'state/app.dart';
 import 'ui/connect.dart';
 import 'ui/home.dart';
 import 'ui/theme.dart';
 
-void main() => runApp(const BlugoApp());
+Future<void> main() async {
+  WidgetsFlutterBinding.ensureInitialized();
+  // Local completion notifications (#209c) — best-effort; a denied permission
+  // just makes it a no-op.
+  await NotificationService.instance.init();
+  runApp(const BlugoApp());
+}
 
 class BlugoApp extends StatefulWidget {
   const BlugoApp({super.key});

@@ -6,6 +6,8 @@
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE"/>
     <!-- Voice input (speech-to-text). -->
     <uses-permission android:name="android.permission.RECORD_AUDIO"/>
+    <!-- Completion notifications (#209c) — runtime-requested on Android 13+. -->
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS"/>
     <application
         android:label="blugo"
         android:name="${applicationName}"
