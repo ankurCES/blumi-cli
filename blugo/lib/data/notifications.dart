@@ -20,6 +20,10 @@ class NotificationService with WidgetsBindingObserver {
   bool _foreground = true;
   bool _armed = false;
 
+  /// Called when a notification shown by this service is tapped, with its
+  /// payload (JSON `{session_id, node}` for dispatch routing). Set by the app.
+  void Function(String payload)? onTap;
+
   static const String _channelId = 'blumi_completion';
 
   /// Initialize the plugin, register the lifecycle observer, and request the
@@ -31,7 +35,13 @@ class NotificationService with WidgetsBindingObserver {
     const ios = DarwinInitializationSettings();
     const settings = InitializationSettings(android: android, iOS: ios);
     try {
-      await _plugin.initialize(settings);
+      await _plugin.initialize(
+        settings,
+        onDidReceiveNotificationResponse: (resp) {
+          final p = resp.payload;
+          if (p != null && p.isNotEmpty) onTap?.call(p);
+        },
+      );
       await _plugin
           .resolvePlatformSpecificImplementation<
               AndroidFlutterLocalNotificationsPlugin>()
@@ -70,6 +80,27 @@ class NotificationService with WidgetsBindingObserver {
         NotificationDetails(android: android, iOS: DarwinNotificationDetails());
     try {
       await _plugin.show(0, title, body, details);
+    } catch (_) {
+      // Best-effort.
+    }
+  }
+
+  /// Show a notification unconditionally (used for foreground FCM messages, which
+  /// the OS doesn't display while the app is open). [payload] carries routing
+  /// data (`{session_id, node}`) consumed by [onTap].
+  Future<void> show(String title, String body, {String? payload}) async {
+    if (!_ready) return;
+    const android = AndroidNotificationDetails(
+      _channelId,
+      'Run completion',
+      channelDescription: 'Notifies when a blumi run finishes.',
+      importance: Importance.high,
+      priority: Priority.high,
+    );
+    const details =
+        NotificationDetails(android: android, iOS: DarwinNotificationDetails());
+    try {
+      await _plugin.show(title.hashCode, title, body, details, payload: payload);
     } catch (_) {
       // Best-effort.
     }

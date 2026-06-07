@@ -7,6 +7,13 @@ plugins {
     id("dev.flutter.flutter-gradle-plugin")
 }
 
+// Firebase Cloud Messaging: apply the Google Services plugin only when the
+// project config is present, so the OSS checkout still builds without it (FCM
+// then no-ops at runtime). Drop google-services.json in android/app/ to enable.
+if (rootProject.file("app/google-services.json").exists()) {
+    apply(plugin = "com.google.gms.google-services")
+}
+
 // Release signing — loaded from android/key.properties (gitignored). Falls back
 // to debug signing when absent so the repo still builds without the keystore.
 val keystoreProperties = Properties()

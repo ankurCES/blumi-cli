@@ -52,6 +52,14 @@ class AppController extends ChangeNotifier {
   String themeName = 'rose';
   bool yolo = false;
 
+  /// Latest FCM device token (null until FCM init succeeds, or on a build with
+  /// no Firebase config). Registered with every authed gateway so it can push.
+  String? fcmToken;
+
+  /// A pending dispatch route from a tapped push — (sessionId, node). The UI
+  /// consumes it to open the right thread, then clears it.
+  (String sessionId, String node)? pendingDispatch;
+
   bool get connected => session != null;
 
   static const _kServers = 'servers';
@@ -203,6 +211,14 @@ class AppController extends ChangeNotifier {
   }
 
   Future<void> removeServer(String id) async {
+    // Best-effort: stop this gateway from pushing to this device.
+    final gone = _byId(id);
+    final t = fcmToken;
+    if (gone != null && gone.token != null && t != null) {
+      try {
+        await ApiClient(ServerConn(gone.base, gone.token)).fcmUnregister(t);
+      } catch (_) {}
+    }
     servers = servers.where((s) => s.id != id).toList();
     if (reauthFor?.id == id) reauthFor = null;
     await _saveServers();
@@ -242,6 +258,32 @@ class AppController extends ChangeNotifier {
     await _saveServers();
     notifyListeners();
     return endpointChanged;
+  }
+
+  // --- FCM (phone push) ------------------------------------------------------
+
+  /// Register [token] with every saved + authed gateway so each can push to this
+  /// device. Idempotent (the gateway de-dups); called on token acquire/refresh.
+  Future<void> registerFcmEverywhere(String token) async {
+    fcmToken = token;
+    for (final s in servers) {
+      await _registerFcmFor(s);
+    }
+  }
+
+  Future<void> _registerFcmFor(SavedServer s) async {
+    final t = fcmToken;
+    if (t == null || s.token == null) return; // needs an authed gateway
+    try {
+      await ApiClient(ServerConn(s.base, s.token)).fcmRegister(t);
+    } catch (_) {}
+  }
+
+  /// A tapped push wants to open a dispatch thread; the UI consumes
+  /// [pendingDispatch] and navigates.
+  void openDispatchFromPush(String sessionId, String node) {
+    pendingDispatch = (sessionId, node);
+    notifyListeners();
   }
 
   // --- LAN discovery (mDNS) --------------------------------------------------
@@ -292,6 +334,9 @@ class AppController extends ChangeNotifier {
     connecting = false;
     status = 'connected';
     await _syncSavedServer();
+    // Register this device for FCM push from the just-connected gateway.
+    final connected = _byId(currentServerId);
+    if (connected != null) await _registerFcmFor(connected);
     // Paint the sessions list + control metadata from cache instantly, then
     // revalidate over the network.
     final cachedSessions = cache.peek(ck('sessions'));

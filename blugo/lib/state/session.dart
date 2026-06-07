@@ -39,9 +39,24 @@ class BlumiSession extends ChangeNotifier {
   PlanReview? pendingPlan;
   final List<AgentCardVM> agents = [];
 
-  BlumiSession(ServerConn conn)
-      : api = ApiClient(conn),
-        _stream = EventStream(conn);
+  /// When set, this is a dedicated (dispatch) session driven concurrently with
+  /// the gateway's active session, addressed by [sessionId].
+  final String? sessionId;
+
+  /// Title for the local completion notification (e.g. the node name).
+  final String notifyTitle;
+
+  /// Whether to fire the local "turn complete" notification. Off for dispatch
+  /// sessions, which rely on FCM (avoids a double notification).
+  final bool localNotify;
+
+  BlumiSession(
+    ServerConn conn, {
+    this.sessionId,
+    this.notifyTitle = 'blumi',
+    this.localNotify = true,
+  })  : api = ApiClient(conn),
+        _stream = EventStream(conn, sessionId: sessionId);
 
   Future<void> start() async {
     await restore();
@@ -72,7 +87,7 @@ class BlumiSession extends ChangeNotifier {
       modelName = cfg['model'] as String? ?? modelName;
     } catch (_) {}
     try {
-      final msgs = await api.messages();
+      final msgs = await api.messages(sessionId: sessionId);
       entries
         ..clear()
         ..addAll(msgs.map((m) => switch (m.role) {
@@ -98,7 +113,7 @@ class BlumiSession extends ChangeNotifier {
     if (busy || streaming != null || switching) return;
     List<StoredMessage> msgs;
     try {
-      msgs = await api.messages();
+      msgs = await api.messages(sessionId: sessionId);
     } catch (_) {
       return; // keep what we have on a transient failure
     }
@@ -160,7 +175,7 @@ class BlumiSession extends ChangeNotifier {
       case TurnStarted():
         busy = true;
         // Arm a completion notification for when this turn finishes (#209c).
-        NotificationService.instance.arm();
+        if (localNotify) NotificationService.instance.arm();
       case AssistantStarted():
         streaming = '';
       case TokenEvent(:final text):
@@ -208,8 +223,11 @@ class BlumiSession extends ChangeNotifier {
         streaming = null;
         thinking = null;
         // Notify only if blugo is backgrounded (no-op in the foreground).
-        unawaited(NotificationService.instance
-            .notifyCompletionIfBackground('blumi', 'Turn complete'));
+        // Dispatch sessions skip this and rely on FCM (avoids a double ping).
+        if (localNotify) {
+          unawaited(NotificationService.instance
+              .notifyCompletionIfBackground(notifyTitle, 'Turn complete'));
+        }
         _scheduleRefresh();
       case NoticeEvent(:final message):
         entries.add(NoticeEntry(message));
@@ -238,7 +256,7 @@ class BlumiSession extends ChangeNotifier {
     busy = true;
     notifyListeners();
     try {
-      await api.send(text);
+      await api.send(text, sessionId: sessionId);
     } catch (e) {
       busy = false;
       entries.add(NoticeEntry('send failed: $e'));

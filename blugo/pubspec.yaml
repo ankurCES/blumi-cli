@@ -45,6 +45,8 @@ dependencies:
   flutter_highlight: ^0.7.0
   webview_flutter: ^4.10.0
   flutter_local_notifications: ^19.0.0
+  firebase_core: ^4.10.0
+  firebase_messaging: ^16.3.0
 
 dev_dependencies:
   flutter_test:

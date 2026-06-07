@@ -43,3 +43,11 @@ app.*.map.json
 /android/app/debug
 /android/app/profile
 /android/app/release
+
+# Firebase — project-specific config (FCM). Drop these in locally to enable
+# push; never commit them (and never the service-account private key).
+/android/app/google-services.json
+/ios/Runner/GoogleService-Info.plist
+**/*service-account*.json
+firebase.json
+.firebaserc

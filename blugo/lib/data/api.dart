@@ -112,14 +112,30 @@ class ApiClient {
         .toList();
   }
 
-  Future<List<StoredMessage>> messages() async {
-    final j = await _getJson('/api/messages');
+  /// The transcript of the active session, or — with [sessionId] — a dedicated
+  /// (dispatch) session running concurrently on the gateway.
+  Future<List<StoredMessage>> messages({String? sessionId}) async {
+    final path = sessionId == null
+        ? '/api/messages'
+        : '/api/messages?session_id=${Uri.encodeQueryComponent(sessionId)}';
+    final j = await _getJson(path);
     return ((j['messages'] as List?) ?? [])
         .map((m) => StoredMessage.fromMap(m as Map<String, dynamic>))
         .toList();
   }
 
-  Future<void> send(String text) => _post('/api/chat/send', {'text': text});
+  /// Send a prompt. With [sessionId], drives that dedicated (dispatch) session
+  /// instead of the active one.
+  Future<void> send(String text, {String? sessionId}) => _post(
+        '/api/chat/send',
+        {'text': text, 'session_id': ?sessionId},
+      );
+
+  /// Register / remove this device's FCM token so the gateway can push to it.
+  Future<void> fcmRegister(String token) =>
+      _post('/api/push/fcm/register', {'token': token});
+  Future<void> fcmUnregister(String token) =>
+      _post('/api/push/fcm/unregister', {'token': token});
   Future<void> cancel() => _post('/api/chat/cancel', const {});
   Future<void> newSession() => _post('/api/session/new', const {});
   Future<void> resume(String id) => _post('/api/session/resume', {'id': id});

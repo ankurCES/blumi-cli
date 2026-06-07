@@ -11,12 +11,16 @@ import 'events.dart';
 /// EventSource), so Bearer auth works directly.
 class EventStream {
   final ServerConn conn;
+
+  /// When set, stream a specific (dedicated dispatch) session instead of the
+  /// gateway's active one — pinned, never following active-session swaps.
+  final String? sessionId;
   final http.Client _http;
   int _lastSeq = 0;
   bool _closed = false;
   StreamController<BlumiEvent>? _ctrl;
 
-  EventStream(this.conn, [http.Client? client])
+  EventStream(this.conn, {this.sessionId, http.Client? client})
       : _http = client ?? http.Client();
 
   Stream<BlumiEvent> connect() {
@@ -28,8 +32,11 @@ class EventStream {
   Future<void> _run() async {
     while (!_closed) {
       try {
-        final req =
-            http.Request('GET', Uri.parse('${conn.baseUrl}/api/chat/stream'));
+        final base = '${conn.baseUrl}/api/chat/stream';
+        final url = sessionId == null
+            ? base
+            : '$base?session_id=${Uri.encodeQueryComponent(sessionId!)}';
+        final req = http.Request('GET', Uri.parse(url));
         req.headers['Accept'] = 'text/event-stream';
         // Only send Last-Event-ID on a reconnect (once we've seen events) so the
         // first connect is live-only — the transcript already came from
