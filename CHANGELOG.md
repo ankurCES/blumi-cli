@@ -9,6 +9,14 @@ tracks its own Flutter version (`x.y.z+build`).
 
 ## [Unreleased]
 
+### Added
+
+- **blugo mascot logo** — the blugo app icon is now the armed-hornet "beekeeper"
+  mascot bursting out of the blumi flower bloom (the mascot composited over the
+  flower on the rose-dark brand background). The welcome network-diagram **hub**
+  node wears this same mascot logo, while the satellite gateway nodes keep the
+  plain flower glyph. blugo-only — the blumi CLI/README brand is unchanged.
+
 ## [0.4.0] — 2026-06-07
 
 ### Added

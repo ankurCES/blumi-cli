@@ -113,8 +113,9 @@ class GridNode extends StatelessWidget {
     Widget disc;
     switch (vm.kind) {
       case NodeKind.hub:
-        // The blumi flower as the hub: a brand-gradient rim around a surface
-        // disc holding the flower in its own (unaltered) Living-Rose colors.
+        // The hub wears the blugo app logo — the armed-hornet mascot bursting
+        // from the blumi flower bloom — inside a brand-gradient rim. (The ring
+        // nodes keep the plain flower glyph.)
         disc = Container(
           width: diameter,
           height: diameter,
@@ -129,9 +130,10 @@ class GridNode extends StatelessWidget {
                   spreadRadius: 1),
             ],
           ),
-          child: Container(
-            decoration: BoxDecoration(shape: BoxShape.circle, color: cs.surface),
-            child: Center(child: BloomFlower(size: diameter * 0.6)),
+          child: ClipOval(
+            child: SizedBox.expand(
+              child: Image.asset('assets/icon/blugo_hub.png', fit: BoxFit.cover),
+            ),
           ),
         );
         break;
