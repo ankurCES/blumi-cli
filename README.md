@@ -413,9 +413,9 @@ Contributing notes: **[Development](https://github.com/ankurCES/blumi-cli/wiki/D
 over your LAN (REST + SSE, token auth). Built for the Pixel 9 Pro Fold — single-pane in portrait,
 multi-pane when unfolded.
 
-| Welcome · interactive grid | Chat · streaming | Control center |
-|---|---|---|
-| <img src="docs/screenshots/app-grid.png" alt="blugo welcome — a radial network diagram of this device plus saved and discovered gateways" width="240"> | <img src="docs/screenshots/app-chat.png" alt="blugo streaming chat with accent-bordered bubbles" width="240"> | <img src="docs/screenshots/app-control.png" alt="blugo control center with icon tabs and a gradient header" width="240"> |
+| Welcome · interactive grid | Chat · streaming | Approvals · permission | Control center |
+|---|---|---|---|
+| <img src="docs/screenshots/app-grid.png" alt="blugo welcome — a radial network diagram of this device plus saved and discovered gateways" width="200"> | <img src="docs/screenshots/app-chat.png" alt="blugo streaming chat with accent-bordered bubbles" width="200"> | <img src="docs/screenshots/app-approval.png" alt="blugo permission card — Allow once / Allow session / Deny for a gated tool" width="200"> | <img src="docs/screenshots/app-control.png" alt="blugo control center with icon tabs and a gradient header" width="200"> |
 
 The **welcome screen is an interactive grid diagram**: this device sits at the hub, your saved
 gateways orbit it, and auto-discovered ones appear as **dashed** nodes — tap any node to
