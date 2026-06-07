@@ -25,6 +25,10 @@ anyhow.workspace = true
 thiserror.workspace = true
 tracing.workspace = true
 glob.workspace = true
+base64.workspace = true
+# Web Push (#209d): VAPID + RFC 8291 payload encryption. Client-agnostic — we
+# build the request and send it with our own reqwest (in the binary's notifier).
+web-push-native = "0.4"
 
 [dev-dependencies]
 tokio = { workspace = true, features = ["macros", "rt-multi-thread", "test-util"] }

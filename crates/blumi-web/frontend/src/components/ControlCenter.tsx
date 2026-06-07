@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { api } from '../api'
+import { enableWebPush, isPushSupported } from '../notify'
 import type {
   AlwaysOnStatus,
   CronJob,
@@ -381,43 +382,74 @@ function MemoryEntriesTab() {
   )
 }
 
+function PushControl() {
+  const [status, setStatus] = useState('')
+  const [busy, setBusy] = useState(false)
+  const supported = isPushSupported()
+  const enable = async () => {
+    setBusy(true)
+    setStatus(await enableWebPush())
+    setBusy(false)
+  }
+  return (
+    <div className="cc-row">
+      <div className="cc-row-main">
+        <strong>Browser push</strong>
+        <div className="cc-dim">
+          {supported
+            ? 'Get notified when a run finishes — even with this tab closed.'
+            : 'Needs a secure context (HTTPS or http://localhost).'}
+        </div>
+        {status && <div className="cc-dim">{status}</div>}
+      </div>
+      <button className="cc-save" disabled={!supported || busy} onClick={enable}>
+        {busy ? '…' : 'Enable'}
+      </button>
+    </div>
+  )
+}
+
 function DiscoveryTab() {
   const [d, setD] = useState<AlwaysOnStatus | null>(null)
   useEffect(() => {
     api.alwaysOn().then(setD).catch(() => {})
   }, [])
-  if (!d) return <div className="cc-empty">loading…</div>
-  if (!d.enabled)
-    return (
-      <div className="cc-pane">
+  return (
+    <div className="cc-pane">
+      <label className="cc-label">Notifications</label>
+      <PushControl />
+      <label className="cc-label">Always-on discovery</label>
+      {!d ? (
+        <div className="cc-empty">loading…</div>
+      ) : !d.enabled ? (
         <div className="cc-empty">
           always-on is off — enable it in <code>settings.json</code> under{' '}
           <code>always_on.enabled</code> + <code>autonomy: "propose"</code>.
         </div>
-      </div>
-    )
-  return (
-    <div className="cc-pane">
-      <div className="cc-row">
-        <span className="cc-row-main">
-          always-on <strong>on</strong>
-        </span>
-        <span className="cc-dim">autonomy {d.autonomy}</span>
-      </div>
-      <label className="cc-label">Recent discoveries</label>
-      {d.recent.length === 0 && <div className="cc-empty">none yet</div>}
-      {d.recent.map((t, i) => (
-        <div className="cc-row" key={i}>
-          <div className="cc-dim cc-clip">{t}</div>
-        </div>
-      ))}
-      <label className="cc-label">Reports (~/.blumi/reports)</label>
-      {d.reports.length === 0 && <div className="cc-empty">none yet</div>}
-      {d.reports.map((r) => (
-        <div className="cc-row" key={r}>
-          <div className="cc-dim">{r}</div>
-        </div>
-      ))}
+      ) : (
+        <>
+          <div className="cc-row">
+            <span className="cc-row-main">
+              always-on <strong>on</strong>
+            </span>
+            <span className="cc-dim">autonomy {d.autonomy}</span>
+          </div>
+          <label className="cc-label">Recent discoveries</label>
+          {d.recent.length === 0 && <div className="cc-empty">none yet</div>}
+          {d.recent.map((t, i) => (
+            <div className="cc-row" key={i}>
+              <div className="cc-dim cc-clip">{t}</div>
+            </div>
+          ))}
+          <label className="cc-label">Reports (~/.blumi/reports)</label>
+          {d.reports.length === 0 && <div className="cc-empty">none yet</div>}
+          {d.reports.map((r) => (
+            <div className="cc-row" key={r}>
+              <div className="cc-dim">{r}</div>
+            </div>
+          ))}
+        </>
+      )}
     </div>
   )
 }

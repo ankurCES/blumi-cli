@@ -477,6 +477,41 @@ impl Management for WebManagement {
         .await
     }
 
+    async fn push_public_key(&self) -> String {
+        blumi_core::push::public_key(&self.config.paths.push_store()).unwrap_or_default()
+    }
+    async fn push_subscribe(&self, sub: serde_json::Value) -> serde_json::Value {
+        // Browser PushSubscription shape: { endpoint, keys: { p256dh, auth } }.
+        let endpoint = sub.get("endpoint").and_then(|v| v.as_str()).unwrap_or("");
+        let keys = sub.get("keys");
+        let p256dh = keys
+            .and_then(|k| k.get("p256dh"))
+            .and_then(|v| v.as_str())
+            .unwrap_or("");
+        let auth = keys
+            .and_then(|k| k.get("auth"))
+            .and_then(|v| v.as_str())
+            .unwrap_or("");
+        if endpoint.is_empty() || p256dh.is_empty() || auth.is_empty() {
+            return serde_json::json!({ "ok": false, "error": "missing endpoint/keys" });
+        }
+        let s = blumi_core::push::PushSubscription {
+            endpoint: endpoint.to_string(),
+            p256dh: p256dh.to_string(),
+            auth: auth.to_string(),
+        };
+        match blumi_core::push::add_subscription(&self.config.paths.push_store(), s) {
+            Ok(n) => serde_json::json!({ "ok": true, "count": n }),
+            Err(e) => serde_json::json!({ "ok": false, "error": e.to_string() }),
+        }
+    }
+    async fn push_unsubscribe(&self, endpoint: &str) -> serde_json::Value {
+        match blumi_core::push::remove_subscription(&self.config.paths.push_store(), endpoint) {
+            Ok(removed) => serde_json::json!({ "ok": removed }),
+            Err(e) => serde_json::json!({ "ok": false, "error": e.to_string() }),
+        }
+    }
+
     async fn always_on_status(&self) -> serde_json::Value {
         let cfg = &self.config.always_on;
         let recent: Vec<String> = match &self.mem {

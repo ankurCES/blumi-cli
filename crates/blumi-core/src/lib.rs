@@ -20,6 +20,7 @@ mod memory;
 mod permissions;
 mod persona;
 mod pipeline;
+pub mod push;
 mod recovery;
 mod registry;
 mod router;

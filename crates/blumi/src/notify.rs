@@ -127,8 +127,68 @@ pub async fn notify_completion(
             send_bot(req).await;
         }
     }
-    // Web push (VAPID) fans out from the gateway's subscription store — wired in
-    // a later sub-phase; `notify.web_push` is read there.
+    if n.web_push {
+        send_web_push(cfg, title, body).await;
+    }
+}
+
+/// VAPID `sub` contact (a `mailto:`/`https:` URL, per RFC 8292). A generic
+/// placeholder — never the user's real email, to avoid leaking it to push hosts.
+const WEB_PUSH_CONTACT: &str = "mailto:notify@blumi.local";
+
+/// Push to every subscribed browser via Web Push (VAPID). Only reaches browsers
+/// served over a secure context (HTTPS / `http://localhost`); on a plain-HTTP LAN
+/// there are simply no subscriptions. Prunes subscriptions a push service reports
+/// as gone (404/410). Best-effort.
+async fn send_web_push(cfg: &BlumiConfig, title: &str, body: &str) {
+    let path = cfg.paths.push_store();
+    let store = match blumi_core::push::load_or_init(&path) {
+        Ok(s) => s,
+        Err(e) => {
+            tracing::warn!("web push: store init failed: {e}");
+            return;
+        }
+    };
+    if store.subscriptions.is_empty() {
+        return;
+    }
+    let payload = serde_json::json!({ "title": title, "body": body })
+        .to_string()
+        .into_bytes();
+    let client = reqwest::Client::new();
+    let mut dead = Vec::new();
+    for sub in &store.subscriptions {
+        let req = match blumi_core::push::build_push_request(
+            &store.vapid_private,
+            WEB_PUSH_CONTACT,
+            sub,
+            &payload,
+        ) {
+            Ok(r) => r,
+            Err(e) => {
+                tracing::warn!("web push: build failed: {e}");
+                continue;
+            }
+        };
+        let mut rb = client.post(&req.url).body(req.body);
+        for (k, v) in &req.headers {
+            rb = rb.header(k, v);
+        }
+        match rb.send().await {
+            Ok(r) => {
+                let code = r.status().as_u16();
+                if code == 404 || code == 410 {
+                    dead.push(sub.endpoint.clone()); // subscription expired/gone
+                } else if !r.status().is_success() {
+                    tracing::warn!("web push: HTTP {code}");
+                }
+            }
+            Err(e) => tracing::warn!("web push: send error: {e}"),
+        }
+    }
+    for endpoint in dead {
+        let _ = blumi_core::push::remove_subscription(&path, &endpoint);
+    }
 }
 
 /// POST a built bot request (best-effort).

@@ -63,6 +63,11 @@ impl Paths {
         self.home.join("reports")
     }
 
+    /// Web Push state (VAPID keypair + browser subscriptions), `<home>/push.json`.
+    pub fn push_store(&self) -> PathBuf {
+        self.home.join("push.json")
+    }
+
     /// Create the home, skills, memory, sessions, and models directories.
     pub fn ensure_dirs(&self) -> std::io::Result<()> {
         for dir in [

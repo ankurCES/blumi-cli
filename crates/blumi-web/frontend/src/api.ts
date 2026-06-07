@@ -112,6 +112,11 @@ export const api = {
   gitStatus: () => getJSON<GitView>('/api/git/status'),
   gitDiff: () => getJSON<GitView>('/api/git/diff'),
   gitLog: () => getJSON<GitView>('/api/git/log'),
+  // Web Push (#209d).
+  pushKey: () => getJSON<{ key: string }>('/api/push/key').then((d) => d.key),
+  pushSubscribe: (sub: unknown) =>
+    postJSON('/api/push/subscribe', sub) as Promise<{ ok: boolean; count?: number; error?: string }>,
+  pushUnsubscribe: (endpoint: string) => postJSON('/api/push/unsubscribe', { endpoint }),
 }
 
 /** All SSE event names the core emits (axum sets `event:` to these). */

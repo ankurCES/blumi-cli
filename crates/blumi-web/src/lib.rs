@@ -361,6 +361,23 @@ pub trait Management: Send + Sync {
         serde_json::json!({ "ok": false, "text": "" })
     }
 
+    // --- Web Push (#209d) ---
+
+    /// The VAPID public key (browser `applicationServerKey`), base64url. Empty
+    /// string ⇒ web push is unavailable. Default: empty.
+    async fn push_public_key(&self) -> String {
+        String::new()
+    }
+    /// Register a browser subscription `{ endpoint, keys: { p256dh, auth } }`.
+    /// Returns `{ ok, count }`. Default: unsupported.
+    async fn push_subscribe(&self, _sub: serde_json::Value) -> serde_json::Value {
+        serde_json::json!({ "ok": false, "error": "push unavailable" })
+    }
+    /// Remove a subscription by `endpoint`. Returns `{ ok }`. Default: unsupported.
+    async fn push_unsubscribe(&self, _endpoint: &str) -> serde_json::Value {
+        serde_json::json!({ "ok": false, "error": "push unavailable" })
+    }
+
     // --- Self-management ---
 
     /// The whole settings.json as JSON, with every secret redacted (for the
@@ -546,6 +563,9 @@ pub fn router(state: AppState) -> Router {
         .route("/api/memory/pin", post(api::memory_pin))
         .route("/api/memory/delete", post(api::memory_delete))
         .route("/api/memory/update", post(api::memory_update))
+        .route("/api/push/key", get(api::push_key))
+        .route("/api/push/subscribe", post(api::push_subscribe))
+        .route("/api/push/unsubscribe", post(api::push_unsubscribe))
         .route(
             "/api/self/config",
             get(api::self_config_get).post(api::self_config_set),

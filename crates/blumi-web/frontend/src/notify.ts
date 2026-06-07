@@ -1,3 +1,5 @@
+import { api } from './api'
+
 // Browser in-tab completion alert (#209b). When a turn finishes while this tab is
 // backgrounded, nudge the user: flash the title, badge the favicon, play a short
 // ping, and drop an in-page toast. Self-contained, dependency-free, best-effort —
@@ -114,6 +116,59 @@ function ping(): void {
     else play()
   } catch {
     /* audio is optional */
+  }
+}
+
+// --- Web Push (#209d) ---
+
+/// Web Push needs a secure context (HTTPS or `http://localhost`) plus the SW +
+/// Push + Notification APIs. On a plain-HTTP LAN page this is false, so the UI
+/// can explain why the button is dormant.
+export function isPushSupported(): boolean {
+  return (
+    typeof window !== 'undefined' &&
+    window.isSecureContext &&
+    'serviceWorker' in navigator &&
+    'PushManager' in window &&
+    'Notification' in window
+  )
+}
+
+function urlBase64ToUint8Array(base64: string): Uint8Array<ArrayBuffer> {
+  const padding = '='.repeat((4 - (base64.length % 4)) % 4)
+  const b64 = (base64 + padding).replace(/-/g, '+').replace(/_/g, '/')
+  const raw = atob(b64)
+  // Back the array with an explicit ArrayBuffer so the type satisfies
+  // BufferSource (TS 5.7 made Uint8Array generic over ArrayBufferLike).
+  const out = new Uint8Array(new ArrayBuffer(raw.length))
+  for (let i = 0; i < raw.length; i++) out[i] = raw.charCodeAt(i)
+  return out
+}
+
+/// Subscribe this browser to Web Push: request permission, fetch the VAPID key,
+/// subscribe via the service worker, and register the subscription server-side.
+/// Returns a human-readable status; no-ops cleanly when unsupported.
+export async function enableWebPush(): Promise<string> {
+  if (!isPushSupported()) {
+    return 'Web push needs a secure context (HTTPS or localhost).'
+  }
+  try {
+    const perm = await Notification.requestPermission()
+    if (perm !== 'granted') return 'Notification permission denied.'
+    const key = await api.pushKey()
+    if (!key) return 'Server has no VAPID key.'
+    const reg = await navigator.serviceWorker.ready
+    const existing = await reg.pushManager.getSubscription()
+    const sub =
+      existing ??
+      (await reg.pushManager.subscribe({
+        userVisibleOnly: true,
+        applicationServerKey: urlBase64ToUint8Array(key),
+      }))
+    const res = await api.pushSubscribe(sub.toJSON())
+    return res.ok ? 'Web push enabled on this browser.' : `Failed: ${res.error ?? 'unknown'}`
+  } catch (e) {
+    return `Web push failed: ${e instanceof Error ? e.message : String(e)}`
   }
 }
 

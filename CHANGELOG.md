@@ -34,7 +34,13 @@ The Rust workspace and the blugo app share the version number.
   and drops a click-to-focus toast (silent while the tab is focused); and a **blugo
   phone notification** (`flutter_local_notifications`) — a heads-up local
   notification when a turn completes while the app is **backgrounded** (Android 13+
-  runtime permission requested on first launch). (Web Push surface follows.)
+  runtime permission requested on first launch). Final wave (`notify.web_push`):
+  **browser Web Push** (VAPID + RFC 8291) — a keypair + subscription store under
+  `~/.blumi/push.json`, `GET /api/push/key` + `POST /api/push/{subscribe,unsubscribe}`,
+  a service-worker `push` handler, and an **Enable** button in the Control Center.
+  Pushes fire on `loop` / `discovery` / `turn` completion to every subscribed
+  browser. ⚠️ Browser Web Push requires a **secure context** (HTTPS or
+  `http://localhost`), so over a plain-HTTP LAN it stays dormant until you add TLS.
 - **Web Control Center panels** — the browser/phone Control Center gains four
   tabs over the new backends: **routing** (tiers + `$ saved`), **entries**
   (white-box memory: pin / edit / delete), **discovery** (always-on status +

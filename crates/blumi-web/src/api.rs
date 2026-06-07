@@ -966,6 +966,31 @@ pub async fn memory_update(
     Json(state.mgmt().memory_update(b.id, &b.text).await)
 }
 
+// --- Web Push (#209d) ---
+
+#[derive(Deserialize)]
+pub struct PushEndpointBody {
+    pub endpoint: String,
+}
+
+/// GET /api/push/key → the VAPID public key (browser `applicationServerKey`).
+pub async fn push_key(State(state): State<AppState>) -> Json<Value> {
+    Json(serde_json::json!({ "key": state.mgmt().push_public_key().await }))
+}
+
+/// POST /api/push/subscribe → register a browser `PushSubscription`.
+pub async fn push_subscribe(State(state): State<AppState>, Json(b): Json<Value>) -> Json<Value> {
+    Json(state.mgmt().push_subscribe(b).await)
+}
+
+/// POST /api/push/unsubscribe → remove a subscription by endpoint.
+pub async fn push_unsubscribe(
+    State(state): State<AppState>,
+    Json(b): Json<PushEndpointBody>,
+) -> Json<Value> {
+    Json(state.mgmt().push_unsubscribe(&b.endpoint).await)
+}
+
 #[derive(Deserialize)]
 pub struct KbIngestBody {
     pub path: String,
