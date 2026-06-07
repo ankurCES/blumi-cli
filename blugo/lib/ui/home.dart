@@ -5,6 +5,7 @@ import '../data/voice.dart';
 import '../state/app.dart';
 import '../state/session.dart';
 import 'control.dart';
+import 'dispatch_inbox.dart';
 import 'kit/kit.dart';
 import 'markdown.dart';
 import 'palette.dart';
@@ -102,6 +103,11 @@ class _Header extends StatelessWidget implements PreferredSizeWidget {
             tooltip: 'New session',
             onPressed: app.newSession,
             icon: const Icon(Icons.add_comment_outlined)),
+        IconButton(
+            tooltip: 'Dispatch',
+            onPressed: () => Navigator.of(context).push(
+                MaterialPageRoute(builder: (_) => DispatchInboxScreen(app))),
+            icon: const Icon(Icons.send_outlined)),
         if (showMenus)
           Builder(
             builder: (ctx) => IconButton(

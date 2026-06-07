@@ -4,6 +4,8 @@ import 'data/notifications.dart';
 import 'data/push.dart';
 import 'state/app.dart';
 import 'ui/connect.dart';
+import 'ui/dispatch_inbox.dart';
+import 'ui/dispatch_thread.dart';
 import 'ui/home.dart';
 import 'ui/kit/kit.dart';
 import 'ui/theme.dart';
@@ -43,18 +45,33 @@ class _BlugoAppState extends State<BlugoApp> {
     NotificationService.instance.onTap = (payload) {
       try {
         final data = jsonDecode(payload) as Map<String, dynamic>;
-        final sid = data['session_id']?.toString();
+        final kind = data['kind']?.toString() ?? 'dispatch';
         final node = data['node']?.toString() ?? '';
-        if (sid != null && sid.isNotEmpty) app.openDispatchFromPush(sid, node);
+        if (kind == 'dispatch' && node.isNotEmpty) {
+          app.openDispatchFromPush(node);
+        }
       } catch (_) {}
     };
-    PushService.instance.init(
-      onOpenThread: (sid, node) => app.openDispatchFromPush(sid, node),
-    );
+    PushService.instance.init(onOpenThread: app.openDispatchFromPush);
+    app.addListener(_maybeRoutePush);
+  }
+
+  /// Consume a pending dispatch route from a tapped push → open the node thread.
+  void _maybeRoutePush() {
+    final node = app.pendingDispatchNode;
+    if (node == null) return;
+    app.pendingDispatchNode = null;
+    final server = app.serverByNodeName(node);
+    final nav = navigatorKey.currentState;
+    if (server == null || nav == null) return;
+    nav.push(MaterialPageRoute(builder: (_) => DispatchInboxScreen(app)));
+    nav.push(
+        MaterialPageRoute(builder: (_) => DispatchThreadScreen(app, server)));
   }
 
   @override
   void dispose() {
+    app.removeListener(_maybeRoutePush);
     app.dispose();
     super.dispose();
   }

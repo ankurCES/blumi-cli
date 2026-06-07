@@ -25,13 +25,12 @@ class PushService {
   /// Called with a fresh token on acquisition/refresh (register it with gateways).
   void Function(String token)? onTokenChanged;
 
-  /// Called when a push is tapped, with the dispatch `session_id` + `node`.
-  void Function(String sessionId, String node)? onOpenThread;
+  /// Called when a dispatch push is tapped, with the `node` (gateway) to open.
+  void Function(String node)? onOpenThread;
 
   /// Initialize FCM. Safe to call once at startup; if Firebase isn't configured
   /// (no `google-services.json`), this is a no-op and [enabled] stays false.
-  Future<void> init(
-      {void Function(String sessionId, String node)? onOpenThread}) async {
+  Future<void> init({void Function(String node)? onOpenThread}) async {
     this.onOpenThread = onOpenThread;
     try {
       await Firebase.initializeApp();
@@ -67,8 +66,10 @@ class PushService {
   }
 
   void _routeTap(RemoteMessage m) {
-    final sid = m.data['session_id']?.toString();
+    // Only dispatch pushes open a thread; workbench ("turn") pushes just
+    // foreground the app.
+    final kind = m.data['kind']?.toString() ?? 'dispatch';
     final node = m.data['node']?.toString() ?? '';
-    if (sid != null && sid.isNotEmpty) onOpenThread?.call(sid, node);
+    if (kind == 'dispatch' && node.isNotEmpty) onOpenThread?.call(node);
   }
 }

@@ -6,6 +6,7 @@ import '../data/cache.dart';
 import '../data/discovery.dart';
 import '../data/models.dart';
 import '../data/saved_server.dart';
+import 'dispatch.dart';
 import 'session.dart';
 
 /// Top-level controller: owns the saved-server list, the live connection +
@@ -56,9 +57,12 @@ class AppController extends ChangeNotifier {
   /// no Firebase config). Registered with every authed gateway so it can push.
   String? fcmToken;
 
-  /// A pending dispatch route from a tapped push — (sessionId, node). The UI
-  /// consumes it to open the right thread, then clears it.
-  (String sessionId, String node)? pendingDispatch;
+  /// A pending dispatch route from a tapped push — the node (gateway) name. The
+  /// UI consumes it to open that node's dispatch thread, then clears it.
+  String? pendingDispatchNode;
+
+  /// Telegram-style per-node dispatch threads + the broadcast channel.
+  late final DispatchController dispatch = DispatchController(this);
 
   bool get connected => session != null;
 
@@ -279,11 +283,22 @@ class AppController extends ChangeNotifier {
     } catch (_) {}
   }
 
-  /// A tapped push wants to open a dispatch thread; the UI consumes
-  /// [pendingDispatch] and navigates.
-  void openDispatchFromPush(String sessionId, String node) {
-    pendingDispatch = (sessionId, node);
+  /// Ensure this device is registered for push from [s] (used when a dispatch
+  /// thread is opened without going through the full connect flow).
+  Future<void> registerFcmForServer(SavedServer s) => _registerFcmFor(s);
+
+  /// A tapped dispatch push wants to open that node's thread; the UI consumes
+  /// [pendingDispatchNode] and navigates.
+  void openDispatchFromPush(String node) {
+    if (node.isEmpty) return;
+    pendingDispatchNode = node;
     notifyListeners();
+  }
+
+  @override
+  void dispose() {
+    dispatch.dispose();
+    super.dispose();
   }
 
   // --- LAN discovery (mDNS) --------------------------------------------------
@@ -492,6 +507,15 @@ class AppController extends ChangeNotifier {
     if (id == null) return null;
     for (final s in servers) {
       if (s.id == id) return s;
+    }
+    return null;
+  }
+
+  /// Find a saved gateway by the `node` (hostname) carried in an FCM push —
+  /// the server name is auto-set to the gateway hostname, with host as a fallback.
+  SavedServer? serverByNodeName(String node) {
+    for (final s in servers) {
+      if (s.name == node || s.host == node) return s;
     }
     return null;
   }

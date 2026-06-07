@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import '../state/app.dart';
+import 'dispatch_inbox.dart';
 import 'grid_map.dart';
 import 'kit/kit.dart';
 import 'node_sheets.dart';
@@ -113,6 +114,13 @@ class _ConnectScreenState extends State<ConnectScreen> {
                         ),
                       ],
                     ),
+                  ),
+                  IconButton(
+                    tooltip: 'Dispatch',
+                    onPressed: () => Navigator.of(context).push(
+                        MaterialPageRoute(
+                            builder: (_) => DispatchInboxScreen(app))),
+                    icon: Icon(Icons.send_outlined, color: t.textMuted),
                   ),
                 ],
               ),

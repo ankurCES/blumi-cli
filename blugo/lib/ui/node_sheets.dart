@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import '../data/saved_server.dart';
 import '../state/app.dart';
+import 'dispatch_thread.dart';
 import 'kit/kit.dart';
 
 /// Tap a **saved** node → Connect (primary) · Edit · Delete (on the side).
@@ -144,6 +145,19 @@ class _SavedNodeActions extends StatelessWidget {
             ),
           ]),
           const SizedBox(height: 10),
+          SizedBox(
+            width: double.infinity,
+            child: OutlinedButton.icon(
+              onPressed: () {
+                Navigator.of(context).pop();
+                Navigator.of(screen).push(MaterialPageRoute(
+                    builder: (_) => DispatchThreadScreen(app, server)));
+              },
+              icon: const Icon(Icons.send_outlined, size: 18),
+              label: const Text('Dispatch'),
+            ),
+          ),
+          const SizedBox(height: 8),
           SizedBox(
             width: double.infinity,
             child: OutlinedButton.icon(
