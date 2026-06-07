@@ -6,6 +6,7 @@ import '../data/api.dart';
 import '../data/cache.dart';
 import '../data/elevenlabs.dart';
 import '../state/app.dart';
+import 'kit/kit.dart';
 import 'theme.dart';
 
 /// The control center — a draggable sheet mirroring the TUI/web control tabs:
@@ -95,37 +96,39 @@ class _ControlCenter extends StatelessWidget {
           mainAxisSize: MainAxisSize.min,
           children: [
             Padding(
-              padding: const EdgeInsets.fromLTRB(16, 4, 16, 0),
+              padding: const EdgeInsets.fromLTRB(16, 4, 16, 2),
               child: Row(
-                children: [
-                  Text(
+                children: const [
+                  GradientText(
                     '✿ control center',
-                    style: TextStyle(
-                      fontWeight: FontWeight.bold,
-                      color: cs.primary,
-                      fontSize: 16,
-                    ),
+                    style:
+                        TextStyle(fontWeight: FontWeight.w800, fontSize: 16),
                   ),
                 ],
               ),
             ),
+            // Tabs ordered by cluster: Agent · Work · Grid · Knowledge.
             TabBar(
               isScrollable: true,
               tabAlignment: TabAlignment.start,
               labelColor: cs.primary,
               indicatorColor: cs.primary,
-              tabs: const [
-                Tab(text: 'Settings'),
-                Tab(text: 'Status'),
-                Tab(text: 'Tasks'),
-                Tab(text: 'Grid'),
-                Tab(text: 'Usage'),
-                Tab(text: 'Skills'),
-                Tab(text: 'Memory'),
-                Tab(text: 'Code'),
-                Tab(text: 'Plans'),
-                Tab(text: 'Graph'),
-                Tab(text: 'Heal'),
+              tabs: [
+                // Agent
+                _IconTab(Icons.tune, 'Settings'),
+                _IconTab(Icons.monitor_heart_outlined, 'Status'),
+                _IconTab(Icons.bar_chart, 'Usage'),
+                // Work
+                _IconTab(Icons.checklist, 'Tasks'),
+                _IconTab(Icons.assignment_outlined, 'Plans'),
+                _IconTab(Icons.healing, 'Heal'),
+                // Grid
+                _IconTab(Icons.hub_outlined, 'Grid'),
+                // Knowledge
+                _IconTab(Icons.auto_awesome, 'Skills'),
+                _IconTab(Icons.psychology_outlined, 'Memory'),
+                _IconTab(Icons.code, 'Code'),
+                _IconTab(Icons.account_tree_outlined, 'Graph'),
               ],
             ),
             Expanded(
@@ -133,15 +136,15 @@ class _ControlCenter extends StatelessWidget {
                 children: [
                   _SettingsTab(app, scroll),
                   _StatusTab(app, scroll),
-                  _TasksTab(app, scroll),
-                  _GridTab(app, scroll),
                   _UsageTab(app, scroll),
+                  _TasksTab(app, scroll),
+                  _PlansTab(app, scroll),
+                  _HealTab(app, scroll),
+                  _GridTab(app, scroll),
                   _SkillsTab(app, scroll),
                   _MemoryTab(app, scroll),
                   _KnowledgeTab(app, scroll),
-                  _PlansTab(app, scroll),
                   _GraphTab(app, scroll),
-                  _HealTab(app, scroll),
                 ],
               ),
             ),
@@ -150,6 +153,24 @@ class _ControlCenter extends StatelessWidget {
       ),
     );
   }
+}
+
+/// A compact tab with a leading icon (icon beside label, single-row height).
+class _IconTab extends StatelessWidget {
+  final IconData icon;
+  final String label;
+  const _IconTab(this.icon, this.label);
+  @override
+  Widget build(BuildContext context) => Tab(
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(icon, size: 16),
+            const SizedBox(width: 6),
+            Text(label),
+          ],
+        ),
+      );
 }
 
 // --- async helper (loading / retry-on-error / content) ---------------------
@@ -709,150 +730,6 @@ class _SettingsTabState extends State<_SettingsTab> {
                 label: const Text('New skill'),
               ),
             ],
-          ),
-          const SizedBox(height: 18),
-          Row(
-            children: [
-              _label('Grid', cs),
-              const Spacer(),
-              IconButton(
-                tooltip: 'Refresh',
-                visualDensity: VisualDensity.compact,
-                icon: const Icon(Icons.refresh, size: 18),
-                onPressed: () => setState(() {}),
-              ),
-            ],
-          ),
-          FutureBuilder<Map<String, dynamic>>(
-            future: _api.gridMetrics(),
-            builder: (context, snap) {
-              if (snap.connectionState != ConnectionState.done) {
-                return const Padding(
-                  padding: EdgeInsets.all(8),
-                  child: LinearProgressIndicator(),
-                );
-              }
-              if (snap.hasError) {
-                return Text(
-                  'grid off / unavailable',
-                  style: TextStyle(color: cs.onSurface.withValues(alpha: 0.6)),
-                );
-              }
-              final d = snap.data!;
-              final me = (d['self'] as Map?) ?? const {};
-              final peers = (d['peers'] as List?) ?? const [];
-              final totals = (d['totals'] as Map?) ?? const {};
-              int n(dynamic v) => (v as num?)?.toInt() ?? 0;
-              Map asMap(dynamic v) => (v as Map?) ?? const {};
-              final tt = asMap(totals['tokens']);
-              Widget node(String name, bool online, Map m) {
-                final t = asMap(m['tokens']);
-                return Padding(
-                  padding: const EdgeInsets.symmetric(vertical: 4),
-                  child: Row(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Icon(
-                        online ? Icons.dns : Icons.cloud_off,
-                        size: 16,
-                        color: online
-                            ? Colors.greenAccent
-                            : cs.onSurface.withValues(alpha: 0.4),
-                      ),
-                      const SizedBox(width: 8),
-                      Expanded(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Row(
-                              children: [
-                                Flexible(
-                                  child: Text(
-                                    name,
-                                    overflow: TextOverflow.ellipsis,
-                                    style: const TextStyle(
-                                      fontWeight: FontWeight.w600,
-                                    ),
-                                  ),
-                                ),
-                                if (online &&
-                                    (m['accel']?.toString().isNotEmpty ??
-                                        false)) ...[
-                                  const SizedBox(width: 6),
-                                  Container(
-                                    padding: const EdgeInsets.symmetric(
-                                      horizontal: 6,
-                                      vertical: 1,
-                                    ),
-                                    decoration: BoxDecoration(
-                                      color: cs.primary.withValues(alpha: 0.15),
-                                      borderRadius: BorderRadius.circular(6),
-                                    ),
-                                    child: Text(
-                                      m['accel'].toString(),
-                                      style: TextStyle(
-                                        fontSize: 10,
-                                        color: cs.primary,
-                                        fontWeight: FontWeight.w600,
-                                      ),
-                                    ),
-                                  ),
-                                ],
-                              ],
-                            ),
-                            if (online)
-                              Text(
-                                'tasks ${n(m['tasks_local'])} local · ${n(m['tasks_remote'])} remote   ·   ↑${n(t['input'])} ↓${n(t['output'])} tok',
-                                style: TextStyle(
-                                  fontSize: 11,
-                                  color: cs.onSurface.withValues(alpha: 0.6),
-                                ),
-                              )
-                            else
-                              Text(
-                                'offline',
-                                style: TextStyle(
-                                  fontSize: 11,
-                                  color: cs.onSurface.withValues(alpha: 0.5),
-                                ),
-                              ),
-                          ],
-                        ),
-                      ),
-                    ],
-                  ),
-                );
-              }
-
-              return Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    '${n(totals['nodes_online'])} node(s) online · ${n(totals['tasks_total'])} tasks · ↑${n(tt['input'])} ↓${n(tt['output'])} tok grid-wide',
-                    style: TextStyle(
-                      fontSize: 12,
-                      color: cs.primary,
-                      fontWeight: FontWeight.w600,
-                    ),
-                  ),
-                  const SizedBox(height: 4),
-                  node('this gateway', true, me),
-                  for (final p in peers)
-                    node(
-                      (p as Map)['name']?.toString() ?? 'peer',
-                      p['online'] == true,
-                      asMap(p['metrics']),
-                    ),
-                  if (peers.isEmpty)
-                    Text(
-                      'no peers discovered on the network',
-                      style: TextStyle(
-                        color: cs.onSurface.withValues(alpha: 0.6),
-                      ),
-                    ),
-                ],
-              );
-            },
           ),
           const SizedBox(height: 8),
         ],
@@ -2464,14 +2341,18 @@ class _MemoryTab extends StatelessWidget {
   );
 }
 
+/// A small uppercase section label — the control center's shared header style
+/// (matches the kit's SectionHeader; takes a ColorScheme so it works in the
+/// many places here that only have `cs`).
 Widget _label(String t, ColorScheme cs) => Padding(
-  padding: const EdgeInsets.only(bottom: 4),
+  padding: const EdgeInsets.only(top: 12, bottom: 6),
   child: Text(
-    t,
+    t.toUpperCase(),
     style: TextStyle(
-      fontWeight: FontWeight.bold,
-      color: cs.onSurface.withValues(alpha: 0.7),
-      fontSize: 13,
+      fontWeight: FontWeight.w700,
+      color: cs.onSurface.withValues(alpha: 0.55),
+      fontSize: 11,
+      letterSpacing: 1.1,
     ),
   ),
 );
