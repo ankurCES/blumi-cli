@@ -209,6 +209,41 @@ class AppController extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// Edit a saved gateway. A name-only change updates in place. Because the id
+  /// is `host:port` and [SavedServer.copyWith] can't move the endpoint, changing
+  /// the host/port instead replaces the entry with a fresh one — and drops the
+  /// saved token so the next connect re-authenticates cleanly against the new
+  /// address. Returns true if the endpoint changed (caller may prompt to
+  /// reconnect).
+  Future<bool> editServer(String id,
+      {String? name, String? host, int? port}) async {
+    final cur = _byId(id);
+    if (cur == null) return false;
+    final newHost = (host ?? cur.host).trim();
+    final newPort = port ?? cur.port;
+    final trimmed = (name ?? cur.name).trim();
+    final newName = trimmed.isEmpty ? cur.host : trimmed;
+    final endpointChanged = newHost != cur.host || newPort != cur.port;
+
+    if (!endpointChanged) {
+      final updated = cur.copyWith(name: newName);
+      servers = servers.map((s) => s.id == id ? updated : s).toList();
+    } else {
+      final next =
+          SavedServer.create(name: newName, host: newHost, port: newPort);
+      // Drop the old entry and any pre-existing one on the new endpoint.
+      servers = [
+        ...servers.where((s) => s.id != id && s.id != next.id),
+        next,
+      ];
+      if (currentServerId == id) currentServerId = next.id;
+      if (reauthFor?.id == id) reauthFor = next;
+    }
+    await _saveServers();
+    notifyListeners();
+    return endpointChanged;
+  }
+
   // --- LAN discovery (mDNS) --------------------------------------------------
 
   /// Browse the LAN for `_blumi._tcp` beacons; updates [discovered] live.

@@ -1,9 +1,12 @@
 import 'package:flutter/material.dart';
-import '../data/saved_server.dart';
 import '../state/app.dart';
+import 'grid_map.dart';
+import 'kit/kit.dart';
+import 'node_sheets.dart';
 
-/// First screen: pick a saved blumi gateway, add a new one, or re-auth one
-/// whose token went stale. blugo can hold several machines, each named.
+/// First screen: an interactive grid diagram of this device plus every saved and
+/// auto-discovered blumi gateway. Tap a node to connect/edit/forget it, tap a
+/// discovered (dashed) node to sign in, or use ＋ to add one by address.
 class ConnectScreen extends StatefulWidget {
   final AppController app;
   const ConnectScreen(this.app, {super.key});
@@ -13,338 +16,111 @@ class ConnectScreen extends StatefulWidget {
 }
 
 class _ConnectScreenState extends State<ConnectScreen> {
-  final _name = TextEditingController();
-  final _host = TextEditingController();
-  final _port = TextEditingController(text: '7777');
-  final _pass = TextEditingController();
-  final _passFocus = FocusNode();
-  bool _adding = false;
+  bool _reauthOpen = false;
 
   @override
   void initState() {
     super.initState();
     widget.app.startDiscovery();
+    widget.app.addListener(_maybeReauth);
+    WidgetsBinding.instance.addPostFrameCallback((_) => _maybeReauth());
   }
 
   @override
   void dispose() {
+    widget.app.removeListener(_maybeReauth);
     widget.app.stopDiscovery();
-    _name.dispose();
-    _host.dispose();
-    _port.dispose();
-    _pass.dispose();
-    _passFocus.dispose();
     super.dispose();
   }
 
-  /// Tapping a discovered gateway prefills the add form and focuses the password.
-  void _pickDiscovered(SavedServer s) {
-    _name.text = s.name;
-    _host.text = s.host;
-    _port.text = s.port.toString();
-    setState(() => _adding = true);
-    _passFocus.requestFocus();
-  }
-
-  void _add() {
-    widget.app.addAndConnect(
-      name: _name.text,
-      host: _host.text.trim(),
-      port: int.tryParse(_port.text.trim()) ?? 7777,
-      password: _pass.text,
-    );
+  /// When a saved token goes stale (e.g. on auto-connect), prompt for the
+  /// password for that gateway. Guarded so we open at most one prompt.
+  void _maybeReauth() {
+    final app = widget.app;
+    if (!mounted || _reauthOpen) return;
+    final srv = app.reauthFor;
+    if (srv == null || app.connected) return;
+    _reauthOpen = true;
+    showReauthSheet(context, app, srv).whenComplete(() {
+      _reauthOpen = false;
+      // If the user dismissed without connecting, clear the pending re-auth so
+      // the diagram returns to its normal state.
+      if (widget.app.reauthFor != null && !widget.app.connected) {
+        widget.app.cancelReauth();
+      }
+    });
   }
 
   @override
   Widget build(BuildContext context) {
     final app = widget.app;
     final cs = Theme.of(context).colorScheme;
+    final t = BlumiTokens.of(context);
+
     return Scaffold(
-      body: Center(
-        child: ConstrainedBox(
-          constraints: const BoxConstraints(maxWidth: 460),
-          child: ListenableBuilder(
-            listenable: app,
-            builder: (context, _) {
-              final reauth = app.reauthFor;
-              final showForm = app.servers.isEmpty || _adding;
-              return ListView(
-                shrinkWrap: true,
-                padding: const EdgeInsets.all(24),
+      floatingActionButton: ListenableBuilder(
+        listenable: app,
+        builder: (context, _) => FloatingActionButton.extended(
+          onPressed: app.connecting ? null : () => showAddNodeSheet(context, app),
+          backgroundColor: cs.primary,
+          foregroundColor: Colors.black,
+          icon: const Icon(Icons.add),
+          label: const Text('Add'),
+        ),
+      ),
+      body: SafeArea(
+        child: Column(
+          children: [
+            Padding(
+              padding: const EdgeInsets.fromLTRB(20, 16, 20, 2),
+              child: Row(
                 children: [
-                  Center(
-                    child: Image.asset('assets/icon/blugo_mark.png',
-                        width: 88,
-                        height: 88,
-                        filterQuality: FilterQuality.medium),
-                  ),
-                  const SizedBox(height: 10),
-                  Center(
-                    child: Text('blugo',
-                        style: TextStyle(
-                            fontSize: 42,
-                            fontWeight: FontWeight.bold,
-                            color: cs.primary)),
-                  ),
-                  const SizedBox(height: 4),
-                  Center(
-                    child: Text(
-                      reauth != null
-                          ? 'sign in to ${reauth.name}'
-                          : 'connect to your blumi gateways',
-                      style:
-                          TextStyle(color: cs.onSurface.withValues(alpha: 0.6)),
+                  Hero(
+                    tag: heroLogoTag,
+                    child: Image.asset(
+                      'assets/icon/blugo_mark.png',
+                      width: 46,
+                      height: 46,
+                      filterQuality: FilterQuality.medium,
                     ),
                   ),
-                  const SizedBox(height: 24),
-                  if (reauth != null)
-                    ..._reauthBody(app, reauth, cs)
-                  else ...[
-                    if (app.servers.isNotEmpty) ..._serverList(app, cs),
-                    if (app.discovered.isNotEmpty) ..._discoveredList(app, cs),
-                    if (showForm)
-                      ..._addForm(app, cs)
-                    else
-                      Padding(
-                        padding: const EdgeInsets.only(top: 8),
-                        child: OutlinedButton.icon(
-                          onPressed: () => setState(() => _adding = true),
-                          icon: const Icon(Icons.add),
-                          label: const Text('Add another gateway'),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        GradientText(
+                          'blugo',
+                          style: const TextStyle(
+                            fontSize: 30,
+                            fontWeight: FontWeight.w800,
+                            height: 1.0,
+                          ),
                         ),
-                      ),
-                  ],
-                  if (app.status.isNotEmpty && !app.connecting && reauth == null)
-                    Padding(
-                      padding: const EdgeInsets.only(top: 14),
-                      child: Text(app.status,
-                          style: TextStyle(color: cs.error),
-                          textAlign: TextAlign.center),
+                        const SizedBox(height: 2),
+                        ListenableBuilder(
+                          listenable: app,
+                          builder: (context, _) => Text(
+                            app.connecting && app.status.isNotEmpty
+                                ? app.status
+                                : 'your blumi grid',
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style:
+                                TextStyle(color: t.textMuted, fontSize: 12.5),
+                          ),
+                        ),
+                      ],
                     ),
-                  const SizedBox(height: 22),
-                  Text(
-                    'On each Mac:  blumi serve pair --password <pw>\n'
-                    'then  blumi serve install',
-                    style: TextStyle(
-                        fontFamily: 'monospace',
-                        fontSize: 12,
-                        color: cs.onSurface.withValues(alpha: 0.45)),
-                    textAlign: TextAlign.center,
                   ),
                 ],
-              );
-            },
-          ),
+              ),
+            ),
+            Expanded(child: GridMap(app)),
+          ],
         ),
       ),
     );
   }
-
-  // --- saved gateways list ---------------------------------------------------
-
-  List<Widget> _serverList(AppController app, ColorScheme cs) => [
-        Align(
-          alignment: Alignment.centerLeft,
-          child: Text('saved gateways',
-              style: TextStyle(
-                  fontWeight: FontWeight.bold,
-                  color: cs.onSurface.withValues(alpha: 0.7),
-                  fontSize: 13)),
-        ),
-        const SizedBox(height: 6),
-        for (final s in app.servers)
-          Card(
-            margin: const EdgeInsets.symmetric(vertical: 4),
-            child: ListTile(
-              leading: Icon(Icons.dns_outlined, color: cs.primary),
-              title: Text(s.name,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: const TextStyle(fontWeight: FontWeight.w600)),
-              subtitle: Text(s.endpoint, style: const TextStyle(fontSize: 12)),
-              trailing: IconButton(
-                tooltip: 'Forget',
-                icon: const Icon(Icons.delete_outline),
-                onPressed: app.connecting ? null : () => _confirmForget(app, s),
-              ),
-              onTap: app.connecting ? null : () => app.connectToSaved(s),
-            ),
-          ),
-        const SizedBox(height: 8),
-      ];
-
-  Future<void> _confirmForget(AppController app, SavedServer s) async {
-    final ok = await showDialog<bool>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        title: Text('Forget ${s.name}?'),
-        content: Text('Removes ${s.endpoint} and its saved token.'),
-        actions: [
-          TextButton(
-              onPressed: () => Navigator.pop(ctx, false),
-              child: const Text('Cancel')),
-          FilledButton(
-              onPressed: () => Navigator.pop(ctx, true),
-              child: const Text('Forget')),
-        ],
-      ),
-    );
-    if (ok == true) app.removeServer(s.id);
-  }
-
-  // --- discovered on the LAN -------------------------------------------------
-
-  List<Widget> _discoveredList(AppController app, ColorScheme cs) => [
-        Row(children: [
-          Icon(Icons.wifi_tethering, size: 16, color: cs.secondary),
-          const SizedBox(width: 6),
-          Text('on your network',
-              style: TextStyle(
-                  fontWeight: FontWeight.bold,
-                  color: cs.onSurface.withValues(alpha: 0.7),
-                  fontSize: 13)),
-        ]),
-        const SizedBox(height: 6),
-        for (final s in app.discovered)
-          Card(
-            margin: const EdgeInsets.symmetric(vertical: 4),
-            color: cs.secondaryContainer.withValues(alpha: 0.25),
-            child: ListTile(
-              leading: Icon(Icons.wifi_tethering, color: cs.secondary),
-              title: Text(s.name,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: const TextStyle(fontWeight: FontWeight.w600)),
-              subtitle: Text(s.endpoint, style: const TextStyle(fontSize: 12)),
-              trailing: const Icon(Icons.add),
-              onTap: app.connecting ? null : () => _pickDiscovered(s),
-            ),
-          ),
-        const SizedBox(height: 8),
-      ];
-
-  // --- add a gateway ---------------------------------------------------------
-
-  List<Widget> _addForm(AppController app, ColorScheme cs) => [
-        if (app.servers.isNotEmpty)
-          Align(
-            alignment: Alignment.centerLeft,
-            child: Text('add a gateway',
-                style: TextStyle(
-                    fontWeight: FontWeight.bold,
-                    color: cs.onSurface.withValues(alpha: 0.7),
-                    fontSize: 13)),
-          ),
-        const SizedBox(height: 6),
-        TextField(
-          controller: _name,
-          decoration: const InputDecoration(
-            labelText: 'Name (optional)',
-            hintText: 'defaults to the machine name',
-            border: OutlineInputBorder(),
-          ),
-        ),
-        const SizedBox(height: 12),
-        TextField(
-          controller: _host,
-          autocorrect: false,
-          decoration: const InputDecoration(
-            labelText: 'Host (Mac LAN IP)',
-            hintText: '10.0.0.61',
-            border: OutlineInputBorder(),
-          ),
-        ),
-        const SizedBox(height: 12),
-        TextField(
-          controller: _port,
-          keyboardType: TextInputType.number,
-          decoration: const InputDecoration(
-              labelText: 'Port', border: OutlineInputBorder()),
-        ),
-        const SizedBox(height: 12),
-        TextField(
-          controller: _pass,
-          focusNode: _passFocus,
-          obscureText: true,
-          decoration: const InputDecoration(
-              labelText: 'Password', border: OutlineInputBorder()),
-          onSubmitted: (_) => _add(),
-        ),
-        const SizedBox(height: 16),
-        Row(
-          children: [
-            Expanded(
-              child: FilledButton(
-                onPressed: app.connecting ? null : _add,
-                child: Padding(
-                  padding: const EdgeInsets.symmetric(vertical: 6),
-                  child: Text(app.connecting ? 'Connecting…' : 'Connect'),
-                ),
-              ),
-            ),
-            if (app.servers.isNotEmpty) ...[
-              const SizedBox(width: 8),
-              TextButton(
-                onPressed: app.connecting
-                    ? null
-                    : () => setState(() => _adding = false),
-                child: const Text('Cancel'),
-              ),
-            ],
-          ],
-        ),
-      ];
-
-  // --- re-auth a stale gateway ----------------------------------------------
-
-  List<Widget> _reauthBody(AppController app, SavedServer s, ColorScheme cs) => [
-        Card(
-          margin: const EdgeInsets.only(bottom: 12),
-          child: ListTile(
-            leading: Icon(Icons.dns_outlined, color: cs.primary),
-            title: Text(s.name,
-                style: const TextStyle(fontWeight: FontWeight.w600)),
-            subtitle: Text(s.endpoint, style: const TextStyle(fontSize: 12)),
-          ),
-        ),
-        TextField(
-          controller: _pass,
-          obscureText: true,
-          autofocus: true,
-          decoration: const InputDecoration(
-              labelText: 'Password', border: OutlineInputBorder()),
-          onSubmitted: (_) => app.reauthenticate(_pass.text),
-        ),
-        if (app.status.isNotEmpty && !app.connecting)
-          Padding(
-            padding: const EdgeInsets.only(top: 12),
-            child: Text(app.status,
-                style: TextStyle(color: cs.error), textAlign: TextAlign.center),
-          ),
-        const SizedBox(height: 16),
-        Row(
-          children: [
-            Expanded(
-              child: FilledButton(
-                onPressed:
-                    app.connecting ? null : () => app.reauthenticate(_pass.text),
-                child: Padding(
-                  padding: const EdgeInsets.symmetric(vertical: 6),
-                  child: Text(app.connecting ? 'Connecting…' : 'Connect'),
-                ),
-              ),
-            ),
-            const SizedBox(width: 8),
-            TextButton(
-              onPressed: app.connecting
-                  ? null
-                  : () {
-                      _pass.clear();
-                      app.cancelReauth();
-                    },
-              child: const Text('Back'),
-            ),
-          ],
-        ),
-      ];
 }
