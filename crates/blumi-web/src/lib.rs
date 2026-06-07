@@ -350,6 +350,17 @@ pub trait Management: Send + Sync {
         serde_json::json!({ "enabled": false, "recent": [], "reports": [] })
     }
 
+    /// Read-only git views for the web git panel → `{ ok, text }`. Default: empty.
+    async fn git_status(&self) -> serde_json::Value {
+        serde_json::json!({ "ok": false, "text": "" })
+    }
+    async fn git_diff(&self) -> serde_json::Value {
+        serde_json::json!({ "ok": false, "text": "" })
+    }
+    async fn git_log(&self) -> serde_json::Value {
+        serde_json::json!({ "ok": false, "text": "" })
+    }
+
     // --- Self-management ---
 
     /// The whole settings.json as JSON, with every secret redacted (for the
@@ -527,6 +538,9 @@ pub fn router(state: AppState) -> Router {
         .route("/api/heal", get(api::heal_status))
         .route("/api/route", get(api::route_status))
         .route("/api/always-on", get(api::always_on_status))
+        .route("/api/git/status", get(api::git_status))
+        .route("/api/git/diff", get(api::git_diff))
+        .route("/api/git/log", get(api::git_log))
         .route("/api/memory/graph", post(api::memory_graph))
         .route("/api/memory/list", post(api::memory_list))
         .route("/api/memory/pin", post(api::memory_pin))

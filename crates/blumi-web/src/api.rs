@@ -886,6 +886,17 @@ pub async fn always_on_status(State(state): State<AppState>) -> Json<Value> {
     Json(state.mgmt().always_on_status().await)
 }
 
+/// GET /api/git/{status,diff,log} → read-only git views for the web git panel.
+pub async fn git_status(State(state): State<AppState>) -> Json<Value> {
+    Json(state.mgmt().git_status().await)
+}
+pub async fn git_diff(State(state): State<AppState>) -> Json<Value> {
+    Json(state.mgmt().git_diff().await)
+}
+pub async fn git_log(State(state): State<AppState>) -> Json<Value> {
+    Json(state.mgmt().git_log().await)
+}
+
 pub async fn memory_graph(
     State(state): State<AppState>,
     Json(b): Json<KbSearchBody>,

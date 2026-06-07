@@ -10,6 +10,13 @@ The Rust workspace and the blugo app share the version number.
 
 ### Added
 
+- **Workspace create/clone wizard (TUI)** — `/new-workspace <path>` creates a
+  folder (+ `git init`) and opens it; `/clone-workspace <url> [dir]` git-clones a
+  repo and opens it. Both append to the workspace pane (extends `/open-workspace`).
+- **Web git panel (read-only)** — `GET /api/git/{status,diff,log}` expose the
+  workspace's git status / diff --stat / recent log (behind the gateway password)
+  so the browser/phone can review what the agent changed. (Staging/commit + the
+  React panel are follow-ups.)
 - **Smart (cost-aware) model routing** (PilotDeck-inspired) — per turn, a fast
   heuristic (and, on ambiguous turns, a local "judge" model) picks a difficulty
   **tier** and routes to a light vs flagship model; delegated **sub-agents default

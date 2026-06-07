@@ -459,6 +459,24 @@ impl Management for WebManagement {
         blumi_core::active_router_status().unwrap_or_else(|| serde_json::json!({ "mode": "off" }))
     }
 
+    async fn git_status(&self) -> serde_json::Value {
+        git_ro(
+            &self.config.paths.working_dir,
+            &["status", "--porcelain=v1", "-b"],
+        )
+        .await
+    }
+    async fn git_diff(&self) -> serde_json::Value {
+        git_ro(&self.config.paths.working_dir, &["diff", "--stat"]).await
+    }
+    async fn git_log(&self) -> serde_json::Value {
+        git_ro(
+            &self.config.paths.working_dir,
+            &["log", "--oneline", "-n", "40"],
+        )
+        .await
+    }
+
     async fn always_on_status(&self) -> serde_json::Value {
         let cfg = &self.config.always_on;
         let recent: Vec<String> = match &self.mem {
@@ -946,6 +964,34 @@ fn merge_settings_json(
     }
     std::fs::rename(&tmp, path)?;
     Ok(())
+}
+
+/// Run a read-only git command in `dir`; returns `{ ok, text }` (stderr on
+/// failure), char-safe-capped so a huge diff can't blow up the response. Used by
+/// the web git panel (`/api/git/*`).
+async fn git_ro(dir: &std::path::Path, args: &[&str]) -> serde_json::Value {
+    let dir = dir.to_path_buf();
+    let args: Vec<String> = args.iter().map(|s| s.to_string()).collect();
+    let out = tokio::task::spawn_blocking(move || {
+        std::process::Command::new("git")
+            .arg("-C")
+            .arg(&dir)
+            .args(&args)
+            .output()
+    })
+    .await;
+    match out {
+        Ok(Ok(o)) => {
+            let raw = if o.status.success() {
+                String::from_utf8_lossy(&o.stdout)
+            } else {
+                String::from_utf8_lossy(&o.stderr)
+            };
+            let text: String = raw.chars().take(64_000).collect();
+            serde_json::json!({ "ok": o.status.success(), "text": text })
+        }
+        _ => serde_json::json!({ "ok": false, "text": "git unavailable" }),
+    }
 }
 
 pub async fn run(

@@ -97,6 +97,14 @@ pub const COMMANDS: &[CommandDef] = &[
         desc: "browse folders to open a workspace (↑↓ move · → enter · space/↵ open)",
     },
     CommandDef {
+        name: "/new-workspace",
+        desc: "create a folder (+ git init) and open it: /new-workspace <path>",
+    },
+    CommandDef {
+        name: "/clone-workspace",
+        desc: "git clone a repo and open it: /clone-workspace <url> [dir]",
+    },
+    CommandDef {
         name: "/export",
         desc: "save transcript to a file",
     },
@@ -211,6 +219,44 @@ pub(crate) async fn toggle_yolo(model: &mut Model, session: &SessionHandle) {
         "yolo off — tools will ask for approval".into()
     }));
     model.mark_dirty();
+}
+
+/// Run a git subcommand off the async runtime; returns its `Output` or an error.
+async fn git_run(args: Vec<String>) -> Result<std::process::Output, String> {
+    tokio::task::spawn_blocking(move || std::process::Command::new("git").args(&args).output())
+        .await
+        .map_err(|e| e.to_string())?
+        .map_err(|e| e.to_string())
+}
+
+/// Resolve a workspace path: absolute as-is, `~/` → `$HOME`, else relative to cwd.
+fn resolve_ws_path(p: &str) -> std::path::PathBuf {
+    let expanded = match p.strip_prefix("~/") {
+        Some(rest) => std::env::var_os("HOME")
+            .map(|h| std::path::PathBuf::from(h).join(rest))
+            .unwrap_or_else(|| std::path::PathBuf::from(p)),
+        None => std::path::PathBuf::from(p),
+    };
+    if expanded.is_absolute() {
+        expanded
+    } else {
+        std::env::current_dir().unwrap_or_default().join(expanded)
+    }
+}
+
+/// Derive a directory name from a git URL (last path segment minus `.git`).
+fn repo_name_from_url(url: &str) -> String {
+    let name = url
+        .trim_end_matches('/')
+        .rsplit(['/', ':'])
+        .next()
+        .unwrap_or("repo")
+        .trim_end_matches(".git");
+    if name.is_empty() {
+        "repo".to_string()
+    } else {
+        name.to_string()
+    }
 }
 
 /// Format the `/route` overlay text from a `Router::status` value.
@@ -401,6 +447,69 @@ pub async fn run(model: &mut Model, session: &SessionHandle, line: &str) {
         }
         "/discoveries" => model.open_discoveries(),
         "/open-workspace" => model.open_fs_browser(),
+        "/new-workspace" => {
+            if arg.is_empty() {
+                model
+                    .entries
+                    .push(Entry::Notice("usage: /new-workspace <path>".into()));
+            } else {
+                let target = resolve_ws_path(&arg);
+                match std::fs::create_dir_all(&target) {
+                    Ok(()) => {
+                        let p = target.display().to_string();
+                        // Best-effort git init so it's a real project workspace.
+                        let _ = git_run(vec!["init".into(), p.clone()]).await;
+                        model.open_workspace_path(&p);
+                        model
+                            .entries
+                            .push(Entry::Notice(format!("✿ new workspace: {p}")));
+                    }
+                    Err(e) => model.entries.push(Entry::Notice(format!(
+                        "couldn't create {}: {e}",
+                        target.display()
+                    ))),
+                }
+            }
+        }
+        "/clone-workspace" => {
+            let mut it = arg.split_whitespace();
+            let url = it.next().unwrap_or("").to_string();
+            if url.is_empty() {
+                model.entries.push(Entry::Notice(
+                    "usage: /clone-workspace <git-url> [dir]".into(),
+                ));
+            } else {
+                let dir = it
+                    .next()
+                    .map(|s| s.to_string())
+                    .unwrap_or_else(|| repo_name_from_url(&url));
+                let target = resolve_ws_path(&dir);
+                model.entries.push(Entry::Notice(format!(
+                    "cloning {url} → {} …",
+                    target.display()
+                )));
+                model.mark_dirty();
+                let p = target.display().to_string();
+                match git_run(vec!["clone".into(), url.clone(), p.clone()]).await {
+                    Ok(out) if out.status.success() => {
+                        model.open_workspace_path(&p);
+                        model
+                            .entries
+                            .push(Entry::Notice(format!("✿ cloned workspace: {p}")));
+                    }
+                    Ok(out) => {
+                        let err = String::from_utf8_lossy(&out.stderr);
+                        let last = err.lines().last().unwrap_or("git error");
+                        model
+                            .entries
+                            .push(Entry::Notice(format!("clone failed: {last}")));
+                    }
+                    Err(e) => model
+                        .entries
+                        .push(Entry::Notice(format!("clone failed: {e}"))),
+                }
+            }
+        }
         "/loop" => {
             if arg.eq_ignore_ascii_case("review") {
                 model.loop_review = !model.loop_review;
@@ -821,5 +930,13 @@ mod tests {
         assert!(!m.iter().any(|c| c.name == "/model")); // /mo, not /me
                                                         // a full slash shows everything
         assert_eq!(matching("/").len(), COMMANDS.len());
+    }
+
+    #[test]
+    fn repo_name_from_url_variants() {
+        assert_eq!(repo_name_from_url("https://github.com/foo/bar.git"), "bar");
+        assert_eq!(repo_name_from_url("git@github.com:foo/baz.git"), "baz");
+        assert_eq!(repo_name_from_url("https://example.com/x/"), "x");
+        assert_eq!(repo_name_from_url(""), "repo");
     }
 }
