@@ -25,10 +25,18 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - name: Format
         run: cargo fmt --all -- --check
+      # NOTE: do NOT use `--all-features` on Linux. It force-enables the
+      # platform-specific embedder features — `gpu-coreml` (an Apple-only ONNX
+      # Runtime symbol, `OrtSessionOptionsAppendExecutionProvider_CoreML`) and
+      # `gpu-cuda` (needs the CUDA toolkit) — neither of which links here. Those
+      # are target-gated on in the `blumi` crate (macOS-aarch64) and opt-in
+      # elsewhere; CI lints/tests the default build + the CPU bundled embedder.
       - name: Clippy
-        run: cargo clippy --all-targets --all-features -- -D warnings
+        run: cargo clippy --workspace --all-targets -- -D warnings
       - name: Test
-        run: cargo test --all-features
+        run: cargo test --workspace
+      - name: Build (bundled CPU embeddings — the Linux-safe optional feature)
+        run: cargo build -p blumi-llm --features local-embeddings
 
   flutter:
     name: blugo (analyze + test)
