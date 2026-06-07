@@ -43,7 +43,7 @@ Flutter **phone app** that's a 1:1 mirror of the TUI, optimized for foldables.
 
 |  Terminal UI (`blumi tui`) | Phone app (blugo) |
 |---|---|
-| <img src="docs/screenshots/tui-landing.png" alt="blumi TUI" width="460"> | <img src="docs/screenshots/app-chat.png" alt="blugo chat" width="230"> |
+| <img src="docs/screenshots/tui-landing.png" alt="blumi TUI" width="460"> | <img src="docs/screenshots/app-grid.png" alt="blugo welcome — an interactive grid network diagram of your blumi gateways" width="230"> |
 
 <p align="center">
   📖 <strong>Docs</strong> &nbsp;·&nbsp;
@@ -413,16 +413,22 @@ Contributing notes: **[Development](https://github.com/ankurCES/blumi-cli/wiki/D
 over your LAN (REST + SSE, token auth). Built for the Pixel 9 Pro Fold — single-pane in portrait,
 multi-pane when unfolded.
 
-| Chat · markdown & code | Approvals · thinking | Control center |
+| Welcome · interactive grid | Chat · streaming | Control center |
 |---|---|---|
-| <img src="docs/screenshots/app-chat.png" alt="blugo chat" width="240"> | <img src="docs/screenshots/app-approval.png" alt="blugo approval card" width="240"> | <img src="docs/screenshots/app-control.png" alt="blugo control center" width="240"> |
+| <img src="docs/screenshots/app-grid.png" alt="blugo welcome — a radial network diagram of this device plus saved and discovered gateways" width="240"> | <img src="docs/screenshots/app-chat.png" alt="blugo streaming chat with accent-bordered bubbles" width="240"> | <img src="docs/screenshots/app-control.png" alt="blugo control center with icon tabs and a gradient header" width="240"> |
+
+The **welcome screen is an interactive grid diagram**: this device sits at the hub, your saved
+gateways orbit it, and auto-discovered ones appear as **dashed** nodes — tap any node to
+connect / edit / forget, tap a dashed one to sign in (password only; the rest is auto-filled), or
+＋ to add by IP. The whole app rides one **design system** (Living-Rose tokens + a reusable widget
+kit) for a consistent, animated look across every screen.
 
 **Highlights:** streaming chat with markdown + syntax-highlighted code, tool cards, approval /
-clarify / plan cards, the animated thinking mascot, sessions, a control center
-(model / persona / theme / YOLO / voice / tasks / **grid** / usage / skills / memory), a **Grid tab**
-that delegates a task across your LAN grid and shows each machine's result (works on any model),
-LAN auto-discovery of gateways, multiple saved instances, and voice (ElevenLabs / OpenAI TTS +
-Whisper STT).
+clarify / plan cards, the animated thinking mascot, a `/` command palette, sessions, a control
+center (model / persona / theme / YOLO / voice / tasks / **grid** / usage / skills / memory),
+a **Grid tab** that delegates a task across your LAN grid and shows each machine's result (works on
+any model), LAN auto-discovery of gateways, multiple saved instances, and voice (ElevenLabs /
+OpenAI TTS + Whisper STT).
 
 ## Connect it
 

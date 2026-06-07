@@ -9,6 +9,42 @@ tracks its own Flutter version (`x.y.z+build`).
 
 ## [Unreleased]
 
+### Changed
+
+- **blugo — full UI/UX redesign.** The phone app is rebuilt on a proper design
+  system and gets a brand-new welcome experience.
+  - **Welcome = an interactive grid network diagram.** Instead of a list+form,
+    the connect screen now draws a radial hub-and-spoke map (native
+    CustomPainter): **this device** at the hub, saved gateways orbiting it on
+    gradient spokes, and auto-discovered (mDNS) gateways as **dashed/dotted**
+    nodes with a ＋ badge. Each node carries a canvas-drawn Living-Rose flower
+    glyph; a radar sweep animates while scanning. **Tap a saved node** →
+    Connect · Edit · Delete-on-the-side; **tap a discovered node** → a connect
+    sheet with the password auto-focused and name/host/port pre-filled from
+    discovery; **＋** adds a gateway by IP. New `AppController.editServer`
+    supports renaming and re-pointing a saved gateway.
+  - **Design-system foundation.** A new `lib/ui/kit/` — `BlumiTokens`
+    (`ThemeExtension`: the Living-Rose ramp, status colors, AA-safe muted text,
+    radii/spacing, brand gradient), a shared motion language (durations,
+    `PressableScale`, staggered entrances, cross-fades, reduced-motion aware),
+    and a reusable widget vocabulary (cards, section headers, status dots/pills,
+    badges, gradient buttons, empty states, sheets/dialogs). `theme.dart` now
+    attaches the tokens and full **component themes** (cards, inputs with a focus
+    ring, buttons, chips, tabs, dialogs, sheets, snackbars, …) to all six
+    palettes.
+  - **Every screen restyled.** Home gets a gradient wordmark header, a
+    `ListView.builder` transcript with `RepaintBoundary`s, accent-bordered chat
+    bubbles, kit tool/approval/clarify/plan cards, an animated context meter, and
+    a themed composer; connect↔home cross-fades. The control center gets a
+    gradient header, **leading-icon tabs grouped into Agent · Work · Grid ·
+    Knowledge**, uppercase section headers, and de-duplicated grid metrics
+    (removed from Settings — the Grid tab owns them). The command palette moves
+    onto the shared bottom-sheet with pressable rows; markdown code/inline blocks
+    are token-ized (atom-one-dark kept for syntax).
+  - Accessibility & perf: `Semantics` on icon nodes, AA-contrast muted text,
+    reduced-motion short-circuits, `RepaintBoundary` on animated leaves.
+  - Verified on the Pixel 9 Pro Fold; `blugo` build bumped to `1.0.0+3`.
+
 ## [0.3.0] — 2026-06-07
 
 ### Added
