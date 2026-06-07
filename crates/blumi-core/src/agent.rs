@@ -75,6 +75,9 @@ pub struct AgentTurnRunner {
     /// and stream from the matching tier's client. `None` = no routing (today's
     /// behaviour — the turn always runs on the active model).
     router: Option<Arc<Router>>,
+    /// UserPromptSubmit lifecycle hooks: shell commands run on the latest prompt
+    /// whose stdout is injected as background context. Empty = none (default).
+    prompt_hooks: Vec<blumi_config::HookDef>,
 }
 
 impl AgentTurnRunner {
@@ -111,6 +114,7 @@ impl AgentTurnRunner {
             recall_k: 5,
             heal: None,
             router: None,
+            prompt_hooks: Vec::new(),
         }
     }
 
@@ -152,6 +156,13 @@ impl AgentTurnRunner {
     /// the router's mode is `Off`.
     pub fn with_router(mut self, router: Arc<Router>) -> Self {
         self.router = Some(router);
+        self
+    }
+
+    /// Enable UserPromptSubmit hooks: shell commands run on the latest prompt
+    /// whose stdout is injected as cache-safe background context. Empty = no-op.
+    pub fn with_prompt_hooks(mut self, hooks: Vec<blumi_config::HookDef>) -> Self {
+        self.prompt_hooks = hooks;
         self
     }
 
@@ -276,6 +287,28 @@ impl TurnRunner for AgentTurnRunner {
             None
         };
 
+        // UserPromptSubmit hooks: run user-configured commands on the latest
+        // prompt; inject their stdout as background context (cache-safe trailing
+        // message). Empty hooks list = skipped.
+        let hook_block: Option<String> = if self.prompt_hooks.is_empty() {
+            None
+        } else {
+            let prompt = {
+                let st = state.lock().await;
+                st.messages
+                    .iter()
+                    .rev()
+                    .find(|m| m.role == Role::User)
+                    .map(|m| m.text())
+                    .unwrap_or_default()
+            };
+            if prompt.trim().is_empty() {
+                None
+            } else {
+                crate::hooks::run_prompt_hooks(&self.prompt_hooks, &prompt, &self.working_dir).await
+            }
+        };
+
         // Cost-aware routing setup (no-op unless a router is attached + not Off).
         // The latest user message drives the difficulty signals; the tier is
         // decided once and held across the turn's iterations (escalate-only).
@@ -314,6 +347,9 @@ impl TurnRunner for AgentTurnRunner {
                 // Trailing background-context message (never the system prefix).
                 if let Some(mb) = &memory_block {
                     msgs.push(Message::user(mb.clone()));
+                }
+                if let Some(hb) = &hook_block {
+                    msgs.push(Message::user(hb.clone()));
                 }
                 (msgs, st.model.clone())
             };

@@ -838,6 +838,33 @@ pub fn default_mcp_catalog() -> Vec<McpCatalogEntry> {
     ]
 }
 
+/// One lifecycle hook: a shell command, optionally gated by a `matcher` (for
+/// tool events). The command runs in the workspace with the triggering payload
+/// (e.g. the user's prompt) piped to its stdin.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct HookDef {
+    /// Shell command (`sh -c <command>`). Empty = ignored.
+    pub command: String,
+    /// For tool events, only fire when the tool name contains this (empty = any).
+    pub matcher: String,
+    /// Seconds before the hook is abandoned (0 = a sane default).
+    pub timeout_secs: u64,
+}
+
+/// Lifecycle hooks (Claude-Code-style extension points). v1 implements
+/// `user_prompt_submit` — each command's stdout is injected as background context
+/// for the turn (cache-safe trailing message). `pre_tool_use` is reserved: the
+/// tool-blocking path lands in a later, security-reviewed pass.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct HooksConfig {
+    /// Run when the user submits a prompt; stdout becomes background context.
+    pub user_prompt_submit: Vec<HookDef>,
+    /// Reserved — run before a tool call (can block). Not yet wired.
+    pub pre_tool_use: Vec<HookDef>,
+}
+
 /// The full blumi configuration.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
@@ -897,6 +924,9 @@ pub struct BlumiConfig {
     /// Always-on proactive discovery (off by default).
     #[serde(default)]
     pub always_on: AlwaysOnConfig,
+    /// Lifecycle hooks (UserPromptSubmit context injection; off by default).
+    #[serde(default)]
+    pub hooks: HooksConfig,
     /// Native-lite code knowledge base (code_search / code_retrieve + CLI).
     #[serde(default)]
     pub knowledge: KnowledgeConfig,
@@ -936,6 +966,7 @@ impl Default for BlumiConfig {
             memory: MemoryConfig::default(),
             heal: HealConfig::default(),
             always_on: AlwaysOnConfig::default(),
+            hooks: HooksConfig::default(),
             knowledge: KnowledgeConfig::default(),
             workspaces: WorkspaceConfig::default(),
             git: GitConfig::default(),

@@ -10,6 +10,11 @@ The Rust workspace and the blugo app share the version number.
 
 ### Added
 
+- **Lifecycle hooks — `UserPromptSubmit`** (Claude-Code-style) — `hooks.user_prompt_submit`
+  runs shell commands when you submit a prompt; each command's stdout is injected
+  as cache-safe background context for the turn (the prompt is piped to stdin, cwd
+  = workspace, per-hook timeout). **Off by default.** `pre_tool_use` (the
+  tool-blocking path) is reserved in config for a later, security-reviewed pass.
 - **Web Control Center panels** — the browser/phone Control Center gains four
   tabs over the new backends: **routing** (tiers + `$ saved`), **entries**
   (white-box memory: pin / edit / delete), **discovery** (always-on status +

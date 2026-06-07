@@ -502,7 +502,8 @@ pub async fn build_session(
     .with_personas(personas, &active)
     .with_auto_continue(config.llm.max_auto_continue)
     .with_auto_continue_tokens(config.llm.max_auto_continue_tokens)
-    .with_router(router.clone());
+    .with_router(router.clone())
+    .with_prompt_hooks(config.hooks.user_prompt_submit.clone());
     // Durable execution: checkpoint the turn after each tool step (shares the
     // history DB) so a crash/restart resumes from the last step.
     if let Some(store) = &history_store {
