@@ -10,10 +10,26 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/ankurCES/blumi-cli/stargazers"><img src="https://img.shields.io/github/stars/ankurCES/blumi-cli?style=flat&logo=github&label=star&color=7c5cff" alt="Star blumi on GitHub"></a>
+  <img src="https://img.shields.io/badge/version-0.3.0-FF4F87?style=for-the-badge" alt="version 0.3.0">
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-Apache--2.0-6B50FF?style=for-the-badge" alt="License: Apache-2.0"></a>
+  <img src="https://img.shields.io/badge/local--first-%E2%9C%93-68FFD6?style=for-the-badge&labelColor=222" alt="local-first">
+  <img src="https://img.shields.io/badge/BYOK-any%20provider-9B86FF?style=for-the-badge" alt="bring your own key">
+</p>
+
+<p align="center">
+  <a href="https://github.com/ankurCES/blumi-cli/stargazers"><img src="https://img.shields.io/github/stars/ankurCES/blumi-cli?style=flat-square&logo=github&label=star&color=7c5cff" alt="Star blumi on GitHub"></a>
   <a href="https://github.com/ankurCES/blumi-cli/actions/workflows/ci.yml"><img src="https://github.com/ankurCES/blumi-cli/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
-  <a href="https://github.com/ankurCES/blumi-cli/wiki"><img src="https://img.shields.io/badge/docs-wiki-7c5cff" alt="Wiki"></a>
-  <a href="LICENSE"><img src="https://img.shields.io/badge/license-Apache--2.0-blue" alt="License: Apache-2.0"></a>
+  <a href="https://github.com/ankurCES/blumi-cli/wiki"><img src="https://img.shields.io/badge/docs-wiki-7c5cff?style=flat-square" alt="Wiki"></a>
+  <img src="https://img.shields.io/badge/Rust-CE412B?style=flat-square&logo=rust&logoColor=white" alt="Rust">
+  <img src="https://img.shields.io/badge/Flutter-02569B?style=flat-square&logo=flutter&logoColor=white" alt="Flutter">
+  <img src="https://img.shields.io/badge/SQLite-003B57?style=flat-square&logo=sqlite&logoColor=white" alt="SQLite">
+  <img src="https://img.shields.io/badge/macOS-000?style=flat-square&logo=apple&logoColor=white" alt="macOS">
+  <img src="https://img.shields.io/badge/Linux-FCC624?style=flat-square&logo=linux&logoColor=black" alt="Linux">
+  <img src="https://img.shields.io/badge/Android-3DDC84?style=flat-square&logo=android&logoColor=white" alt="Android">
+</p>
+
+<p align="center">
+  🌸&nbsp; <strong>rose → lavender → violet → cyan</strong> — the Living Rose palette across every surface &nbsp;🩵
 </p>
 
 <p align="center">
@@ -29,9 +45,21 @@ Flutter **phone app** that's a 1:1 mirror of the TUI, optimized for foldables.
 |---|---|
 | <img src="docs/screenshots/tui-landing.png" alt="blumi TUI" width="460"> | <img src="docs/screenshots/app-chat.png" alt="blugo chat" width="230"> |
 
-> 📖 **Full setup & help lives in the [Wiki](https://github.com/ankurCES/blumi-cli/wiki)** —
-> installation, configuration, the always-on gateway, the mobile app, the distributed grid,
-> voice, self-management, and troubleshooting, each with step-by-step guides for different setups.
+<p align="center">
+  📖 <strong>Docs</strong> &nbsp;·&nbsp;
+  <a href="https://github.com/ankurCES/blumi-cli/wiki/Installation">Install</a> ·
+  <a href="https://github.com/ankurCES/blumi-cli/wiki/Configuration">Configure</a> ·
+  <a href="https://github.com/ankurCES/blumi-cli/wiki/CLI-Usage">CLI</a> ·
+  <a href="https://github.com/ankurCES/blumi-cli/wiki/Gateway">Gateway</a> ·
+  <a href="https://github.com/ankurCES/blumi-cli/wiki/Mobile-App">Mobile</a> ·
+  <a href="https://github.com/ankurCES/blumi-cli/wiki/Grid">Grid</a> ·
+  <a href="https://github.com/ankurCES/blumi-cli/wiki/Memory-and-Knowledge">Memory</a> ·
+  <a href="https://github.com/ankurCES/blumi-cli/wiki/Voice">Voice</a> ·
+  <a href="https://github.com/ankurCES/blumi-cli/wiki/Self-Management">Self-Management</a> ·
+  <a href="https://github.com/ankurCES/blumi-cli/wiki/Troubleshooting">Troubleshooting</a>
+  <br>
+  <sub>Full setup &amp; step-by-step guides → <a href="https://github.com/ankurCES/blumi-cli/wiki">the Wiki</a></sub>
+</p>
 
 ### 🌐 One grid, every machine you own
 
