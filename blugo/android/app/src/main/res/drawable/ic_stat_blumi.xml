@@ -1,0 +1,86 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Notification status-bar small icon: an outline of the blumi flower.
+
+  Android masks the small icon down to its alpha channel and tints it (white on
+  the status bar), so this is drawn as pure-white shapes on a transparent canvas
+  — an eight-petal bloom (outlined) around a solid centre. Geometry mirrors
+  assets/icon/blugo_foreground.svg (each diagonal petal is rotated about its own
+  centre, then translated into place, matching Android's group transform order).
+-->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp"
+    android:height="24dp"
+    android:viewportWidth="160"
+    android:viewportHeight="160">
+    <group
+        android:translateX="80"
+        android:translateY="80">
+        <!-- axis petals (top / bottom / left / right) -->
+        <path
+            android:fillColor="#00000000"
+            android:strokeColor="#FFFFFFFF"
+            android:strokeWidth="10"
+            android:pathData="M-19,-36 a19,33 0 1,0 38,0 a19,33 0 1,0 -38,0 Z" />
+        <path
+            android:fillColor="#00000000"
+            android:strokeColor="#FFFFFFFF"
+            android:strokeWidth="10"
+            android:pathData="M-19,36 a19,33 0 1,0 38,0 a19,33 0 1,0 -38,0 Z" />
+        <path
+            android:fillColor="#00000000"
+            android:strokeColor="#FFFFFFFF"
+            android:strokeWidth="10"
+            android:pathData="M-69,0 a33,19 0 1,0 66,0 a33,19 0 1,0 -66,0 Z" />
+        <path
+            android:fillColor="#00000000"
+            android:strokeColor="#FFFFFFFF"
+            android:strokeWidth="10"
+            android:pathData="M3,0 a33,19 0 1,0 66,0 a33,19 0 1,0 -66,0 Z" />
+        <!-- diagonal petals (rotated about their own centre, then positioned) -->
+        <group
+            android:translateX="-26"
+            android:translateY="-26"
+            android:rotation="45">
+            <path
+                android:fillColor="#00000000"
+                android:strokeColor="#FFFFFFFF"
+                android:strokeWidth="10"
+                android:pathData="M-28,0 a28,15 0 1,0 56,0 a28,15 0 1,0 -56,0 Z" />
+        </group>
+        <group
+            android:translateX="26"
+            android:translateY="26"
+            android:rotation="45">
+            <path
+                android:fillColor="#00000000"
+                android:strokeColor="#FFFFFFFF"
+                android:strokeWidth="10"
+                android:pathData="M-28,0 a28,15 0 1,0 56,0 a28,15 0 1,0 -56,0 Z" />
+        </group>
+        <group
+            android:translateX="26"
+            android:translateY="-26"
+            android:rotation="-45">
+            <path
+                android:fillColor="#00000000"
+                android:strokeColor="#FFFFFFFF"
+                android:strokeWidth="10"
+                android:pathData="M-28,0 a28,15 0 1,0 56,0 a28,15 0 1,0 -56,0 Z" />
+        </group>
+        <group
+            android:translateX="-26"
+            android:translateY="26"
+            android:rotation="-45">
+            <path
+                android:fillColor="#00000000"
+                android:strokeColor="#FFFFFFFF"
+                android:strokeWidth="10"
+                android:pathData="M-28,0 a28,15 0 1,0 56,0 a28,15 0 1,0 -56,0 Z" />
+        </group>
+        <!-- solid centre (anchors the bloom; covers the petal convergence) -->
+        <path
+            android:fillColor="#FFFFFFFF"
+            android:pathData="M-14,0 a14,14 0 1,0 28,0 a14,14 0 1,0 -28,0 Z" />
+    </group>
+</vector>

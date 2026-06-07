@@ -31,7 +31,10 @@ class NotificationService with WidgetsBindingObserver {
   /// startup; failures leave the service a no-op.
   Future<void> init() async {
     WidgetsBinding.instance.addObserver(this);
-    const android = AndroidInitializationSettings('@mipmap/ic_launcher');
+    // Status-bar small icon: a white, alpha-only flower outline. The launcher
+    // icon would be masked to its alpha channel by Android and render as a
+    // white blob, so notifications use a purpose-built monochrome drawable.
+    const android = AndroidInitializationSettings('@drawable/ic_stat_blumi');
     const ios = DarwinInitializationSettings();
     const settings = InitializationSettings(android: android, iOS: ios);
     try {
@@ -75,6 +78,7 @@ class NotificationService with WidgetsBindingObserver {
       channelDescription: 'Notifies when a blumi run finishes.',
       importance: Importance.high,
       priority: Priority.high,
+      icon: 'ic_stat_blumi',
     );
     const details =
         NotificationDetails(android: android, iOS: DarwinNotificationDetails());
@@ -96,6 +100,7 @@ class NotificationService with WidgetsBindingObserver {
       channelDescription: 'Notifies when a blumi run finishes.',
       importance: Importance.high,
       priority: Priority.high,
+      icon: 'ic_stat_blumi',
     );
     const details =
         NotificationDetails(android: android, iOS: DarwinNotificationDetails());

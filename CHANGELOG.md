@@ -30,6 +30,12 @@ tracks its own Flutter version (`x.y.z+build`).
     **blugo:** `firebase_messaging` integration that registers its token with
     every gateway and routes a notification tap to the right dispatch thread
     (graceful no-op without Firebase config, falling back to local notifications).
+  - **Notification status-bar icon** — a purpose-built white, alpha-only
+    **flower-outline** small icon (`ic_stat_blumi`), wired into both the OS-drawn
+    FCM path (`default_notification_icon` + a rose `default_notification_color`)
+    and the local-notifications plugin. Android masks small icons to their alpha
+    channel, so the full-colour launcher icon previously collapsed to a white
+    blob; it now shows the blumi flower.
   - **Concurrent dedicated sessions (gateway)** — `/api/chat/send`,
     `/api/messages`, and `/api/chat/stream` accept an optional `session_id` so a
     client can drive a specific session **concurrently** with the active one

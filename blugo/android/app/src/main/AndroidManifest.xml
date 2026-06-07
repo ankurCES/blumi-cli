@@ -34,6 +34,17 @@
                 <category android:name="android.intent.category.LAUNCHER"/>
             </intent-filter>
         </activity>
+        <!-- FCM: the status-bar small icon for OS-drawn (backgrounded) pushes.
+             Without this, Firebase falls back to the full-colour launcher icon,
+             which Android masks to its alpha channel → a white blob. This is a
+             white, alpha-only flower outline instead. The accent tints the icon
+             chip in the notification shade. -->
+        <meta-data
+            android:name="com.google.firebase.messaging.default_notification_icon"
+            android:resource="@drawable/ic_stat_blumi" />
+        <meta-data
+            android:name="com.google.firebase.messaging.default_notification_color"
+            android:resource="@color/blumi_notification_accent" />
         <!-- Don't delete the meta-data below.
              This is used by the Flutter tool to generate GeneratedPluginRegistrant.java -->
         <meta-data
