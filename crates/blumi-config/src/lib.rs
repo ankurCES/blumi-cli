@@ -625,6 +625,10 @@ pub struct TelegramGatewayConfig {
     pub token: String,
     /// If non-empty, only these chat ids are served (an allow-list).
     pub allowed_chats: Vec<i64>,
+    /// Handle voice: transcribe inbound voice notes and speak replies (TTS).
+    /// **Off by default** — also requires global `voice.*` to be configured.
+    #[serde(default)]
+    pub voice: bool,
 }
 
 /// Discord bot settings.

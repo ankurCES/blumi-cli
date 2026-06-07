@@ -16,6 +16,9 @@ pub struct TelegramOptions {
     pub token: String,
     /// If non-empty, only these chat ids are served (an allow-list).
     pub allowed_chats: Vec<i64>,
+    /// Handle voice: transcribe inbound voice notes + speak replies (TTS). When
+    /// false, a voice note gets a short "voice off" reply and replies are text-only.
+    pub voice: bool,
 }
 
 #[derive(Deserialize)]
@@ -89,10 +92,20 @@ pub async fn run_telegram(core: Arc<GatewayCore>, opts: TelegramOptions) -> anyh
                 tracing::debug!("ignoring message from non-allowed chat {chat_id}");
                 continue;
             }
-            // Text directly, or transcribe a voice note into text.
+            // Text directly, or transcribe a voice note into text (when enabled).
             let text = if let Some(t) = msg.text {
                 t.trim().to_string()
             } else if let Some(voice) = msg.voice {
+                if !opts.voice {
+                    let _ = send_message(
+                        &client,
+                        &base,
+                        chat_id,
+                        "🔇 Voice is off — send a text message.",
+                    )
+                    .await;
+                    continue;
+                }
                 match transcribe_voice(&client, &base, &core, &voice).await {
                     Ok(t) => {
                         // Confirm what we heard so the user has context.
@@ -116,7 +129,7 @@ pub async fn run_telegram(core: Arc<GatewayCore>, opts: TelegramOptions) -> anyh
             if text.is_empty() {
                 continue;
             }
-            handle_message(&client, &base, &core, chat_id, &text).await;
+            handle_message(&client, &base, &core, chat_id, &text, opts.voice).await;
         }
     }
 }
@@ -162,6 +175,7 @@ async fn handle_message(
     core: &Arc<GatewayCore>,
     chat_id: i64,
     text: &str,
+    voice: bool,
 ) {
     let key = chat_id.to_string();
 
@@ -210,10 +224,12 @@ async fn handle_message(
         }
     }
 
-    // Speak the reply too, if TTS is configured.
-    if let Some(audio) = core.synthesize(&reply).await {
-        if let Err(e) = send_audio(client, base, chat_id, audio).await {
-            tracing::warn!("telegram sendAudio failed: {e}");
+    // Speak the reply too, if voice is enabled and TTS is configured.
+    if voice {
+        if let Some(audio) = core.synthesize(&reply).await {
+            if let Err(e) = send_audio(client, base, chat_id, audio).await {
+                tracing::warn!("telegram sendAudio failed: {e}");
+            }
         }
     }
 }

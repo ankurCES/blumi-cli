@@ -47,6 +47,7 @@ pub async fn run_telegram(config: BlumiConfig, token: Option<String>) -> anyhow:
     config.paths.ensure_dirs().ok();
     let token = resolve_token(token, &config.gateway.telegram.token, "telegram token")?;
     let allowed_chats = config.gateway.telegram.allowed_chats.clone();
+    let voice = config.gateway.telegram.voice;
     let yolo = config.gateway.yolo;
 
     crate::branding::banner();
@@ -65,6 +66,7 @@ pub async fn run_telegram(config: BlumiConfig, token: Option<String>) -> anyhow:
         TelegramOptions {
             token,
             allowed_chats,
+            voice,
         },
     )
     .await

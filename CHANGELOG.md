@@ -10,6 +10,12 @@ The Rust workspace and the blugo app share the version number.
 
 ### Added
 
+- **Telegram voice toggle** — `gateway.telegram.voice` (**off by default**) gates the
+  Telegram bot's voice handling: inbound voice-note transcription **and** spoken
+  (TTS) replies. With it off, a voice note gets a short "voice is off" reply and the
+  bot answers in text only. Set `"gateway": { "telegram": { "voice": true } }` to
+  re-enable (still needs global `voice.*` configured). *Note: this flips the prior
+  always-on behavior — Telegram voice is now opt-in.*
 - **Lifecycle hooks** (Claude-Code-style) — two events, **off by default**:
   - **`user_prompt_submit`** runs shell commands when you submit a prompt; each
     command's stdout is injected as cache-safe background context for the turn (the
