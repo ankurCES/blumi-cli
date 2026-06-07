@@ -891,6 +891,11 @@ pub struct NotifyConfig {
     /// Push to subscribed browsers via Web Push (VAPID). Only reaches browsers
     /// served over a secure context (HTTPS or `http://localhost`).
     pub web_push: bool,
+    /// FCM push to the blugo phone app. Enabled automatically when the service
+    /// account file exists (`~/.blumi/fcm-service-account.json`) — no flag needed;
+    /// this struct only carries optional overrides.
+    #[serde(default)]
+    pub fcm: FcmConfig,
 }
 
 impl Default for NotifyConfig {
@@ -901,8 +906,22 @@ impl Default for NotifyConfig {
             desktop: true,
             bot: None,
             web_push: false,
+            fcm: FcmConfig::default(),
         }
     }
+}
+
+/// FCM (Firebase Cloud Messaging) push for the blugo phone app. Push is gated on
+/// the **presence** of the service-account file, so this is on-by-default with no
+/// settings; these fields are optional overrides only.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(default)]
+pub struct FcmConfig {
+    /// GCP project id. Empty ⇒ read `project_id` from the service-account JSON.
+    pub project_id: String,
+    /// Path override for the service account. Empty ⇒ `paths.fcm_service_account()`
+    /// (`~/.blumi/fcm-service-account.json`).
+    pub service_account_path: String,
 }
 
 impl NotifyConfig {

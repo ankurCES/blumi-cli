@@ -512,6 +512,26 @@ impl Management for WebManagement {
         }
     }
 
+    async fn fcm_register(&self, token: &str) -> serde_json::Value {
+        let token = token.trim();
+        if token.is_empty() {
+            return serde_json::json!({ "ok": false, "error": "missing token" });
+        }
+        match blumi_core::fcm::add_device(&self.config.paths.fcm_store(), token) {
+            Ok(n) => serde_json::json!({ "ok": true, "count": n }),
+            Err(e) => serde_json::json!({ "ok": false, "error": e.to_string() }),
+        }
+    }
+    async fn fcm_unregister(&self, token: &str) -> serde_json::Value {
+        match blumi_core::fcm::remove_device(&self.config.paths.fcm_store(), token.trim()) {
+            Ok(removed) => serde_json::json!({ "ok": removed }),
+            Err(e) => serde_json::json!({ "ok": false, "error": e.to_string() }),
+        }
+    }
+    async fn notify_turn(&self, title: &str, body: &str, data: serde_json::Value) {
+        crate::notify::notify_turn(&self.config, title, body, data).await;
+    }
+
     async fn always_on_status(&self) -> serde_json::Value {
         let cfg = &self.config.always_on;
         let recent: Vec<String> = match &self.mem {

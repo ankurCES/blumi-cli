@@ -46,6 +46,10 @@ reqwest.workspace = true
 eventsource-stream.workspace = true
 futures.workspace = true
 sha2.workspace = true
+# FCM HTTP v1 push (blugo phone): sign the service-account JWT (RS256) to mint a
+# short-lived OAuth2 access token for fcm.googleapis.com. Default features pull
+# ring/pem — fine for our rustls-based tree.
+jsonwebtoken = "9"
 # LAN auto-discovery: advertise + browse `_blumi._tcp` for the grid. whoami
 # pinned to 1.x to match blumi-web (one copy in the tree); flume matches the
 # version mdns-sd already pulls in (its browse Receiver is a flume channel).

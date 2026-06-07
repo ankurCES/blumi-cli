@@ -378,6 +378,21 @@ pub trait Management: Send + Sync {
         serde_json::json!({ "ok": false, "error": "push unavailable" })
     }
 
+    // --- FCM (blugo phone push) ---
+
+    /// Register a blugo device FCM token. Returns `{ ok, count }`. Default: unsupported.
+    async fn fcm_register(&self, _token: &str) -> serde_json::Value {
+        serde_json::json!({ "ok": false, "error": "fcm unavailable" })
+    }
+    /// Remove a device FCM token. Returns `{ ok }`. Default: unsupported.
+    async fn fcm_unregister(&self, _token: &str) -> serde_json::Value {
+        serde_json::json!({ "ok": false, "error": "fcm unavailable" })
+    }
+    /// Push an interactive turn completion to registered blugo phones via FCM.
+    /// `data` (e.g. `session_id`, `node`) routes a notification tap. Gated only on
+    /// the FCM service-account file existing — no settings. Default: no-op.
+    async fn notify_turn(&self, _title: &str, _body: &str, _data: serde_json::Value) {}
+
     // --- Self-management ---
 
     /// The whole settings.json as JSON, with every secret redacted (for the
@@ -566,6 +581,8 @@ pub fn router(state: AppState) -> Router {
         .route("/api/push/key", get(api::push_key))
         .route("/api/push/subscribe", post(api::push_subscribe))
         .route("/api/push/unsubscribe", post(api::push_unsubscribe))
+        .route("/api/push/fcm/register", post(api::fcm_register))
+        .route("/api/push/fcm/unregister", post(api::fcm_unregister))
         .route(
             "/api/self/config",
             get(api::self_config_get).post(api::self_config_set),
@@ -651,6 +668,31 @@ pub async fn serve(
                                     let _ = st.reload_current().await;
                                     break;
                                 }
+                            }
+                            // Phone push: when an interactive turn finishes, FCM the
+                            // registered blugo devices with a reply preview (no-op
+                            // unless the FCM service account is present).
+                            blumi_protocol::Event::TurnDone { .. } => {
+                                let handle = st.current().await;
+                                let snap = handle.snapshot().await;
+                                let preview = snap
+                                    .messages
+                                    .iter()
+                                    .rev()
+                                    .find(|m| {
+                                        matches!(m.role, blumi_protocol::Role::Assistant)
+                                            && !m.text().trim().is_empty()
+                                    })
+                                    .map(|m| m.text())
+                                    .unwrap_or_default();
+                                let host = whoami::fallible::hostname()
+                                    .unwrap_or_else(|_| "blumi".to_string());
+                                let data = serde_json::json!({
+                                    "session_id": handle.id().as_str(),
+                                    "node": host,
+                                    "kind": "turn",
+                                });
+                                st.mgmt().notify_turn(&host, &preview, data).await;
                             }
                             _ => {}
                         },

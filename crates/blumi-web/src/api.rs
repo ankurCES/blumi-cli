@@ -992,6 +992,27 @@ pub async fn push_unsubscribe(
 }
 
 #[derive(Deserialize)]
+pub struct FcmTokenBody {
+    pub token: String,
+}
+
+/// POST /api/push/fcm/register → register a blugo device FCM token.
+pub async fn fcm_register(
+    State(state): State<AppState>,
+    Json(b): Json<FcmTokenBody>,
+) -> Json<Value> {
+    Json(state.mgmt().fcm_register(&b.token).await)
+}
+
+/// POST /api/push/fcm/unregister → remove a blugo device FCM token.
+pub async fn fcm_unregister(
+    State(state): State<AppState>,
+    Json(b): Json<FcmTokenBody>,
+) -> Json<Value> {
+    Json(state.mgmt().fcm_unregister(&b.token).await)
+}
+
+#[derive(Deserialize)]
 pub struct KbIngestBody {
     pub path: String,
 }

@@ -17,6 +17,7 @@
 //! Everything is **best-effort**: a channel that fails is logged, never fatal.
 
 use blumi_config::{BlumiConfig, NotifyBot};
+use std::path::{Path, PathBuf};
 
 /// A built gateway-bot HTTP request: where to POST, an optional `Authorization`
 /// header value, and the JSON body. Returned by [`build_bot_request`] so the
@@ -130,6 +131,23 @@ pub async fn notify_completion(
     if n.web_push {
         send_web_push(cfg, title, body).await;
     }
+    // Phone push (blugo) via FCM — fires when the service account is present.
+    if fcm_sa_path(cfg).is_some() {
+        send_fcm(cfg, title, body, None).await;
+    }
+}
+
+/// Push an interactive **turn** completion to the blugo phone(s) via FCM.
+///
+/// Unlike [`notify_completion`], this is gated **only** on the FCM service-account
+/// file existing (it's the phone dispatch channel) — it ignores `notify.enabled` /
+/// `notify.on` and never touches desktop/bot, so dispatch push works out of the
+/// box with zero config and adds no desktop/bot noise. `data` (e.g. `session_id`,
+/// `node`) rides along so a notification tap can open the right thread.
+pub async fn notify_turn(cfg: &BlumiConfig, title: &str, body: &str, data: serde_json::Value) {
+    if fcm_sa_path(cfg).is_some() {
+        send_fcm(cfg, title, body, Some(data)).await;
+    }
 }
 
 /// VAPID `sub` contact (a `mailto:`/`https:` URL, per RFC 8292). A generic
@@ -188,6 +206,219 @@ async fn send_web_push(cfg: &BlumiConfig, title: &str, body: &str) {
     }
     for endpoint in dead {
         let _ = blumi_core::push::remove_subscription(&path, &endpoint);
+    }
+}
+
+// --- FCM (blugo phone push, HTTP v1) ---------------------------------------
+
+/// The Firebase service-account fields we need to mint an access token.
+#[derive(serde::Deserialize)]
+struct ServiceAccount {
+    client_email: String,
+    private_key: String,
+    token_uri: String,
+    project_id: String,
+}
+
+/// Resolve the service-account path (config override, else the default
+/// `~/.blumi/fcm-service-account.json`), returning `Some` only if it exists.
+/// Its presence is what turns FCM push on — no settings flag.
+fn fcm_sa_path(cfg: &BlumiConfig) -> Option<PathBuf> {
+    let over = cfg.notify.fcm.service_account_path.trim();
+    let p = if over.is_empty() {
+        cfg.paths.fcm_service_account()
+    } else {
+        PathBuf::from(over)
+    };
+    p.exists().then_some(p)
+}
+
+fn load_sa(path: &Path) -> Option<ServiceAccount> {
+    serde_json::from_str(&std::fs::read_to_string(path).ok()?).ok()
+}
+
+fn now_unix() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0)
+}
+
+/// Truncate a notification body to a sane heads-up length.
+fn preview(s: &str) -> String {
+    const MAX: usize = 140;
+    let s = s.trim();
+    if s.chars().count() <= MAX {
+        s.to_string()
+    } else {
+        let head: String = s.chars().take(MAX).collect();
+        format!("{}…", head.trim_end())
+    }
+}
+
+/// FCM v1 requires `data` to be a flat string→string map. Coerce each top-level
+/// value to a string (strings as-is, everything else via its JSON form).
+fn stringify_values(v: serde_json::Value) -> serde_json::Value {
+    match v {
+        serde_json::Value::Object(map) => {
+            let mut out = serde_json::Map::new();
+            for (k, val) in map {
+                let s = match val {
+                    serde_json::Value::String(s) => s,
+                    serde_json::Value::Null => continue,
+                    other => other.to_string(),
+                };
+                out.insert(k, serde_json::Value::String(s));
+            }
+            serde_json::Value::Object(out)
+        }
+        _ => serde_json::json!({}),
+    }
+}
+
+/// Process-wide cache of the current FCM OAuth2 access token + its expiry (unix
+/// secs). The token is valid ~1h; reuse it instead of minting a JWT per push.
+fn fcm_token_cache() -> &'static std::sync::Mutex<Option<(String, u64)>> {
+    static C: std::sync::OnceLock<std::sync::Mutex<Option<(String, u64)>>> =
+        std::sync::OnceLock::new();
+    C.get_or_init(|| std::sync::Mutex::new(None))
+}
+
+/// Mint (or reuse) a Google OAuth2 access token for FCM via the service-account
+/// JWT-bearer flow. Best-effort: `None` on any failure (logged, never fatal).
+async fn fcm_access_token(sa: &ServiceAccount) -> Option<String> {
+    if let Ok(cache) = fcm_token_cache().lock() {
+        if let Some((tok, exp)) = cache.as_ref() {
+            if now_unix() + 60 < *exp {
+                return Some(tok.clone());
+            }
+        }
+    }
+
+    let iat = now_unix();
+    #[derive(serde::Serialize)]
+    struct Claims<'a> {
+        iss: &'a str,
+        scope: &'a str,
+        aud: &'a str,
+        iat: u64,
+        exp: u64,
+    }
+    let claims = Claims {
+        iss: &sa.client_email,
+        scope: "https://www.googleapis.com/auth/firebase.messaging",
+        aud: &sa.token_uri,
+        iat,
+        exp: iat + 3600,
+    };
+    let key = match jsonwebtoken::EncodingKey::from_rsa_pem(sa.private_key.as_bytes()) {
+        Ok(k) => k,
+        Err(e) => {
+            tracing::warn!("fcm: bad service-account private key: {e}");
+            return None;
+        }
+    };
+    let jwt = jsonwebtoken::encode(
+        &jsonwebtoken::Header::new(jsonwebtoken::Algorithm::RS256),
+        &claims,
+        &key,
+    )
+    .ok()?;
+
+    let resp = reqwest::Client::new()
+        .post(&sa.token_uri)
+        .form(&[
+            ("grant_type", "urn:ietf:params:oauth:grant-type:jwt-bearer"),
+            ("assertion", jwt.as_str()),
+        ])
+        .send()
+        .await
+        .ok()?;
+    if !resp.status().is_success() {
+        tracing::warn!("fcm: token endpoint HTTP {}", resp.status());
+        return None;
+    }
+    #[derive(serde::Deserialize)]
+    struct TokResp {
+        access_token: String,
+        #[serde(default)]
+        expires_in: u64,
+    }
+    let t: TokResp = resp.json().await.ok()?;
+    let ttl = if t.expires_in == 0 {
+        3600
+    } else {
+        t.expires_in
+    };
+    if let Ok(mut cache) = fcm_token_cache().lock() {
+        *cache = Some((t.access_token.clone(), now_unix() + ttl));
+    }
+    Some(t.access_token)
+}
+
+/// Send a notification + data message to every registered blugo device via the
+/// FCM HTTP v1 API. Prunes tokens FCM reports as gone (404). Best-effort.
+async fn send_fcm(cfg: &BlumiConfig, title: &str, body: &str, data: Option<serde_json::Value>) {
+    let Some(sa_path) = fcm_sa_path(cfg) else {
+        return;
+    };
+    let Some(sa) = load_sa(&sa_path) else {
+        tracing::warn!("fcm: could not parse {}", sa_path.display());
+        return;
+    };
+    let project = {
+        let over = cfg.notify.fcm.project_id.trim();
+        if over.is_empty() {
+            sa.project_id.clone()
+        } else {
+            over.to_string()
+        }
+    };
+    if project.is_empty() {
+        return;
+    }
+    let store_path = cfg.paths.fcm_store();
+    let devices = blumi_core::fcm::list_devices(&store_path);
+    if devices.is_empty() {
+        return;
+    }
+    let Some(token) = fcm_access_token(&sa).await else {
+        return;
+    };
+
+    let url = format!("https://fcm.googleapis.com/v1/projects/{project}/messages:send");
+    let data_obj = stringify_values(data.unwrap_or_else(|| serde_json::json!({})));
+    let client = reqwest::Client::new();
+    let mut dead = Vec::new();
+    for d in &devices {
+        let msg = serde_json::json!({
+            "message": {
+                "token": d.token,
+                "notification": { "title": title, "body": preview(body) },
+                "data": data_obj,
+                "android": { "priority": "high" },
+            }
+        });
+        match client
+            .post(&url)
+            .bearer_auth(&token)
+            .json(&msg)
+            .send()
+            .await
+        {
+            Ok(r) => {
+                let code = r.status().as_u16();
+                if code == 404 {
+                    dead.push(d.token.clone()); // UNREGISTERED / NOT_FOUND
+                } else if !r.status().is_success() {
+                    tracing::warn!("fcm: HTTP {code}");
+                }
+            }
+            Err(e) => tracing::warn!("fcm: send error: {e}"),
+        }
+    }
+    for t in dead {
+        let _ = blumi_core::fcm::remove_device(&store_path, &t);
     }
 }
 
@@ -312,5 +543,34 @@ mod tests {
         n.on = vec!["turn".into()];
         assert!(n.fires("turn"));
         assert!(!n.fires("loop"));
+    }
+
+    #[test]
+    fn preview_truncates_long_bodies() {
+        assert_eq!(preview("  hi  "), "hi");
+        let long = "a".repeat(200);
+        let p = preview(&long);
+        assert!(p.ends_with('…'));
+        assert!(p.chars().count() <= 141); // 140 chars + ellipsis
+    }
+
+    #[test]
+    fn stringify_values_coerces_to_strings_and_drops_null() {
+        let v = serde_json::json!({
+            "session_id": "dispatch",
+            "n": 7,
+            "flag": true,
+            "skip": null,
+        });
+        let out = stringify_values(v);
+        assert_eq!(out["session_id"], "dispatch");
+        assert_eq!(out["n"], "7");
+        assert_eq!(out["flag"], "true");
+        assert!(out.get("skip").is_none());
+        // Non-object input becomes an empty object.
+        assert_eq!(
+            stringify_values(serde_json::json!("x")),
+            serde_json::json!({})
+        );
     }
 }

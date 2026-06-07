@@ -68,6 +68,18 @@ impl Paths {
         self.home.join("push.json")
     }
 
+    /// FCM service account (the gateway's sender key for blugo phone push),
+    /// `<home>/fcm-service-account.json`. Drop the Firebase admin-SDK JSON here
+    /// and FCM push turns on automatically — no settings required.
+    pub fn fcm_service_account(&self) -> PathBuf {
+        self.home.join("fcm-service-account.json")
+    }
+
+    /// Registered blugo device FCM tokens, `<home>/fcm.json`.
+    pub fn fcm_store(&self) -> PathBuf {
+        self.home.join("fcm.json")
+    }
+
     /// Create the home, skills, memory, sessions, and models directories.
     pub fn ensure_dirs(&self) -> std::io::Result<()> {
         for dir in [
@@ -94,5 +106,10 @@ mod tests {
         assert_eq!(p.db, PathBuf::from("/data/blumi/blumi.db"));
         assert_eq!(p.memory_md(), PathBuf::from("/data/blumi/memory/MEMORY.md"));
         assert_eq!(p.working_dir, PathBuf::from("/work/proj"));
+        assert_eq!(
+            p.fcm_service_account(),
+            PathBuf::from("/data/blumi/fcm-service-account.json")
+        );
+        assert_eq!(p.fcm_store(), PathBuf::from("/data/blumi/fcm.json"));
     }
 }

@@ -14,6 +14,7 @@ mod emit;
 mod error;
 mod eventlog;
 mod exec;
+pub mod fcm;
 mod hooks;
 mod llm;
 mod memory;
