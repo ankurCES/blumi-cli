@@ -10,6 +10,15 @@ The Rust workspace and the blugo app share the version number.
 
 ### Added
 
+- **Messaging gateway as a managed service** — `blumi gateway` now mirrors
+  `blumi serve`'s service layer. **`blumi gateway run`** launches every *configured*
+  transport (Telegram / Discord / Slack / WhatsApp) concurrently in one process; and
+  **`install` / `uninstall` / `start` / `stop` / `status`** register it as a launchd
+  (`com.blumi.gateway`) or systemd-user (`blumi-gateway`) service with **auto-start +
+  crash/reboot restart** (KeepAlive · Restart=always). `status` reports the service
+  state + which transports are configured; logs at `~/.blumi/gateway.log`. The
+  existing single-transport commands (`blumi gateway telegram`, …) still work for
+  foreground use.
 - **Telegram voice toggle** — `gateway.telegram.voice` (**off by default**) gates the
   Telegram bot's voice handling: inbound voice-note transcription **and** spoken
   (TTS) replies. With it off, a voice note gets a short "voice is off" reply and the

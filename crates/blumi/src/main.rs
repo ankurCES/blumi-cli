@@ -282,6 +282,18 @@ enum GatewayCmd {
         #[arg(long)]
         port: Option<u16>,
     },
+    /// Run every configured transport in the foreground (used by the service).
+    Run,
+    /// Install the messaging gateway as a background service (launchd/systemd) + auto-start.
+    Install,
+    /// Remove the background gateway service.
+    Uninstall,
+    /// Start the installed gateway service.
+    Start,
+    /// Stop the installed gateway service.
+    Stop,
+    /// Show the gateway service state + configured transports.
+    Status,
 }
 
 /// The always-on gateway for the blugo mobile app (reuses the web server).
@@ -534,6 +546,15 @@ async fn main() -> anyhow::Result<()> {
                 app_token,
             } => gateway::run_slack(config, bot_token, app_token).await,
             GatewayCmd::Whatsapp { port } => gateway::run_whatsapp(config, port).await,
+            GatewayCmd::Run => gateway::run_all(config).await,
+            GatewayCmd::Install => gateway::install(&config),
+            GatewayCmd::Uninstall => gateway::uninstall(),
+            GatewayCmd::Start => gateway::service("start"),
+            GatewayCmd::Stop => gateway::service("stop"),
+            GatewayCmd::Status => {
+                gateway::status(&config);
+                Ok(())
+            }
         },
         Some(Commands::Task { action }) => match action {
             TaskCmd::Add {

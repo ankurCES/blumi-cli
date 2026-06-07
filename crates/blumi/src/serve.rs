@@ -78,7 +78,7 @@ fn pair(config: &BlumiConfig, password: Option<String>) -> anyhow::Result<()> {
 
 // ── Service management ──────────────────────────────────────────────────────
 
-fn run_cmd(bin: &str, args: &[&str]) -> anyhow::Result<()> {
+pub(crate) fn run_cmd(bin: &str, args: &[&str]) -> anyhow::Result<()> {
     let status = Command::new(bin)
         .args(args)
         .status()
@@ -90,12 +90,12 @@ fn run_cmd(bin: &str, args: &[&str]) -> anyhow::Result<()> {
 }
 
 #[cfg(any(target_os = "macos", target_os = "linux"))]
-fn exe() -> anyhow::Result<String> {
+pub(crate) fn exe() -> anyhow::Result<String> {
     Ok(std::env::current_exe()?.display().to_string())
 }
 
 #[cfg(any(target_os = "macos", target_os = "linux"))]
-fn home_dir() -> anyhow::Result<PathBuf> {
+pub(crate) fn home_dir() -> anyhow::Result<PathBuf> {
     std::env::var_os("HOME")
         .map(PathBuf::from)
         .ok_or_else(|| anyhow!("HOME is not set"))
