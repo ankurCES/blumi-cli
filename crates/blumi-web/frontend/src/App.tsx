@@ -1,5 +1,6 @@
 import { useEffect, useReducer, useRef, useState } from 'react'
 import { api, SSE_EVENTS } from './api'
+import { armCompletionAlert, fireCompletionAlertIfHidden } from './notify'
 import type {
   Approval,
   Clarify,
@@ -249,6 +250,10 @@ export function App() {
           .catch(() => {})
         return
       }
+      // In-tab completion alert: arm on turn start, and on completion nudge the
+      // user iff this tab is backgrounded (no-op while focused).
+      if (e.type === 'turn_started') armCompletionAlert()
+      else if (e.type === 'done') fireCompletionAlertIfHidden('Turn complete')
       dispatch({ type: 'sse', name: e.type, data })
     }
     for (const name of SSE_EVENTS) es.addEventListener(name, handler as EventListener)

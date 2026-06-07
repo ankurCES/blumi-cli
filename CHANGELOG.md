@@ -28,7 +28,11 @@ The Rust workspace and the blugo app share the version number.
   configured chat/channel, reusing the `gateway.*` credentials. Config:
   `notify { enabled, on:[loop,discovery,turn], desktop, bot:{transport,target},
   web_push }`. `blumi loop --notify` still fires a one-off desktop notification even
-  when `notify` is off. (Browser in-tab + phone + Web Push surfaces follow.)
+  when `notify` is off. Second wave (live-stream surface, needs no config): a
+  **browser in-tab alert** — when a turn you started finishes while the web tab is
+  **backgrounded**, blumi flashes the title, badges the favicon, plays a short ping,
+  and drops a click-to-focus toast (silent while the tab is focused). (Phone +
+  Web Push surfaces follow.)
 - **Web Control Center panels** — the browser/phone Control Center gains four
   tabs over the new backends: **routing** (tiers + `$ saved`), **entries**
   (white-box memory: pin / edit / delete), **discovery** (always-on status +
