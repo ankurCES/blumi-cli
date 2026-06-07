@@ -41,11 +41,11 @@ pub use memory::{RecalledMemory, SemanticMemory};
 pub use permissions::{PermissionEngine, PermissionOutcome};
 pub use persona::{builtin_personas, Persona};
 pub use pipeline::execute_tool_call;
-pub use recovery::{action_for, RecoveryAction, RecoveryBudget};
+pub use recovery::{action_for, redact, RecoveryAction, RecoveryBudget};
 pub use registry::ToolRegistry;
 pub use router::{
-    active_router_mode, active_router_status, set_active_router, Judge, Router, RouterMode,
-    RouterStats, Tier, TierClient,
+    active_router, active_router_mode, active_router_status, set_active_router, Judge, Router,
+    RouterMode, RouterStats, Tier, TierClient,
 };
 pub use runner::{TurnContext, TurnRunner};
 pub use session::{SessionSnapshot, SessionState};

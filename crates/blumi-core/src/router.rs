@@ -372,6 +372,12 @@ pub fn set_active_router(router: Arc<Router>) {
     }
 }
 
+/// The active router handle, if any. Lets a transient session (e.g. an always-on
+/// discovery pass) snapshot + restore the main session's router around its build.
+pub fn active_router() -> Option<Arc<Router>> {
+    ACTIVE_ROUTER.read().ok().and_then(|g| g.clone())
+}
+
 /// The active router's status JSON (mode + per-tier counts + `saved_usd`), or
 /// `None` when no router is attached.
 pub fn active_router_status() -> Option<Value> {

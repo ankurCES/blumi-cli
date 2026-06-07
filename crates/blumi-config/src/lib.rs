@@ -457,6 +457,66 @@ impl Default for HealConfig {
     }
 }
 
+/// Always-on discovery autonomy (mirrors [`HealEvolve`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "lowercase")]
+pub enum DiscoveryAutonomy {
+    /// Never run a discovery pass.
+    #[default]
+    Off,
+    /// Discover candidate tasks → add them to the board (Todo) + write a report.
+    Propose,
+    /// Like `propose`, plus auto-run low-risk discoveries in isolation. (The
+    /// auto-run path is a follow-up; today `auto` behaves like `propose`.)
+    Auto,
+}
+
+/// Always-on proactive discovery: the gateway periodically (and only when gated
+/// allows) asks the agent to surface candidate tasks for the workspace, adds them
+/// to the board, and lands a markdown report. Off by default ⇒ zero behaviour
+/// change. A sibling of the SEDM sweep + the autonomous loop, not a replacement.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct AlwaysOnConfig {
+    /// Master switch. `false` (default) ⇒ the scheduler is never even spawned.
+    pub enabled: bool,
+    /// How the pass may act: off | propose | auto.
+    pub autonomy: DiscoveryAutonomy,
+    /// Seconds between discovery passes (floored in code).
+    pub cadence_secs: u64,
+    /// Minimum seconds between two passes regardless of cadence (rate-limit).
+    pub min_interval_secs: u64,
+    /// Skip a pass while the board already has at least this many `todo` tasks
+    /// (don't pile work on a busy board). 0 = never skip on that account.
+    pub skip_if_todos: u32,
+    /// Skip while at/above this many open (todo+doing) `Discovered:` tasks.
+    pub max_open_discoveries: u32,
+    /// Cap candidate tasks proposed per pass (the parser truncates).
+    pub max_per_pass: u32,
+    /// Override the discovery prompt (the `{signals}` placeholder is filled with
+    /// board/git context). Empty = the built-in prompt.
+    pub prompt_template: String,
+    /// Also write each report into the workspace (`.blumi/reports/`), not just
+    /// `~/.blumi/reports/`.
+    pub report_in_workspace: bool,
+}
+
+impl Default for AlwaysOnConfig {
+    fn default() -> Self {
+        AlwaysOnConfig {
+            enabled: false,
+            autonomy: DiscoveryAutonomy::Off,
+            cadence_secs: 900,
+            min_interval_secs: 300,
+            skip_if_todos: 1,
+            max_open_discoveries: 5,
+            max_per_pass: 3,
+            prompt_template: String::new(),
+            report_in_workspace: false,
+        }
+    }
+}
+
 /// Native-lite code knowledge base. When enabled, `blumi knowledge ingest` and
 /// the `code_search` / `code_retrieve` tools index repos into `knowledge.db`
 /// (FTS5 + embeddings when available). Disable to drop the code-KB tools.
@@ -834,6 +894,9 @@ pub struct BlumiConfig {
     /// Self-healing + self-evolving agent controls (reflex recovery + learning).
     #[serde(default)]
     pub heal: HealConfig,
+    /// Always-on proactive discovery (off by default).
+    #[serde(default)]
+    pub always_on: AlwaysOnConfig,
     /// Native-lite code knowledge base (code_search / code_retrieve + CLI).
     #[serde(default)]
     pub knowledge: KnowledgeConfig,
@@ -872,6 +935,7 @@ impl Default for BlumiConfig {
             acceleration: AccelerationConfig::default(),
             memory: MemoryConfig::default(),
             heal: HealConfig::default(),
+            always_on: AlwaysOnConfig::default(),
             knowledge: KnowledgeConfig::default(),
             workspaces: WorkspaceConfig::default(),
             git: GitConfig::default(),

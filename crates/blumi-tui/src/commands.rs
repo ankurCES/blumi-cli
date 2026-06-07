@@ -73,6 +73,10 @@ pub const COMMANDS: &[CommandDef] = &[
         desc: "cost-aware routing: tiers + $ saved (/route off|heuristic|hybrid|judge)",
     },
     CommandDef {
+        name: "/discoveries",
+        desc: "tasks the always-on pass proposed (+ where reports land)",
+    },
+    CommandDef {
         name: "/loop",
         desc: "start/pause the autonomous task loop (/loop review to toggle gate)",
     },
@@ -395,6 +399,7 @@ pub async fn run(model: &mut Model, session: &SessionHandle, line: &str) {
                 ));
             }
         }
+        "/discoveries" => model.open_discoveries(),
         "/open-workspace" => model.open_fs_browser(),
         "/loop" => {
             if arg.eq_ignore_ascii_case("review") {

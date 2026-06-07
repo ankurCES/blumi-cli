@@ -132,6 +132,9 @@ pub fn render(model: &mut Model, f: &mut Frame) {
     if model.route_view.is_some() {
         render_route(model, f, area, &theme);
     }
+    if model.discoveries_view.is_some() {
+        render_discoveries(model, f, area, &theme);
+    }
     if model.fs_browser.is_some() {
         render_fs_browser(model, f, area, &theme);
     }
@@ -169,6 +172,8 @@ pub fn render(model: &mut Model, f: &mut Frame) {
         (11, centered_rect(70, 64, area))
     } else if model.route_view.is_some() {
         (13, centered_rect(70, 64, area))
+    } else if model.discoveries_view.is_some() {
+        (14, centered_rect(70, 64, area))
     } else if model.fs_browser.is_some() {
         (12, centered_rect(70, 70, area))
     } else if model.dash_modal {
@@ -1249,6 +1254,41 @@ fn render_route(model: &Model, f: &mut Frame, area: Rect, theme: &Theme) {
         };
         lines.push(Line::from(Span::styled(truncate(raw, width), style)));
     }
+    f.render_widget(Paragraph::new(lines), inner);
+}
+
+/// The `/discoveries` overlay: tasks the always-on pass proposed.
+fn render_discoveries(model: &Model, f: &mut Frame, area: Rect, theme: &Theme) {
+    let Some(text) = &model.discoveries_view else {
+        return;
+    };
+    let popup = centered_rect(70, 64, area);
+    f.render_widget(Clear, popup);
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .border_type(BorderType::Rounded)
+        .border_style(Style::default().fg(theme.primary))
+        .title(Span::styled(
+            " always-on discoveries — any key to close ",
+            theme.bold_primary(),
+        ));
+    let inner = block.inner(popup);
+    f.render_widget(block, popup);
+
+    let width = inner.width.saturating_sub(1) as usize;
+    let lines: Vec<Line> = text
+        .lines()
+        .map(|raw| {
+            let style = if raw.starts_with(char::is_numeric)
+                || raw.trim_start().starts_with(char::is_numeric)
+            {
+                theme.body()
+            } else {
+                theme.accent()
+            };
+            Line::from(Span::styled(truncate(raw, width), style))
+        })
+        .collect();
     f.render_widget(Paragraph::new(lines), inner);
 }
 

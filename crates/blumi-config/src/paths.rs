@@ -58,6 +58,11 @@ impl Paths {
         self.home.join("settings.json")
     }
 
+    /// Always-on discovery reports, `<home>/reports`.
+    pub fn reports_dir(&self) -> PathBuf {
+        self.home.join("reports")
+    }
+
     /// Create the home, skills, memory, sessions, and models directories.
     pub fn ensure_dirs(&self) -> std::io::Result<()> {
         for dir in [

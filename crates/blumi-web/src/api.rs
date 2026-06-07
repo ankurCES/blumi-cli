@@ -881,6 +881,11 @@ pub async fn route_status(State(state): State<AppState>) -> Json<Value> {
     Json(state.mgmt().route_status().await)
 }
 
+/// GET /api/always-on → proactive-discovery status (recent + reports).
+pub async fn always_on_status(State(state): State<AppState>) -> Json<Value> {
+    Json(state.mgmt().always_on_status().await)
+}
+
 pub async fn memory_graph(
     State(state): State<AppState>,
     Json(b): Json<KbSearchBody>,

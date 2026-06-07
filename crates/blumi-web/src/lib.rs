@@ -344,6 +344,12 @@ pub trait Management: Send + Sync {
         serde_json::json!({ "mode": "off" })
     }
 
+    /// Always-on discovery status → `{ enabled, autonomy, recent: [...],
+    /// reports: [...] }`. Default: disabled.
+    async fn always_on_status(&self) -> serde_json::Value {
+        serde_json::json!({ "enabled": false, "recent": [], "reports": [] })
+    }
+
     // --- Self-management ---
 
     /// The whole settings.json as JSON, with every secret redacted (for the
@@ -520,6 +526,7 @@ pub fn router(state: AppState) -> Router {
         .route("/api/plans", get(api::plans))
         .route("/api/heal", get(api::heal_status))
         .route("/api/route", get(api::route_status))
+        .route("/api/always-on", get(api::always_on_status))
         .route("/api/memory/graph", post(api::memory_graph))
         .route("/api/memory/list", post(api::memory_list))
         .route("/api/memory/pin", post(api::memory_pin))

@@ -1,6 +1,7 @@
 //! blumi — the CLI entry point.
 
 mod accel;
+mod always_on;
 mod branding;
 mod cron;
 mod discovery;

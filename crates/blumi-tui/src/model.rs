@@ -461,6 +461,8 @@ pub struct Model {
     pub heal_view: Option<String>,
     /// Rendered cost-aware routing summary when `/route` is open (tiers + savings).
     pub route_view: Option<String>,
+    /// Rendered always-on discovery summary when `/discoveries` is open.
+    pub discoveries_view: Option<String>,
     /// File-browser popup state when `/open-workspace` is open.
     pub fs_browser: Option<FsBrowser>,
     /// Path to the persistent task board (`<project>/.blumi/tasks.json`).
@@ -592,6 +594,7 @@ impl Model {
             grid_view: None,
             heal_view: None,
             route_view: None,
+            discoveries_view: None,
             fs_browser: None,
             remotes: Vec::new(),
             tabs: vec![("local".to_string(), false)],
@@ -941,6 +944,7 @@ impl Model {
         self.grid_view = None;
         self.heal_view = None;
         self.route_view = None;
+        self.discoveries_view = None;
         self.help_modal = false;
         self.plans_view = false;
         self.agents.clear();
@@ -1179,6 +1183,30 @@ impl Model {
             }
         }
         self.board_view = Some(s);
+    }
+
+    /// Build the `/discoveries` overlay: tasks the always-on pass proposed
+    /// (titles marked `Discovered:`), plus a pointer to the full reports.
+    pub fn open_discoveries(&mut self) {
+        let board = blumi_task::TaskBoard::load(&self.tasks_path);
+        let found: Vec<_> = board
+            .tasks()
+            .iter()
+            .filter(|t| t.title.starts_with("Discovered:"))
+            .collect();
+        let mut s = format!("proactively discovered tasks: {}\n", found.len());
+        if found.is_empty() {
+            s.push_str(
+                "\nnone yet — enable in settings.json:\n  \"always_on\": { \"enabled\": true, \"autonomy\": \"propose\" }\n\nreports land in ~/.blumi/reports/",
+            );
+        } else {
+            for (i, t) in found.iter().enumerate() {
+                let title = t.title.trim_start_matches("Discovered:").trim();
+                s.push_str(&format!("\n{:>2}. {} {}", i + 1, t.state.icon(), title));
+            }
+            s.push_str("\n\nfull reports in ~/.blumi/reports/");
+        }
+        self.discoveries_view = Some(s);
     }
 
     /// Build the `/grid` overlay: task distribution across runtimes, derived from

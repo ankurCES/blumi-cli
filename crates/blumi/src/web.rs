@@ -459,6 +459,31 @@ impl Management for WebManagement {
         blumi_core::active_router_status().unwrap_or_else(|| serde_json::json!({ "mode": "off" }))
     }
 
+    async fn always_on_status(&self) -> serde_json::Value {
+        let cfg = &self.config.always_on;
+        let recent: Vec<String> = match &self.mem {
+            Some(mem) => mem.episodes_by_kind("discovery", 20).await,
+            None => vec![],
+        };
+        let mut reports: Vec<String> = std::fs::read_dir(self.config.paths.reports_dir())
+            .map(|rd| {
+                rd.filter_map(|e| e.ok())
+                    .filter_map(|e| e.file_name().into_string().ok())
+                    .filter(|n| n.ends_with(".md"))
+                    .collect()
+            })
+            .unwrap_or_default();
+        reports.sort();
+        reports.reverse();
+        reports.truncate(20);
+        serde_json::json!({
+            "enabled": cfg.enabled,
+            "autonomy": format!("{:?}", cfg.autonomy).to_lowercase(),
+            "recent": recent,
+            "reports": reports,
+        })
+    }
+
     async fn embed(&self, texts: Vec<String>) -> Option<Vec<Vec<f32>>> {
         match &self.mem {
             Some(mem) => mem.embed_texts(&texts).await,
@@ -1213,6 +1238,22 @@ pub async fn run(
                 tokio_util::sync::CancellationToken::new(),
             );
         });
+    }
+
+    // Always-on proactive discovery: a sibling of the SEDM sweep on its own
+    // cadence + gates, independent of the grid. Constructed only when enabled, so
+    // it's zero-cost when off (the default).
+    if provider.config.always_on.enabled
+        && !matches!(
+            provider.config.always_on.autonomy,
+            blumi_config::DiscoveryAutonomy::Off
+        )
+    {
+        std::sync::Arc::new(crate::always_on::DiscoveryScheduler::new(
+            provider.config.clone(),
+            mem.clone(),
+        ))
+        .spawn();
     }
 
     let result = blumi_web::serve(provider, mgmt, web, addr, auth, grid_secret).await;

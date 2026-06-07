@@ -302,6 +302,23 @@ fn status(config: &BlumiConfig) -> anyhow::Result<()> {
         }
         Err(_) => println!("gateway: not running (no lock file)"),
     }
+    // Always-on proactive discovery (off by default).
+    if config.always_on.enabled
+        && !matches!(
+            config.always_on.autonomy,
+            blumi_config::DiscoveryAutonomy::Off
+        )
+    {
+        let reports = std::fs::read_dir(config.paths.reports_dir())
+            .map(|rd| rd.filter_map(|e| e.ok()).count())
+            .unwrap_or(0);
+        println!(
+            "  always-on: on (autonomy={}, {reports} reports)",
+            format!("{:?}", config.always_on.autonomy).to_lowercase()
+        );
+    } else {
+        println!("  always-on: off");
+    }
     Ok(())
 }
 
