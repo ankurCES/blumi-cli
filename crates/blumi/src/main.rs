@@ -223,6 +223,14 @@ enum KnowledgeCmd {
     Path { from: String, to: String },
     /// Graph: the most-connected symbols ("god nodes").
     Hubs,
+    /// Graph: who calls / uses a symbol.
+    Callers { symbol: String },
+    /// Graph: what a symbol calls / uses.
+    Callees { symbol: String },
+    /// Graph: transitive callers — the change blast radius of a symbol.
+    Impact { symbol: String },
+    /// Graph: types implementing a trait.
+    Implementers { symbol: String },
 }
 
 #[derive(Subcommand)]
@@ -603,6 +611,16 @@ async fn main() -> anyhow::Result<()> {
             KnowledgeCmd::Neighbors { symbol } => knowledge::neighbors(&config, symbol).await,
             KnowledgeCmd::Path { from, to } => knowledge::path(&config, from, to).await,
             KnowledgeCmd::Hubs => knowledge::hubs(&config).await,
+            KnowledgeCmd::Callers { symbol } => {
+                knowledge::relation(&config, "callers", symbol).await
+            }
+            KnowledgeCmd::Callees { symbol } => {
+                knowledge::relation(&config, "callees", symbol).await
+            }
+            KnowledgeCmd::Impact { symbol } => knowledge::relation(&config, "impact", symbol).await,
+            KnowledgeCmd::Implementers { symbol } => {
+                knowledge::relation(&config, "implementers", symbol).await
+            }
         },
         Some(Commands::Loop {
             max,

@@ -143,6 +143,29 @@ pub async fn neighbors(config: &BlumiConfig, symbol: String) -> anyhow::Result<(
     Ok(())
 }
 
+/// Typed code-graph query: `callers` / `callees` / `impact` / `implementers`.
+pub async fn relation(config: &BlumiConfig, kind: &str, symbol: String) -> anyhow::Result<()> {
+    let ks = open(config).await?;
+    let hits = match kind {
+        "callers" => ks.callers(&symbol, 40).await,
+        "callees" => ks.callees(&symbol, 40).await,
+        "implementers" => ks.implementers(&symbol, 40).await,
+        _ => ks.impact(&symbol, 5, 100).await, // "impact"
+    };
+    if hits.is_empty() {
+        println!(
+            "No {kind} for '{symbol}'. (Ingest a repo; set knowledge.graph.mode=structural \
+             + build --features code-graph for precise edges.)"
+        );
+        return Ok(());
+    }
+    println!("{} {kind} of '{symbol}':", hits.len());
+    for h in &hits {
+        println!("  • {}:{} [{}] {}", h.path, h.start_line, h.kind, h.name);
+    }
+    Ok(())
+}
+
 pub async fn path(config: &BlumiConfig, from: String, to: String) -> anyhow::Result<()> {
     let ks = open(config).await?;
     let p = ks.shortest_path(&from, &to, 8).await;
