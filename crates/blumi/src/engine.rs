@@ -210,6 +210,17 @@ pub async fn build_session(
         registry.register(Arc::new(blumi_core::Typed(tool)));
     }
 
+    // Adapter: expose code-graph file fan-in as the RPL impact oracle (keeps
+    // blumi-core free of a blumi-knowledge dependency).
+    struct KnowledgeImpactOracle(Arc<blumi_knowledge::KnowledgeStore>);
+    #[async_trait::async_trait]
+    impl blumi_core::rpl::ImpactOracle for KnowledgeImpactOracle {
+        async fn fan_in(&self, path: &str) -> usize {
+            self.0.file_fan_in(path).await
+        }
+    }
+    let mut impact_oracle: Option<Arc<dyn blumi_core::rpl::ImpactOracle>> = None;
+
     // Code knowledge base (native-lite): code_search + code_retrieve over an
     // indexed repo (knowledge.db). Shares the process-global embeddings model;
     // FTS5 fallback when embeddings are off. Skipped if it can't open.
@@ -235,6 +246,10 @@ pub async fn build_session(
                 registry.register(Arc::new(blumi_core::Typed(blumi_tools::CodePath::new(
                     ks.clone(),
                 ))));
+                // RPL blast-radius oracle: file fan-in over the code graph.
+                if config.knowledge.graph.rpl_impact {
+                    impact_oracle = Some(Arc::new(KnowledgeImpactOracle(ks.clone())));
+                }
                 // Typed graph queries (callers/callees/impact/implementers).
                 registry.register(Arc::new(blumi_core::Typed(blumi_tools::CodeGraph::new(ks))));
             }
@@ -548,6 +563,7 @@ pub async fn build_session(
     .with_wake_on_rollover(config.llm.wake_on_rollover)
     .with_router(router.clone())
     .with_prompt_hooks(config.hooks.user_prompt_submit.clone())
+    .with_impact_oracle(impact_oracle)
     .with_rpl(config.rpl.clone());
     // Durable execution: checkpoint the turn after each tool step (shares the
     // history DB) so a crash/restart resumes from the last step.

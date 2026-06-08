@@ -83,6 +83,8 @@ pub struct AgentTurnRunner {
     /// RPL-Judgement: adversarial, regret-minimizing pre-execution review of
     /// high-blast tool batches. `None` (or `enabled = false`) = no review.
     rpl: Option<blumi_config::RplConfig>,
+    /// Code-graph fan-in oracle for the RPL blast radius (None = unwired).
+    impact_oracle: Option<Arc<dyn crate::rpl::ImpactOracle>>,
 }
 
 impl AgentTurnRunner {
@@ -122,6 +124,7 @@ impl AgentTurnRunner {
             router: None,
             prompt_hooks: Vec::new(),
             rpl: None,
+            impact_oracle: None,
         }
     }
 
@@ -171,6 +174,13 @@ impl AgentTurnRunner {
     /// Error-Delta learning). A no-op while `enabled` is false.
     pub fn with_rpl(mut self, rpl: blumi_config::RplConfig) -> Self {
         self.rpl = Some(rpl);
+        self
+    }
+
+    /// Inject a code-graph impact oracle so the RPL blast radius scales with how
+    /// depended-upon the edited file is. `None` = no fan-in signal.
+    pub fn with_impact_oracle(mut self, oracle: Option<Arc<dyn crate::rpl::ImpactOracle>>) -> Self {
+        self.impact_oracle = oracle;
         self
     }
 
@@ -694,7 +704,7 @@ impl TurnRunner for AgentTurnRunner {
                                 .unwrap_or_default()
                         })
                         .collect();
-                    let blast = crate::rpl::BlastRadius::assess(&caps);
+                    let mut blast = crate::rpl::BlastRadius::assess(&caps);
                     // A tool that mutates but declared no capabilities (many MCP
                     // and self-management tools) yields an empty blast radius —
                     // review it anyway rather than let an undeclared effect slip
@@ -705,6 +715,20 @@ impl TurnRunner for AgentTurnRunner {
                             .map(|t| !t.is_read_only())
                             .unwrap_or(true)
                     });
+                    // Code-graph fan-in: editing a heavily-referenced file is
+                    // higher-risk, so fold its incoming-reference count into the
+                    // blast radius (no-op when no oracle is wired).
+                    if let Some(oracle) = &self.impact_oracle {
+                        let mut fan = 0usize;
+                        for c in &tool_calls {
+                            if let Some(p) = c.arguments.get("path").and_then(|v| v.as_str()) {
+                                fan = fan.saturating_add(oracle.fan_in(p).await);
+                            }
+                        }
+                        if fan > 0 {
+                            blast = blast.with_boost(((fan as u32 * 2).min(40)) as u8);
+                        }
+                    }
                     if blast.should_review(any_mutating, rpl.blast_threshold) {
                         let opaque = any_mutating && blast.is_read_only();
                         ctx.events.emit(Event::Notice {

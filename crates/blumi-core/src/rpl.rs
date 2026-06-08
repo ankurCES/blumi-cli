@@ -16,6 +16,15 @@
 
 use blumi_protocol::Capability;
 
+/// Supplies the RPL blast radius with an external "how depended-upon" signal —
+/// implemented in the binary over the code knowledge graph (file fan-in), so
+/// `blumi-core` needn't depend on `blumi-knowledge`. Unwired by default.
+#[async_trait::async_trait]
+pub trait ImpactOracle: Send + Sync {
+    /// Number of references pointing at the symbols defined in `path`.
+    async fn fan_in(&self, path: &str) -> usize;
+}
+
 /// What a planned action could touch — the surface RPL reasons about in Phase 1
 /// ("The Hypothesis": exploration of bounds / the blast radius).
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -27,6 +36,8 @@ pub struct BlastRadius {
     pub spawns: usize,
     /// Any command matched the destructive heuristic (`rm -rf`, force-push, …).
     pub destructive: bool,
+    /// Extra severity from external signals (e.g. code-graph fan-in). 0 normally.
+    pub boost: u8,
 }
 
 impl BlastRadius {
@@ -82,7 +93,16 @@ impl BlastRadius {
         if !self.reversible() {
             s += 15;
         }
+        s += self.boost as u32;
         s.min(100) as u8
+    }
+
+    /// Add external severity (e.g. code-graph fan-in for the edited file),
+    /// saturating — lets the RPL gate raise the blast radius of editing a
+    /// heavily-referenced file.
+    pub fn with_boost(mut self, extra: u8) -> Self {
+        self.boost = self.boost.saturating_add(extra);
+        self
     }
 
     /// Engage the full RPL loop only when a *mutating* batch clears the severity
@@ -297,6 +317,17 @@ mod tests {
         let d = BlastRadius::assess(&[Capability::process_exec("rm -rf /x")]);
         assert!(d.should_review(true, 40));
         assert!(d.predicted_risk(false, 40) >= 60);
+    }
+
+    #[test]
+    fn fan_in_boost_raises_severity() {
+        // Editing a low-blast file (one command-equivalent) is below review on
+        // its own; a high code-graph fan-in boost pushes its severity up.
+        let b = BlastRadius::assess(&[Capability::process_exec("echo hi")]);
+        let base = b.severity();
+        let boosted = b.with_boost(40).severity();
+        assert!(boosted > base, "boost raised severity: {base} -> {boosted}");
+        assert!(boosted <= 100, "severity stays clamped");
     }
 
     #[test]
