@@ -292,6 +292,16 @@ pub trait Management: Send + Sync {
     async fn knowledge_search(&self, _query: &str, _limit: u32) -> serde_json::Value {
         serde_json::json!({ "hits": [] })
     }
+    /// Typed code-graph query: relation = callers | callees | impact |
+    /// implementers. Default: disabled.
+    async fn knowledge_graph(
+        &self,
+        _relation: &str,
+        _symbol: &str,
+        _limit: u32,
+    ) -> serde_json::Value {
+        serde_json::json!({ "hits": [] })
+    }
     /// Start a background ingest of `path`. Default: disabled.
     async fn knowledge_ingest(&self, _path: &str) -> serde_json::Value {
         serde_json::json!({ "ok": false, "error": "knowledge disabled" })
@@ -640,6 +650,7 @@ pub fn router(state: AppState) -> Router {
         .route("/api/knowledge/status", get(api::knowledge_status))
         .route("/api/knowledge/sources", get(api::knowledge_sources))
         .route("/api/knowledge/search", post(api::knowledge_search))
+        .route("/api/knowledge/graph", post(api::knowledge_graph))
         .route("/api/knowledge/ingest", post(api::knowledge_ingest))
         .route("/api/knowledge/remove", post(api::knowledge_remove))
         .route("/api/memory/search", post(api::memory_search))

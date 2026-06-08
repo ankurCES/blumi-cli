@@ -311,6 +311,20 @@ impl Management for WebManagement {
         }
     }
 
+    async fn knowledge_graph(&self, relation: &str, symbol: &str, limit: u32) -> serde_json::Value {
+        let Some(ks) = &self.knowledge else {
+            return serde_json::json!({ "hits": [] });
+        };
+        let n = limit.clamp(1, 100) as usize;
+        let hits = match relation {
+            "callers" => ks.callers(symbol, n).await,
+            "callees" => ks.callees(symbol, n).await,
+            "implementers" => ks.implementers(symbol, n).await,
+            _ => ks.impact(symbol, 5, n).await, // "impact"
+        };
+        serde_json::json!({ "hits": hits })
+    }
+
     async fn knowledge_ingest(&self, path: &str) -> serde_json::Value {
         let Some(ks) = &self.knowledge else {
             return serde_json::json!({ "ok": false, "error": "knowledge disabled" });

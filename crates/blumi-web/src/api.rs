@@ -910,6 +910,27 @@ pub async fn knowledge_search(
     )
 }
 
+#[derive(Deserialize)]
+pub struct KbGraphBody {
+    /// callers | callees | impact | implementers.
+    pub relation: String,
+    pub symbol: String,
+    #[serde(default)]
+    pub limit: Option<u32>,
+}
+
+pub async fn knowledge_graph(
+    State(state): State<AppState>,
+    Json(b): Json<KbGraphBody>,
+) -> Json<Value> {
+    Json(
+        state
+            .mgmt()
+            .knowledge_graph(&b.relation, &b.symbol, b.limit.unwrap_or(20))
+            .await,
+    )
+}
+
 pub async fn memory_search(
     State(state): State<AppState>,
     Json(b): Json<KbSearchBody>,
