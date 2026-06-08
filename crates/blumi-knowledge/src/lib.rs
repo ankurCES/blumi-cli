@@ -978,6 +978,24 @@ impl KnowledgeStore {
             .collect()
     }
 
+    /// How many reference edges point *at* symbols defined in `path` — a rough
+    /// "how depended-upon is this file" measure, used to scale the RPL blast
+    /// radius (editing a heavily-referenced file is higher-risk). 0 when the
+    /// file isn't indexed.
+    pub async fn file_fan_in(&self, path: &str) -> usize {
+        let n: i64 = sqlx::query_scalar(
+            "SELECT COUNT(*) FROM code_edges e
+             JOIN code_symbols s ON s.id = e.dst
+             JOIN code_files f ON f.id = s.file_id
+             WHERE f.path = ? AND e.kind IN ('call', 'ref', 'implements', 'type')",
+        )
+        .bind(path)
+        .fetch_one(&self.pool)
+        .await
+        .unwrap_or(0);
+        n.max(0) as usize
+    }
+
     /// Most-connected symbols ("god nodes"), by total degree (score = degree).
     pub async fn hubs(&self, limit: usize) -> Vec<CodeHit> {
         let rows = sqlx::query(
@@ -1393,6 +1411,30 @@ mod tests {
             .await
             .iter()
             .any(|h| h.name == "Engine"));
+    }
+
+    #[cfg(feature = "code-graph")]
+    #[tokio::test]
+    async fn file_fan_in_counts_incoming_refs() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("engine.rs");
+        std::fs::write(
+            &path,
+            "pub struct Engine {}\nimpl Engine {\n    pub fn run(&self) -> bool { self.check() }\n    fn check(&self) -> bool { true }\n}\n",
+        )
+        .unwrap();
+        let ks = KnowledgeStore::open_in_memory(None)
+            .await
+            .unwrap()
+            .with_graph_mode(GraphMode::Structural);
+        ks.ingest_path(dir.path(), "test", &IngestConfig::default())
+            .await
+            .unwrap();
+        // The file's symbols have incoming reference edges (run->check, contains).
+        let fan = ks.file_fan_in(&path.to_string_lossy()).await;
+        assert!(fan >= 1, "expected incoming refs, got {fan}");
+        // An unknown file has none.
+        assert_eq!(ks.file_fan_in("/nope/x.rs").await, 0);
     }
 
     #[tokio::test]
