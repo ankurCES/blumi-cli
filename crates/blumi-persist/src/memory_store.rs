@@ -882,6 +882,36 @@ impl SemanticMemoryImpl {
             .collect()
     }
 
+    /// Memory-graph degree (number of similarity links) per id — used to
+    /// down-weight over-connected "hub" memories at recall. ids are i64 from our
+    /// own DB → safe to inline. Missing ids ⇒ degree 0 (graph empty / isolated).
+    async fn degrees(&self, ids: &[i64]) -> std::collections::HashMap<i64, i64> {
+        let mut out = std::collections::HashMap::new();
+        if ids.is_empty() {
+            return out;
+        }
+        let inlist = ids
+            .iter()
+            .map(|i| i.to_string())
+            .collect::<Vec<_>>()
+            .join(",");
+        let q = format!(
+            "SELECT nid, COUNT(*) AS d FROM (
+                 SELECT src AS nid FROM memory_edges WHERE src IN ({inlist})
+                 UNION ALL
+                 SELECT dst AS nid FROM memory_edges WHERE dst IN ({inlist})
+             ) GROUP BY nid"
+        );
+        for r in sqlx::query(&q)
+            .fetch_all(self.pool())
+            .await
+            .unwrap_or_default()
+        {
+            out.insert(r.get::<i64, _>("nid"), r.get::<i64, _>("d"));
+        }
+        out
+    }
+
     async fn node_info(&self, id: i64) -> Option<(String, String)> {
         sqlx::query("SELECT namespace AS ns, text FROM memories WHERE id = ? AND status = 'active'")
             .bind(id)
@@ -979,9 +1009,29 @@ pub struct MemoryGraph {
 #[async_trait]
 impl SemanticMemory for SemanticMemoryImpl {
     async fn recall(&self, query: &str, k: usize) -> Vec<RecalledMemory> {
+        // Pull a wider cosine pool, then structure-aware re-rank: down-weight
+        // over-connected "hub" memories (generic notes that match everything) by
+        // their memory-graph degree, so specific, on-point memories surface. A
+        // no-op when the graph is empty (degree 0 ⇒ penalty 1.0), so recall never
+        // regresses before the first sweep builds the graph.
+        let pool = (k * 3).max(12);
         let mut hits = self
-            .search_inner(None, query, k, self.params.recall_floor)
+            .search_inner(None, query, pool, self.params.recall_floor)
             .await;
+        if !hits.is_empty() {
+            let ids: Vec<i64> = hits.iter().map(|h| h.id).collect();
+            let deg = self.degrees(&ids).await;
+            for h in hits.iter_mut() {
+                let d = *deg.get(&h.id).unwrap_or(&0) as f32;
+                h.score *= 1.0 / (1.0 + (1.0 + d).ln()); // hub suppression
+            }
+            hits.sort_by(|a, b| {
+                b.score
+                    .partial_cmp(&a.score)
+                    .unwrap_or(std::cmp::Ordering::Equal)
+            });
+            hits.truncate(k);
+        }
         // Graph-augmented: pull in strongly-connected neighbors of the top hits
         // for richer, coherent context. Bounded + strong-links-only, and a no-op
         // when the memory graph hasn't been built yet (so recall never regresses).
@@ -1154,6 +1204,49 @@ mod tests {
         assert!(
             !mem.query(None, "rust ownership", 5).await.is_empty(),
             "the confirmed fix survives the prune"
+        );
+    }
+
+    #[tokio::test]
+    async fn degrees_counts_graph_links_for_hub_suppression() {
+        let mem = store_with(Some(Arc::new(MockEmbedder))).await;
+        // Distinct-but-similar memories (none dedup-merge): the bridge links to
+        // both rust and python and is the "hub"; the cake is isolated.
+        let a = mem
+            .remember("agent", "note", "rust ownership")
+            .await
+            .unwrap();
+        let bridge = mem
+            .remember("agent", "note", "rust and python together")
+            .await
+            .unwrap();
+        let p = mem.remember("agent", "note", "python lists").await.unwrap();
+        let d = mem
+            .remember("agent", "note", "cooking a cake")
+            .await
+            .unwrap();
+        mem.build_memory_graph(0.55, 6).await;
+
+        let deg = mem.degrees(&[a, bridge, p, d]).await;
+        let dbridge = deg.get(&bridge).copied().unwrap_or(0);
+        assert!(
+            dbridge >= 2,
+            "bridge is the hub (rust + python), got {dbridge}"
+        );
+        assert!(
+            deg.get(&a).copied().unwrap_or(0) >= 1,
+            "rust links to bridge"
+        );
+        assert_eq!(
+            deg.get(&d).copied().unwrap_or(0),
+            0,
+            "isolated cake: no links"
+        );
+        // Hub-suppression: the hub takes a stronger penalty than a leaf node.
+        let pen = |dg: i64| 1.0_f32 / (1.0 + (1.0 + dg as f32).ln());
+        assert!(
+            pen(dbridge) < pen(deg.get(&a).copied().unwrap_or(0)),
+            "the hub is penalized more than a leaf"
         );
     }
 

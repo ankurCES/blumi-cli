@@ -324,12 +324,19 @@ impl TurnRunner for AgentTurnRunner {
         let memory_block: Option<String> = if let Some(mem) = &self.memory {
             let query = {
                 let st = state.lock().await;
-                st.messages
+                // Broaden recall beyond the latest line: the last couple of user
+                // turns capture multi-turn intent ("do that for the other file
+                // too"), so recall isn't anchored to a single message (F12).
+                let mut parts: Vec<String> = st
+                    .messages
                     .iter()
                     .rev()
-                    .find(|m| m.role == Role::User)
+                    .filter(|m| m.role == Role::User)
+                    .take(2)
                     .map(|m| m.text())
-                    .unwrap_or_default()
+                    .collect();
+                parts.reverse();
+                parts.join("\n")
             };
             if query.trim().is_empty() {
                 None
@@ -1316,8 +1323,10 @@ mod tests {
     #[test]
     fn porfiry_parse_reject_approve_and_failopen() {
         // A clear rejection with a flaw + risk is parsed faithfully.
-        let (v, risk) =
-            parse_porfiry("{\"approved\":false,\"risk\":80,\"flaw\":\"deletes the repo\"}", 10);
+        let (v, risk) = parse_porfiry(
+            "{\"approved\":false,\"risk\":80,\"flaw\":\"deletes the repo\"}",
+            10,
+        );
         assert!(!v.approved);
         assert_eq!(risk, 80);
         assert_eq!(v.flaw.as_deref(), Some("deletes the repo"));
