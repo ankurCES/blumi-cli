@@ -23,6 +23,17 @@ pub enum EdgeKind {
     Implements,
 }
 
+impl EdgeKind {
+    /// The `code_edges.kind` string for this relation.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            EdgeKind::Call => "call",
+            EdgeKind::Type => "type",
+            EdgeKind::Implements => "implements",
+        }
+    }
+}
+
 /// A declaration — the unit of retrieval: fn / struct / enum / trait / impl / …
 #[derive(Debug, Clone)]
 pub struct Decl {
@@ -221,7 +232,10 @@ fn is_decl_or_impl_name(n: Node) -> bool {
 }
 
 fn last_ident(n: Node, src: &[u8]) -> Option<String> {
-    if matches!(n.kind(), "identifier" | "type_identifier" | "field_identifier") {
+    if matches!(
+        n.kind(),
+        "identifier" | "type_identifier" | "field_identifier"
+    ) {
         return text(n, src);
     }
     let mut cursor = n.walk();
@@ -286,8 +300,14 @@ impl Runner for Engine {
         let p = extract_structural("engine.rs", SAMPLE, "rust").expect("rust grammar");
 
         // Declarations carry kind + fully-qualified name + parent + signature.
-        assert!(p.decls.iter().any(|d| d.kind == "struct" && d.name == "Engine"));
-        assert!(p.decls.iter().any(|d| d.kind == "trait" && d.name == "Runner"));
+        assert!(p
+            .decls
+            .iter()
+            .any(|d| d.kind == "struct" && d.name == "Engine"));
+        assert!(p
+            .decls
+            .iter()
+            .any(|d| d.kind == "trait" && d.name == "Runner"));
         let run = p
             .decls
             .iter()
@@ -295,7 +315,11 @@ impl Runner for Engine {
             .expect("method fqname is scope-qualified");
         assert_eq!(run.kind, "fn");
         assert_eq!(run.parent.as_deref(), Some("Engine"));
-        assert!(run.signature.contains("fn run"), "signature: {}", run.signature);
+        assert!(
+            run.signature.contains("fn run"),
+            "signature: {}",
+            run.signature
+        );
 
         // Call sites are anchored to their enclosing declaration.
         assert!(
@@ -310,7 +334,10 @@ impl Runner for Engine {
             .iter()
             .any(|s| s.kind == EdgeKind::Implements && s.name == "Runner"));
         // Type references are captured (e.g. HashMap in the field type).
-        assert!(p.sites.iter().any(|s| s.kind == EdgeKind::Type && s.name == "HashMap"));
+        assert!(p
+            .sites
+            .iter()
+            .any(|s| s.kind == EdgeKind::Type && s.name == "HashMap"));
         // Imports are captured best-effort.
         assert!(p.imports.iter().any(|i| i.name == "HashMap"));
     }

@@ -114,6 +114,16 @@ struct InsertRow {
     signature: Option<String>,
 }
 
+/// An unresolved reference site accumulated during ingest, resolved into a typed
+/// edge by `build_graph_structural`. `kind` is the `code_edges.kind` string.
+/// Only produced/consumed under the `code-graph` feature.
+#[cfg_attr(not(feature = "code-graph"), allow(dead_code))]
+struct RawSite {
+    from: String,
+    name: String,
+    kind: String,
+}
+
 pub struct KnowledgeStore {
     pool: SqlitePool,
     embedder: Option<Arc<dyn EmbeddingClient>>,
@@ -178,11 +188,16 @@ impl KnowledgeStore {
     /// Parse a file into symbol rows. In `structural` mode (and with a bundled
     /// grammar) this is tree-sitter — yielding `fqname` / parent / `signature`
     /// enrichment; otherwise the regex extractor (no enrichment).
-    fn parse_symbols(&self, path: &str, content: &str, lang: &str) -> Vec<InsertRow> {
+    fn parse_symbols(
+        &self,
+        path: &str,
+        content: &str,
+        lang: &str,
+    ) -> (Vec<InsertRow>, Vec<RawSite>) {
         #[cfg(feature = "code-graph")]
         if self.graph_mode == GraphMode::Structural {
             if let Some(p) = crate::extract_ts::extract_structural(path, content, lang) {
-                return p
+                let rows = p
                     .decls
                     .into_iter()
                     .map(|d| InsertRow {
@@ -196,10 +211,20 @@ impl KnowledgeStore {
                         signature: Some(d.signature),
                     })
                     .collect();
+                let sites = p
+                    .sites
+                    .into_iter()
+                    .map(|s| RawSite {
+                        from: s.from_fqname,
+                        name: s.name,
+                        kind: s.kind.as_str().to_string(),
+                    })
+                    .collect();
+                return (rows, sites);
             }
         }
         let _ = lang;
-        extract::extract(path, content)
+        let rows = extract::extract(path, content)
             .into_iter()
             .map(|s| InsertRow {
                 name: s.name,
@@ -211,7 +236,8 @@ impl KnowledgeStore {
                 parent_fq: None,
                 signature: None,
             })
-            .collect()
+            .collect();
+        (rows, Vec::new())
     }
 
     /// Walk `root` (gitignore-aware) and index changed/new files under the
@@ -226,6 +252,7 @@ impl KnowledgeStore {
         self.backfill_vectors(512).await;
 
         let mut stats = IngestStats::default();
+        let mut all_sites: Vec<RawSite> = Vec::new();
         let walker = ignore::WalkBuilder::new(root)
             .hidden(true)
             .git_ignore(true)
@@ -274,7 +301,8 @@ impl KnowledgeStore {
             }
 
             let lang = extract::lang_for(&path_str);
-            let rows = self.parse_symbols(&path_str, &content, lang);
+            let (rows, mut sites) = self.parse_symbols(&path_str, &content, lang);
+            all_sites.append(&mut sites);
             let now = now();
 
             // Replace the file's prior rows (cascade clears symbols/vec/fts).
@@ -345,8 +373,19 @@ impl KnowledgeStore {
             stats.indexed += 1;
             stats.symbols += rows.len();
         }
-        // Rebuild the symbol reference graph over the (updated) index.
-        let _ = self.build_graph().await;
+        // Rebuild the reference graph over the (updated) index. Structural mode
+        // resolves the accumulated sites into typed edges; otherwise the lite
+        // name-co-occurrence builder.
+        if self.graph_mode == GraphMode::Structural {
+            #[cfg(feature = "code-graph")]
+            if let Err(e) = self.build_graph_structural(&all_sites).await {
+                tracing::warn!("structural code-graph build failed: {e}");
+            }
+            #[cfg(not(feature = "code-graph"))]
+            let _ = self.build_graph().await;
+        } else {
+            let _ = self.build_graph().await;
+        }
         Ok(stats)
     }
 
@@ -611,6 +650,101 @@ impl KnowledgeStore {
     }
 
     // --- Reference graph (neighbors / shortest_path / hubs) --------------
+
+    /// Resolve accumulated reference `sites` into typed, scope-resolved edges
+    /// (Tier-1). Full rebuild over the current symbol table. `resolved=1` when a
+    /// site's target is unambiguous (qualified fqname, or a unique bare name);
+    /// `0` for ambiguous name-only fallbacks. Also emits `contains` edges from
+    /// the parent links set during ingest.
+    #[cfg(feature = "code-graph")]
+    async fn build_graph_structural(&self, sites: &[RawSite]) -> Result<usize, KnowledgeError> {
+        let edge_sql = "INSERT INTO code_edges (src, dst, kind, resolved, count) \
+                        VALUES (?, ?, ?, ?, 1) \
+                        ON CONFLICT(src, dst, kind) DO UPDATE SET \
+                        count = count + 1, resolved = MAX(resolved, excluded.resolved)";
+
+        // Global resolution tables over all symbols.
+        let rows = sqlx::query("SELECT id, name, fqname FROM code_symbols")
+            .fetch_all(&self.pool)
+            .await?;
+        let mut fq_to_id: std::collections::HashMap<String, i64> = std::collections::HashMap::new();
+        let mut name_to_ids: std::collections::HashMap<String, Vec<i64>> =
+            std::collections::HashMap::new();
+        for r in &rows {
+            let id: i64 = r.get("id");
+            let name: String = r.get("name");
+            let fqname: Option<String> = r.get("fqname");
+            if let Some(fq) = fqname {
+                fq_to_id.entry(fq).or_insert(id);
+            }
+            name_to_ids.entry(name).or_default().push(id);
+        }
+
+        // `contains` edges from the parent links set during ingest. Read BEFORE
+        // opening the write tx — the in-memory pool has a single connection, so
+        // querying `self.pool` while the tx holds it would deadlock.
+        let parents =
+            sqlx::query("SELECT id, parent_id FROM code_symbols WHERE parent_id IS NOT NULL")
+                .fetch_all(&self.pool)
+                .await?;
+
+        let mut tx = self.pool.begin().await?;
+        sqlx::query("DELETE FROM code_edges")
+            .execute(&mut *tx)
+            .await?;
+        let mut count = 0usize;
+
+        for r in &parents {
+            let id: i64 = r.get("id");
+            let pid: i64 = r.get("parent_id");
+            sqlx::query(edge_sql)
+                .bind(pid)
+                .bind(id)
+                .bind("contains")
+                .bind(1_i64)
+                .execute(&mut *tx)
+                .await?;
+            count += 1;
+        }
+
+        // Reference sites → resolved typed edges.
+        for s in sites {
+            let Some(&from_id) = fq_to_id.get(&s.from) else {
+                continue;
+            };
+            // Build the (target, resolved) candidates: a qualified name resolves
+            // via the fqname table; a bare name via a unique symbol name, else
+            // ambiguous (link all candidates, marked unresolved).
+            let candidates: Vec<(i64, i64)> = if s.name.contains("::") {
+                fq_to_id
+                    .get(&s.name)
+                    .map(|&d| vec![(d, 1)])
+                    .unwrap_or_default()
+            } else {
+                match name_to_ids.get(&s.name) {
+                    Some(ids) if ids.len() == 1 => vec![(ids[0], 1)],
+                    Some(ids) if ids.len() <= 4 => ids.iter().map(|&d| (d, 0)).collect(),
+                    _ => Vec::new(),
+                }
+            };
+            for (dst, resolved) in candidates {
+                if dst == from_id {
+                    continue;
+                }
+                sqlx::query(edge_sql)
+                    .bind(from_id)
+                    .bind(dst)
+                    .bind(&s.kind)
+                    .bind(resolved)
+                    .execute(&mut *tx)
+                    .await?;
+                count += 1;
+            }
+        }
+
+        tx.commit().await?;
+        Ok(count)
+    }
 
     /// Rebuild the symbol reference graph: an edge src→dst means src's body
     /// mentions dst's name. Full rebuild (cheap at native-lite scale).
@@ -1025,6 +1159,56 @@ mod tests {
         let parent_id: Option<i64> = row.get("parent_id");
         assert!(signature.contains("fn run"), "signature: {signature}");
         assert!(parent_id.is_some(), "parent_id links to the impl");
+    }
+
+    #[cfg(feature = "code-graph")]
+    #[tokio::test]
+    async fn structural_resolver_builds_typed_edges() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(
+            dir.path().join("engine.rs"),
+            "pub struct Engine {}\nimpl Engine {\n    pub fn run(&self) -> bool { self.check() }\n    fn check(&self) -> bool { true }\n}\n",
+        )
+        .unwrap();
+        let ks = KnowledgeStore::open_in_memory(None)
+            .await
+            .unwrap()
+            .with_graph_mode(GraphMode::Structural);
+        ks.ingest_path(dir.path(), "test", &IngestConfig::default())
+            .await
+            .unwrap();
+
+        let run_id: i64 =
+            sqlx::query_scalar("SELECT id FROM code_symbols WHERE fqname = 'Engine::run'")
+                .fetch_one(&ks.pool)
+                .await
+                .unwrap();
+        let check_id: i64 =
+            sqlx::query_scalar("SELECT id FROM code_symbols WHERE fqname = 'Engine::check'")
+                .fetch_one(&ks.pool)
+                .await
+                .unwrap();
+
+        // A *resolved* `call` edge Engine::run -> Engine::check (self.check()).
+        let resolved: Option<i64> = sqlx::query_scalar(
+            "SELECT resolved FROM code_edges WHERE src = ? AND dst = ? AND kind = 'call'",
+        )
+        .bind(run_id)
+        .bind(check_id)
+        .fetch_optional(&ks.pool)
+        .await
+        .unwrap();
+        assert_eq!(resolved, Some(1), "resolved call edge run -> check");
+
+        // A `contains` edge into the method (from its enclosing impl).
+        let contains: i64 = sqlx::query_scalar(
+            "SELECT COUNT(*) FROM code_edges WHERE dst = ? AND kind = 'contains'",
+        )
+        .bind(run_id)
+        .fetch_one(&ks.pool)
+        .await
+        .unwrap();
+        assert!(contains >= 1, "contains edge into Engine::run");
     }
 
     #[tokio::test]
