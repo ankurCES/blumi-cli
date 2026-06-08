@@ -353,8 +353,12 @@ fn format_heal(v: &serde_json::Value) -> String {
     s
 }
 
-/// Format the `/knowledge` overlay from a `KnowledgeStatus` (counts + sources).
-fn format_knowledge(s: &blumi_knowledge::KnowledgeStatus) -> String {
+/// Format the `/knowledge` overlay from a `KnowledgeStatus` (counts + sources)
+/// plus the code graph's most-connected symbols (hot-spots).
+fn format_knowledge(
+    s: &blumi_knowledge::KnowledgeStatus,
+    hubs: &[blumi_knowledge::CodeHit],
+) -> String {
     let mut out = format!(
         "indexed: {} files   ·   {} symbols   ·   {} vectors",
         s.files, s.symbols, s.vectors
@@ -367,6 +371,15 @@ fn format_knowledge(s: &blumi_knowledge::KnowledgeStatus) -> String {
             out.push_str(&format!(
                 "\n  {} — {} files, {} symbols",
                 src.source, src.files, src.symbols
+            ));
+        }
+    }
+    if !hubs.is_empty() {
+        out.push_str("\n\nMost-connected symbols (graph hot-spots — edit with care)");
+        for h in hubs {
+            out.push_str(&format!(
+                "\n  {} [{}]  {}:{}",
+                h.name, h.kind, h.path, h.start_line
             ));
         }
     }
@@ -480,7 +493,8 @@ pub async fn run(model: &mut Model, session: &SessionHandle, line: &str) {
         "/knowledge" => match model.knowledge_store.clone() {
             Some(ks) => {
                 let status = ks.status().await;
-                model.knowledge_view = Some(format_knowledge(&status));
+                let hubs = ks.hubs(8).await;
+                model.knowledge_view = Some(format_knowledge(&status, &hubs));
             }
             None => model.entries.push(Entry::Notice(
                 "knowledge base is off (set knowledge.enabled in settings.json)".into(),
