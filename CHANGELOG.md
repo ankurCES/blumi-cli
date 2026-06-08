@@ -9,6 +9,31 @@ tracks its own Flutter version (`x.y.z+build`).
 
 ## [Unreleased]
 
+### Added
+
+- **Structural code graph (opt-in).** A new `code-graph` build feature +
+  `knowledge.graph.mode = "structural"` upgrades the code knowledge base from
+  name-co-occurrence edges to a **typed, scope-resolved** graph via tree-sitter
+  (Rust first): declarations carry a fully-qualified name / parent / signature,
+  and reference sites resolve into typed `code_edges` (`call` / `type` /
+  `implements` / `contains`; `resolved=1` when unambiguous). A unified
+  **`code_graph`** agent tool exposes `callers` / `callees` / `impact` /
+  `implementers` — `impact` being the transitive *change blast radius* of a
+  symbol. The default build stays native-lite (regex symbols, no C grammars); the
+  tool degrades gracefully over the lite graph.
+- **RPL blast radius reads the code graph.** With `knowledge.graph.rpl_impact`
+  (default on), editing a heavily-referenced file raises the RPL severity (file
+  fan-in folds into the blast radius), so the adversarial Porfiry review is
+  likelier to fire on high-impact edits.
+
+### Changed
+
+- **Auto-wake on context rollover.** A long / autonomous turn no longer stalls at
+  the auto-continue token ceiling right after a context compaction: a rollover now
+  resets the cumulative token tally (`llm.wake_on_rollover`, default **on**), so
+  the task keeps going across rollovers without a manual nudge. The per-turn step
+  budget still bounds the turn.
+
 ## [0.5.0] — 2026-06-08
 
 ### Added
