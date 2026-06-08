@@ -340,8 +340,9 @@ fn matches_any(patterns: &[String], subject: &str) -> bool {
     })
 }
 
-/// Heuristic detection of dangerous shell commands.
-fn is_destructive(cmd: &str) -> bool {
+/// Heuristic detection of dangerous shell commands. Shared with the RPL
+/// blast-radius classifier (`crate::rpl`).
+pub(crate) fn is_destructive(cmd: &str) -> bool {
     const NEEDLES: &[&str] = &[
         "rm -rf",
         "rm -fr",

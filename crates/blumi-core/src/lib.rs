@@ -25,6 +25,7 @@ pub mod push;
 mod recovery;
 mod registry;
 mod router;
+pub mod rpl;
 mod runner;
 mod session;
 mod subagent;
@@ -51,6 +52,7 @@ pub use router::{
     active_router, active_router_mode, active_router_status, set_active_router, Judge, Router,
     RouterMode, RouterStats, Tier, TierClient,
 };
+pub use rpl::{choose_least_regret, BlastRadius, ErrorDelta, ParanoiaScore, PorfiryVerdict};
 pub use runner::{TurnContext, TurnRunner};
 pub use session::{SessionSnapshot, SessionState};
 pub use subagent::{

@@ -458,6 +458,54 @@ impl Default for HealConfig {
     }
 }
 
+/// Sandbox backend for the RPL Fever-Dream simulation (Phase 2).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum RplSandbox {
+    /// Predict branch outcomes with sub-agents, no real execution (MVP, safe).
+    #[default]
+    Dry,
+    /// Execute branches in throwaway git worktrees, then discard (V2).
+    Worktree,
+}
+
+/// Raskolnikov's Psychological Loop (RPL-Judgement): an adversarial, regret-
+/// minimizing pre-execution review. When a planned tool batch's blast radius
+/// clears `blast_threshold`, the agent branches the plan, scores each branch's
+/// paranoia, submits the best to an adversarial "Porfiry" judge, and only then
+/// actuates — writing the predicted-vs-actual Error Delta back to memory.
+/// Opt-in: it trades extra LLM calls for fewer catastrophic actions.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct RplConfig {
+    /// Master switch (off by default — RPL multiplies LLM calls).
+    pub enabled: bool,
+    /// Severity (0–100) a mutating batch must reach to trigger the full loop;
+    /// below it, the cheap path runs as today.
+    pub blast_threshold: u8,
+    /// Tree-of-Thoughts branches simulated per review (clamped 1..=5 at use).
+    pub branches: u8,
+    /// Max Porfiry reject → re-plan rounds before falling back to escalation.
+    pub max_defend_rounds: u8,
+    /// Model for the Porfiry judge (empty = reuse the brain / main model).
+    pub judge_model: String,
+    /// Simulation backend (dry predictions vs. worktree execution).
+    pub sandbox: RplSandbox,
+}
+
+impl Default for RplConfig {
+    fn default() -> Self {
+        RplConfig {
+            enabled: false,
+            blast_threshold: 40,
+            branches: 3,
+            max_defend_rounds: 2,
+            judge_model: String::new(),
+            sandbox: RplSandbox::Dry,
+        }
+    }
+}
+
 /// Always-on discovery autonomy (mirrors [`HealEvolve`]).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "lowercase")]
@@ -1004,6 +1052,10 @@ pub struct BlumiConfig {
     /// Self-healing + self-evolving agent controls (reflex recovery + learning).
     #[serde(default)]
     pub heal: HealConfig,
+    /// Raskolnikov's Psychological Loop: adversarial pre-execution review of
+    /// high-blast actions (off by default — opt-in, costs extra LLM calls).
+    #[serde(default)]
+    pub rpl: RplConfig,
     /// Always-on proactive discovery (off by default).
     #[serde(default)]
     pub always_on: AlwaysOnConfig,
@@ -1051,6 +1103,7 @@ impl Default for BlumiConfig {
             acceleration: AccelerationConfig::default(),
             memory: MemoryConfig::default(),
             heal: HealConfig::default(),
+            rpl: RplConfig::default(),
             always_on: AlwaysOnConfig::default(),
             hooks: HooksConfig::default(),
             notify: NotifyConfig::default(),
