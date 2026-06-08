@@ -9,8 +9,41 @@ tracks its own Flutter version (`x.y.z+build`).
 
 ## [Unreleased]
 
+## [0.5.0] — 2026-06-08
+
 ### Added
 
+- **Self-improving agent memory — credit assignment, value-based fitness, and a
+  structure-aware recall ranker.** The agentic long-term memory now learns from
+  *observed outcomes*, not merely from retrieval:
+  - **Probationary failure→fix learning** — a guided recovery is stored as a
+    *pending hypothesis* and only promoted to a recallable / mineable / diffusable
+    fix once the same tool is observed to succeed (cross-step verification, now on
+    by default), with provenance. Unverified guesses never masquerade as fixes;
+    stale hypotheses are reaped by the sweep.
+  - **Value-based fitness** — every memory carries a learned `value` distinct from
+    retrieval `utility`: rewarded when it was in context for a productive step,
+    decayed on failures, and corroborated across grid nodes (consensus). Eviction
+    now drops the lowest-**value** memory, so genuinely-useful memories survive
+    instead of merely frequently-retrieved ones.
+  - **Structure-aware recall** — recall re-ranks a wider candidate pool by
+    memory-graph degree (hub-suppression, so generic "matches-everything" memories
+    stop dominating) and is seeded from the last couple of user turns, not one line.
+  - **Curation everywhere** — the SEDM consolidation / eviction / graph / evolution
+    sweep now runs for standalone `blumi run` and `blumi tui`, not only the
+    gateway, so memory is actually curated and the recall graph gets built.
+  - **Conflict + diffusion groundwork** — reversible `supersede` + conflict
+    detection land as the substrate for resolving contradictions; diffusion now
+    shares the highest-**value** memories and raises value on cross-node agreement.
+- **RPL-Judgement — an opt-in adversarial, regret-minimizing reasoning loop
+  (“Raskolnikov’s Psychological Loop”).** Before a high-blast tool batch touches
+  the live system, blumi maps its **blast radius**, submits the plan to an
+  adversarial **“Porfiry”** LLM judge that must approve it (on rejection the plan
+  is bounced and re-planned, bounded by a defend budget), executes the survivor
+  through the normal typed pipeline, then writes the predicted-vs-actual **Error
+  Delta** (“regret”) back to memory — where it feeds value-based fitness. Off by
+  default (`rpl.enabled`); it trades extra LLM calls for fewer catastrophic
+  actions. A standard agent maximizes success; an RPL agent minimizes regret.
 - **blugo mascot logo** — the blugo app icon is now the armed-hornet "beekeeper"
   mascot bursting out of the blumi flower bloom (the mascot composited over the
   flower on the rose-dark brand background). The welcome network-diagram **hub**

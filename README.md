@@ -11,7 +11,7 @@
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/version-0.4.0-FF4F87?style=for-the-badge" alt="version 0.4.0">
+  <img src="https://img.shields.io/badge/version-0.5.0-FF4F87?style=for-the-badge" alt="version 0.5.0">
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-Apache--2.0-6B50FF?style=for-the-badge" alt="License: Apache-2.0"></a>
   <img src="https://img.shields.io/badge/local--first-%E2%9C%93-68FFD6?style=for-the-badge&labelColor=222" alt="local-first">
   <img src="https://img.shields.io/badge/BYOK-any%20provider-9B86FF?style=for-the-badge" alt="bring your own key">
