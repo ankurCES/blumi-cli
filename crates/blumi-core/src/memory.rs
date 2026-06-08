@@ -37,6 +37,24 @@ pub trait SemanticMemory: Send + Sync {
     /// stored (or merged-into) id, or `None` on failure.
     async fn remember(&self, namespace: &str, kind: &str, text: &str) -> Option<i64>;
 
+    /// Persist a memory as a *pending hypothesis*: stored but excluded from
+    /// recall/mining/diffusion until [`SemanticMemory::confirm`]ed by an observed
+    /// outcome. Use for guided recoveries whose fix is not yet proven to work.
+    /// The default impl falls back to [`SemanticMemory::remember`] (no probation)
+    /// for stores that don't model a lifecycle.
+    async fn remember_pending(&self, namespace: &str, kind: &str, text: &str) -> Option<i64> {
+        self.remember(namespace, kind, text).await
+    }
+
+    /// Promote a pending memory to active (recallable) once its outcome is
+    /// observed to be good, recording optional `provenance` (the evidence it
+    /// worked) and reinforcing it. The default impl reinforces via
+    /// [`SemanticMemory::note_used`].
+    async fn confirm(&self, id: i64, provenance: Option<&str>) {
+        let _ = provenance;
+        self.note_used(&[id]).await;
+    }
+
     /// Explicit search (the `memory` tool's `query` action). `namespace = None`
     /// searches all namespaces; no relevance floor is applied (returns best k).
     async fn query(&self, namespace: Option<&str>, q: &str, k: usize) -> Vec<RecalledMemory>;

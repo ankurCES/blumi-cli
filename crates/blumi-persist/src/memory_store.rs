@@ -166,7 +166,7 @@ impl SemanticMemoryImpl {
                 }
             }
             let id = self
-                .insert(namespace, kind, text, source_session, origin)
+                .insert(namespace, kind, text, source_session, origin, "active")
                 .await?;
             self.insert_vector(id, &qvec).await;
             Some(id)
@@ -176,7 +176,7 @@ impl SemanticMemoryImpl {
                 self.merge(id).await;
                 return Some(id);
             }
-            self.insert(namespace, kind, text, source_session, origin)
+            self.insert(namespace, kind, text, source_session, origin, "active")
                 .await
         }
     }
@@ -195,7 +195,13 @@ impl SemanticMemoryImpl {
             .is_some()
     }
 
-    async fn insert(
+    /// Persist a memory as a *pending hypothesis*: embedded and stored but
+    /// excluded from recall/mining/diffusion/consolidation/eviction (all of which
+    /// filter `status='active'`) until [`promote`](Self::promote)d once its
+    /// outcome is observed. No dedup — each attempt is its own hypothesis; stale
+    /// ones are reaped by [`prune_pending`](Self::prune_pending). Used for guided
+    /// recoveries whose fix is not yet proven to work.
+    pub async fn add_pending(
         &self,
         namespace: &str,
         kind: &str,
@@ -203,12 +209,72 @@ impl SemanticMemoryImpl {
         source_session: Option<&str>,
         origin: &str,
     ) -> Option<i64> {
+        let text = text.trim();
+        if text.is_empty() {
+            return None;
+        }
+        let id = self
+            .insert(namespace, kind, text, source_session, origin, "pending")
+            .await?;
+        // Embed now so promotion makes it instantly recallable (active_vectors
+        // joins on status='active', so the vector simply isn't surfaced yet).
+        if let Some(qvec) = self.embed_one(text).await {
+            self.insert_vector(id, &qvec).await;
+        }
+        Some(id)
+    }
+
+    /// Promote a pending memory to active (recallable) once its outcome is
+    /// observed to be good: flips status, reinforces utility, and records
+    /// `provenance` (the evidence it worked) into `source_session` if unset.
+    /// Idempotent — only acts on a still-`pending` row.
+    pub async fn promote(&self, id: i64, provenance: Option<&str>) {
+        let now = now();
+        let _ = sqlx::query(
+            "UPDATE memories
+                SET status = 'active', utility = utility + 0.5, hits = hits + 1,
+                    last_used_at = ?, updated_at = ?,
+                    source_session = COALESCE(NULLIF(source_session, ''), ?)
+              WHERE id = ? AND status = 'pending'",
+        )
+        .bind(&now)
+        .bind(&now)
+        .bind(provenance)
+        .bind(id)
+        .execute(self.pool())
+        .await;
+    }
+
+    /// Reap pending hypotheses never promoted within `max_age_secs` (their fix was
+    /// never observed to work), so unconfirmed episodes don't accumulate. Vectors
+    /// cascade via the FK. Returns the number pruned.
+    pub async fn prune_pending(&self, max_age_secs: i64) -> usize {
+        let cutoff = (OffsetDateTime::now_utc() - time::Duration::seconds(max_age_secs))
+            .format(&Rfc3339)
+            .unwrap_or_default();
+        sqlx::query("DELETE FROM memories WHERE status = 'pending' AND created_at < ?")
+            .bind(cutoff)
+            .execute(self.pool())
+            .await
+            .map(|r| r.rows_affected() as usize)
+            .unwrap_or(0)
+    }
+
+    async fn insert(
+        &self,
+        namespace: &str,
+        kind: &str,
+        text: &str,
+        source_session: Option<&str>,
+        origin: &str,
+        status: &str,
+    ) -> Option<i64> {
         let now = now();
         let res = sqlx::query(
             "INSERT INTO memories
                 (namespace, kind, text, origin, source_session, created_at, updated_at,
                  hits, last_used_at, utility, status)
-             VALUES (?, ?, ?, ?, ?, ?, ?, 0, NULL, 1.0, 'active')",
+             VALUES (?, ?, ?, ?, ?, ?, ?, 0, NULL, 1.0, ?)",
         )
         .bind(namespace)
         .bind(kind)
@@ -217,6 +283,7 @@ impl SemanticMemoryImpl {
         .bind(source_session)
         .bind(&now)
         .bind(&now)
+        .bind(status)
         .execute(self.pool())
         .await
         .ok()?;
@@ -672,6 +739,9 @@ impl SemanticMemoryImpl {
             merged += self.consolidate(&ns).await;
             evicted += self.evict(&ns, cap).await;
         }
+        // Reap pending hypotheses never confirmed within a week (their fix was
+        // never observed to work) so unconfirmed episodes don't pile up.
+        self.prune_pending(7 * 24 * 3600).await;
         // Rebuild the similarity graph (enrichment for graph recall + the view).
         let _ = self.build_memory_graph(0.55, 6).await;
         (merged, evicted)
@@ -957,6 +1027,14 @@ impl SemanticMemory for SemanticMemoryImpl {
         self.add(namespace, kind, text, None, "").await
     }
 
+    async fn remember_pending(&self, namespace: &str, kind: &str, text: &str) -> Option<i64> {
+        self.add_pending(namespace, kind, text, None, "").await
+    }
+
+    async fn confirm(&self, id: i64, provenance: Option<&str>) {
+        self.promote(id, provenance).await;
+    }
+
     async fn query(&self, namespace: Option<&str>, q: &str, k: usize) -> Vec<RecalledMemory> {
         self.search_inner(namespace, q, k, 0.0).await
     }
@@ -1037,6 +1115,46 @@ mod tests {
     async fn store_with(embedder: Option<Arc<dyn EmbeddingClient>>) -> SemanticMemoryImpl {
         let store = Arc::new(Store::open_in_memory().await.unwrap());
         SemanticMemoryImpl::new(store, embedder, MemoryParams::default())
+    }
+
+    #[tokio::test]
+    async fn probation_hides_until_confirmed_then_prunes() {
+        let mem = store_with(Some(Arc::new(MockEmbedder))).await;
+
+        // A pending hypothesis is stored but invisible to recall (the whole store
+        // filters status='active', so probation is enforced for free).
+        let id = mem
+            .remember_pending("agent", "recovery", "rust ownership borrow fix")
+            .await
+            .unwrap();
+        assert!(
+            mem.query(None, "rust ownership", 5).await.is_empty(),
+            "pending memory must not be recallable"
+        );
+
+        // Confirming it (observed-good outcome) promotes it to recallable.
+        mem.confirm(id, Some("verified")).await;
+        assert!(
+            mem.query(None, "rust ownership", 5)
+                .await
+                .iter()
+                .any(|h| h.text.contains("rust")),
+            "confirmed memory should be recallable"
+        );
+
+        // A never-confirmed hypothesis is reaped; the confirmed one survives.
+        mem.remember_pending("agent", "recovery", "python import fix")
+            .await
+            .unwrap();
+        // Negative age ⇒ cutoff slightly in the future, so the fresh pending row
+        // is always eligible regardless of clock granularity; active rows are
+        // never touched (the DELETE filters status='pending').
+        let pruned = mem.prune_pending(-1).await;
+        assert_eq!(pruned, 1, "exactly the one pending row is pruned");
+        assert!(
+            !mem.query(None, "rust ownership", 5).await.is_empty(),
+            "the confirmed fix survives the prune"
+        );
     }
 
     #[tokio::test]

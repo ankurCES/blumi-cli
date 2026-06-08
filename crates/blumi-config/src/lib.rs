@@ -431,10 +431,11 @@ pub struct HealConfig {
     pub enabled: bool,
     /// Max budgeted recovery attempts per turn (0 = no auto-recovery).
     pub recovery_budget: u32,
-    /// Confirm recoveries across steps: when a guided tool succeeds on a later
-    /// iteration, emit a `verified` trace + reinforce the learned fix's utility
-    /// (ground-truth "the fix worked", not just "a fix was suggested"). Free — no
-    /// extra LLM. Off by default to keep the default event stream minimal.
+    /// Confirm recoveries across steps: a guided recovery is stored as a
+    /// *pending hypothesis* and only promoted to a recallable fix when the same
+    /// tool succeeds on a later iteration — ground truth that the fix worked, not
+    /// just that one was suggested. On by default so learned fixes reflect
+    /// observed outcomes (the credit-assignment keystone). Free — no extra LLM.
     pub verify: bool,
     /// Write failure→fix episodes to memory + recall them on similar failures.
     pub learn: bool,
@@ -449,7 +450,7 @@ impl Default for HealConfig {
         HealConfig {
             enabled: true,
             recovery_budget: 2,
-            verify: false,
+            verify: true,
             learn: true,
             evolve: HealEvolve::Auto,
             redact_paths: true,

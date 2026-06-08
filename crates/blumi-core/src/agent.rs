@@ -649,7 +649,10 @@ impl TurnRunner for AgentTurnRunner {
                                     verified: Some(true),
                                 });
                                 if let (Some(id), Some(mem)) = (ep, &self.memory) {
-                                    mem.note_used(&[id]).await; // reinforce the fix that worked
+                                    // Promote the pending hypothesis to a verified
+                                    // fix — ground truth it worked — with provenance.
+                                    let prov = format!("cross-step verified: {tool}");
+                                    mem.confirm(id, Some(&prov)).await;
                                 }
                             } else {
                                 still.push((tool, ep));
@@ -743,7 +746,19 @@ impl TurnRunner for AgentTurnRunner {
                                     } else {
                                         raw
                                     };
-                                    episode_id = mem.remember("agent", "recovery", &text).await;
+                                    // Probationary: a verifiable recovery is a
+                                    // *hypothesis* — store it pending (invisible to
+                                    // recall/mining) until a later success promotes
+                                    // it (the verify branch above). Without
+                                    // verification, or for escalations (never
+                                    // confirmed), keep the prior immediate behaviour.
+                                    let verifiable =
+                                        action != crate::recovery::RecoveryAction::Escalate;
+                                    episode_id = if heal.verify && verifiable {
+                                        mem.remember_pending("agent", "recovery", &text).await
+                                    } else {
+                                        mem.remember("agent", "recovery", &text).await
+                                    };
                                 }
                             }
                             // Track this guided recovery for cross-step confirmation.
