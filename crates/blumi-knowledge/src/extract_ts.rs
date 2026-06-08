@@ -78,40 +78,116 @@ pub struct Parsed {
 /// Parse `content` structurally for `lang`. Returns `None` when no grammar is
 /// bundled for the language (the caller falls back to the regex extractor).
 pub fn extract_structural(_path: &str, content: &str, lang: &str) -> Option<Parsed> {
-    let language: tree_sitter::Language = match lang {
-        "rust" => tree_sitter_rust::LANGUAGE.into(),
-        _ => return None,
-    };
+    let (language, spec) = spec_for(lang)?;
     let mut parser = Parser::new();
     parser.set_language(&language).ok()?;
     let tree = parser.parse(content, None)?;
     let src = content.as_bytes();
     let mut out = Parsed::default();
     let mut stack: Vec<String> = Vec::new();
-    walk(tree.root_node(), src, &mut stack, &mut out);
+    walk(tree.root_node(), src, spec, &mut stack, &mut out);
     Some(out)
 }
 
-fn decl_kind(node_kind: &str) -> Option<&'static str> {
-    Some(match node_kind {
-        "function_item" => "fn",
-        "struct_item" | "union_item" => "struct",
-        "enum_item" => "enum",
-        "trait_item" => "trait",
-        "mod_item" => "mod",
-        "type_item" => "type",
-        "const_item" | "static_item" => "const",
-        "macro_definition" => "macro",
-        "impl_item" => "impl",
+/// Per-language node-kind mapping. Adding a language = a `LangSpec` + a grammar.
+struct LangSpec {
+    /// (tree-sitter node kind, our symbol kind) for declarations.
+    decls: &'static [(&'static str, &'static str)],
+    /// Node kinds that are call expressions.
+    calls: &'static [&'static str],
+    /// Node kinds that are import / use statements.
+    imports: &'static [&'static str],
+    /// Emit `Type` sites from `type_identifier` references (Rust only).
+    type_ref: bool,
+}
+
+impl LangSpec {
+    fn decl_kind(&self, k: &str) -> Option<&'static str> {
+        self.decls.iter().find(|(n, _)| *n == k).map(|(_, v)| *v)
+    }
+}
+
+const RUST: LangSpec = LangSpec {
+    decls: &[
+        ("function_item", "fn"),
+        ("struct_item", "struct"),
+        ("union_item", "struct"),
+        ("enum_item", "enum"),
+        ("trait_item", "trait"),
+        ("mod_item", "mod"),
+        ("type_item", "type"),
+        ("const_item", "const"),
+        ("static_item", "const"),
+        ("macro_definition", "macro"),
+        ("impl_item", "impl"),
+    ],
+    calls: &["call_expression"],
+    imports: &["use_declaration"],
+    type_ref: true,
+};
+
+const PYTHON: LangSpec = LangSpec {
+    decls: &[("function_definition", "fn"), ("class_definition", "class")],
+    calls: &["call"],
+    imports: &["import_statement", "import_from_statement"],
+    type_ref: false,
+};
+
+const GO: LangSpec = LangSpec {
+    decls: &[
+        ("function_declaration", "fn"),
+        ("method_declaration", "fn"),
+        ("type_spec", "type"),
+    ],
+    calls: &["call_expression"],
+    imports: &["import_declaration"],
+    type_ref: false,
+};
+
+const JS: LangSpec = LangSpec {
+    decls: &[
+        ("function_declaration", "fn"),
+        ("generator_function_declaration", "fn"),
+        ("class_declaration", "class"),
+        ("method_definition", "fn"),
+    ],
+    calls: &["call_expression"],
+    imports: &["import_statement"],
+    type_ref: false,
+};
+
+const TS: LangSpec = LangSpec {
+    decls: &[
+        ("function_declaration", "fn"),
+        ("generator_function_declaration", "fn"),
+        ("class_declaration", "class"),
+        ("abstract_class_declaration", "class"),
+        ("method_definition", "fn"),
+        ("interface_declaration", "interface"),
+        ("type_alias_declaration", "type"),
+        ("enum_declaration", "enum"),
+    ],
+    calls: &["call_expression"],
+    imports: &["import_statement"],
+    type_ref: false,
+};
+
+fn spec_for(lang: &str) -> Option<(tree_sitter::Language, &'static LangSpec)> {
+    Some(match lang {
+        "rust" => (tree_sitter_rust::LANGUAGE.into(), &RUST),
+        "python" => (tree_sitter_python::LANGUAGE.into(), &PYTHON),
+        "go" => (tree_sitter_go::LANGUAGE.into(), &GO),
+        "javascript" => (tree_sitter_javascript::LANGUAGE.into(), &JS),
+        "typescript" => (tree_sitter_typescript::LANGUAGE_TYPESCRIPT.into(), &TS),
         _ => return None,
     })
 }
 
-fn walk(node: Node, src: &[u8], stack: &mut Vec<String>, out: &mut Parsed) {
+fn walk(node: Node, src: &[u8], spec: &LangSpec, stack: &mut Vec<String>, out: &mut Parsed) {
     let kind = node.kind();
     let mut pushed = false;
 
-    if let Some(dk) = decl_kind(kind) {
+    if let Some(dk) = spec.decl_kind(kind) {
         if let Some(name) = decl_name(node, src, dk) {
             let parent = stack.last().cloned();
             let fqname = match &parent {
@@ -128,7 +204,7 @@ fn walk(node: Node, src: &[u8], stack: &mut Vec<String>, out: &mut Parsed) {
                 .trim_end_matches('{')
                 .trim()
                 .to_string();
-            // `impl Trait for Type` → an Implements site from the type.
+            // `impl Trait for Type` (Rust) → an Implements site from the type.
             if dk == "impl" {
                 if let Some(tr) = node.child_by_field_name("trait") {
                     if let Some(trait_name) = last_ident(tr, src) {
@@ -154,7 +230,7 @@ fn walk(node: Node, src: &[u8], stack: &mut Vec<String>, out: &mut Parsed) {
             stack.push(fqname);
             pushed = true;
         }
-    } else if kind == "call_expression" {
+    } else if spec.calls.contains(&kind) {
         if let (Some(from), Some(name)) = (stack.last().cloned(), call_name(node, src)) {
             out.sites.push(Site {
                 from_fqname: from,
@@ -163,7 +239,7 @@ fn walk(node: Node, src: &[u8], stack: &mut Vec<String>, out: &mut Parsed) {
                 line: node.start_position().row + 1,
             });
         }
-    } else if kind == "type_identifier" && !is_decl_or_impl_name(node) {
+    } else if spec.type_ref && kind == "type_identifier" && !is_decl_or_impl_name(node) {
         if let (Some(from), Some(name)) = (stack.last().cloned(), text(node, src)) {
             out.sites.push(Site {
                 from_fqname: from,
@@ -172,21 +248,20 @@ fn walk(node: Node, src: &[u8], stack: &mut Vec<String>, out: &mut Parsed) {
                 line: node.start_position().row + 1,
             });
         }
-    } else if kind == "use_declaration" {
-        if let Some(arg) = node.child_by_field_name("argument") {
-            if let Some(name) = last_ident(arg, src) {
-                out.imports.push(Import {
-                    name,
-                    path: text(arg, src).unwrap_or_default(),
-                });
-            }
+    } else if spec.imports.contains(&kind) {
+        // Best-effort across grammars: the rightmost identifier is the bound name.
+        if let Some(name) = last_ident(node, src) {
+            out.imports.push(Import {
+                name,
+                path: text(node, src).unwrap_or_default(),
+            });
         }
     }
 
     let mut cursor = node.walk();
     let children: Vec<Node> = node.children(&mut cursor).collect();
     for child in children {
-        walk(child, src, stack, out);
+        walk(child, src, spec, stack, out);
     }
     if pushed {
         stack.pop();
@@ -204,16 +279,11 @@ fn decl_name(node: Node, src: &[u8], kind: &str) -> Option<String> {
 }
 
 fn call_name(call: Node, src: &[u8]) -> Option<String> {
+    // The callee is the `function` field across grammars (call_expression in
+    // Rust/JS/TS/Go, `call` in Python); its rightmost identifier is the name —
+    // handling `a.b()`, `a::b()`, `pkg.Fn()`, `obj.method()`.
     let f = call.child_by_field_name("function")?;
-    match f.kind() {
-        "identifier" => text(f, src),
-        "field_expression" => f.child_by_field_name("field").and_then(|n| text(n, src)),
-        "scoped_identifier" => f
-            .child_by_field_name("name")
-            .and_then(|n| text(n, src))
-            .or_else(|| last_ident(f, src)),
-        _ => last_ident(f, src),
-    }
+    last_ident(f, src)
 }
 
 /// True when this `type_identifier` is the *name* of a declaration (or the
@@ -234,7 +304,7 @@ fn is_decl_or_impl_name(n: Node) -> bool {
 fn last_ident(n: Node, src: &[u8]) -> Option<String> {
     if matches!(
         n.kind(),
-        "identifier" | "type_identifier" | "field_identifier"
+        "identifier" | "type_identifier" | "field_identifier" | "property_identifier"
     ) {
         return text(n, src);
     }
@@ -340,6 +410,72 @@ impl Runner for Engine {
             .any(|s| s.kind == EdgeKind::Type && s.name == "HashMap"));
         // Imports are captured best-effort.
         assert!(p.imports.iter().any(|i| i.name == "HashMap"));
+    }
+
+    #[test]
+    fn python_extraction() {
+        let p = extract_structural(
+            "x.py",
+            "class Engine:\n    def run(self):\n        return self.check()\n    def check(self):\n        return True\n",
+            "python",
+        )
+        .expect("python grammar");
+        assert!(p
+            .decls
+            .iter()
+            .any(|d| d.kind == "class" && d.name == "Engine"));
+        assert!(p.decls.iter().any(|d| d.fqname == "Engine::run"));
+        assert!(p.sites.iter().any(|s| s.kind == EdgeKind::Call
+            && s.name == "check"
+            && s.from_fqname == "Engine::run"));
+    }
+
+    #[test]
+    fn go_extraction() {
+        let p = extract_structural(
+            "x.go",
+            "package main\nfunc check() bool { return true }\nfunc run() bool { return check() }\n",
+            "go",
+        )
+        .expect("go grammar");
+        assert!(p.decls.iter().any(|d| d.kind == "fn" && d.name == "run"));
+        assert!(p
+            .sites
+            .iter()
+            .any(|s| s.kind == EdgeKind::Call && s.name == "check" && s.from_fqname == "run"));
+    }
+
+    #[test]
+    fn javascript_extraction() {
+        let p = extract_structural(
+            "x.js",
+            "function check() { return true; }\nfunction run() { return check(); }\n",
+            "javascript",
+        )
+        .expect("javascript grammar");
+        assert!(p.decls.iter().any(|d| d.kind == "fn" && d.name == "run"));
+        assert!(p
+            .sites
+            .iter()
+            .any(|s| s.kind == EdgeKind::Call && s.name == "check" && s.from_fqname == "run"));
+    }
+
+    #[test]
+    fn typescript_extraction() {
+        let p = extract_structural(
+            "x.ts",
+            "interface Runner { go(): void; }\nfunction check(): boolean { return true; }\nfunction run(): boolean { return check(); }\n",
+            "typescript",
+        )
+        .expect("typescript grammar");
+        assert!(p
+            .decls
+            .iter()
+            .any(|d| d.kind == "interface" && d.name == "Runner"));
+        assert!(p
+            .sites
+            .iter()
+            .any(|s| s.kind == EdgeKind::Call && s.name == "check" && s.from_fqname == "run"));
     }
 
     #[test]
