@@ -19,10 +19,11 @@ tracks its own Flutter version (`x.y.z+build`).
 - **blugo "Bloom" live wallpaper** — a native Android live wallpaper bundled in
   the app (`BloomWallpaperService`): the eight-petal blumi flower blooms
   petal-by-petal into the logo (flower + **blumi** wordmark) on the Living-Rose
-  dark background. It replays whenever the wallpaper becomes visible and, on
-  foldables, the moment the device is **opened** — detected via the hinge-angle
-  sensor (fold open → bloom). Settles to a static logo to spare battery. Pick it
-  under *Wallpaper → Live wallpapers → "blumi Bloom"*.
+  dark background, then the **wasp mascot fades in, centred over the bloom**. It
+  replays whenever the wallpaper becomes visible and, on foldables, the moment
+  the device is **opened** — detected via the hinge-angle sensor (fold open →
+  bloom). Settles to a static scene to spare battery. Pick it under *Wallpaper →
+  Live wallpapers → "blumi Bloom"*.
 
 ## [0.4.0] — 2026-06-07
 

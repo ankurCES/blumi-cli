@@ -1,6 +1,8 @@
 package com.blumi.blugo
 
 import android.content.Context
+import android.graphics.Bitmap
+import android.graphics.BitmapFactory
 import android.graphics.Canvas
 import android.graphics.Color
 import android.graphics.LinearGradient
@@ -41,7 +43,7 @@ class BloomWallpaperService : WallpaperService() {
         private val handler = Handler(Looper.getMainLooper())
         private var visible = false
         private var bloomStart = 0L
-        private val bloomDurMs = 2000L
+        private val bloomDurMs = 2800L
 
         private var sensorManager: SensorManager? = null
         private var hinge: Sensor? = null
@@ -75,6 +77,8 @@ class BloomWallpaperService : WallpaperService() {
             textAlign = Paint.Align.CENTER
             typeface = Typeface.create(Typeface.SANS_SERIF, Typeface.BOLD)
         }
+        private var waspBmp: Bitmap? = null
+        private val waspPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { isFilterBitmap = true }
 
         private val drawRunnable = Runnable { drawFrame() }
 
@@ -84,6 +88,13 @@ class BloomWallpaperService : WallpaperService() {
                 this@BloomWallpaperService.getSystemService(Context.SENSOR_SERVICE) as? SensorManager
             if (Build.VERSION.SDK_INT >= 30) {
                 hinge = sensorManager?.getDefaultSensor(Sensor.TYPE_HINGE_ANGLE)
+            }
+            waspBmp = try {
+                BitmapFactory.decodeResource(
+                    this@BloomWallpaperService.resources, R.drawable.bloom_wasp,
+                )
+            } catch (_: Throwable) {
+                null
             }
         }
 
@@ -108,6 +119,8 @@ class BloomWallpaperService : WallpaperService() {
         override fun onDestroy() {
             handler.removeCallbacks(drawRunnable)
             sensorManager?.unregisterListener(this)
+            waspBmp?.recycle()
+            waspBmp = null
             super.onDestroy()
         }
 
@@ -186,8 +199,14 @@ class BloomWallpaperService : WallpaperService() {
             val extent = min(w, h) * 0.20f       // bloom radius
             val scaleBase = extent / 70f          // petals live in ±70 space
 
+            // Phase clocks: the flower blooms first, the wordmark settles, then
+            // the wasp mascot rises in — centred over the bloom.
+            val bt = (t / 0.45f).coerceIn(0f, 1f)            // flower bloom
+            val wt = ((t - 0.40f) / 0.30f).coerceIn(0f, 1f)  // wordmark
+            val at = ((t - 0.55f) / 0.45f).coerceIn(0f, 1f)  // wasp fade-in
+
             // 2) Bloom glow that swells with the flower.
-            val glowT = easeOutCubic(t)
+            val glowT = easeOutCubic(bt)
             val glowR = extent * (0.4f + 1.7f * glowT)
             glowPaint.shader = RadialGradient(
                 cx, cy, glowR,
@@ -204,8 +223,8 @@ class BloomWallpaperService : WallpaperService() {
             //    spin, each petal staggered for a "petals unfurling" feel.
             c.save()
             c.translate(cx, cy)
-            c.rotate((1f - easeOutCubic(t)) * -90f)
-            val groupScale = easeOutBack(t) * scaleBase
+            c.rotate((1f - easeOutCubic(bt)) * -90f)
+            val groupScale = easeOutBack(bt) * scaleBase
             c.scale(groupScale, groupScale)
 
             val grad = LinearGradient(
@@ -216,7 +235,7 @@ class BloomWallpaperService : WallpaperService() {
             petalPaint.shader = grad
             for (i in petals.indices) {
                 val p = petals[i]
-                val pt = ((t * 1.5f) - i * 0.07f).coerceIn(0f, 1f)
+                val pt = ((bt * 1.5f) - i * 0.07f).coerceIn(0f, 1f)
                 val pe = easeOutBack(pt)
                 petalPaint.alpha = (255 * easeOutCubic(pt)).toInt().coerceIn(0, 255)
                 c.save()
@@ -228,7 +247,7 @@ class BloomWallpaperService : WallpaperService() {
             }
 
             // 4) Nucleus pops in last.
-            val nucT = ((t * 1.5f) - 0.55f).coerceIn(0f, 1f)
+            val nucT = ((bt * 1.5f) - 0.55f).coerceIn(0f, 1f)
             if (nucT > 0f) {
                 nucPaint.color = cyan
                 nucPaint.alpha = (255 * nucT).toInt()
@@ -239,7 +258,6 @@ class BloomWallpaperService : WallpaperService() {
             c.restore()
 
             // 5) Wordmark fades up beneath the bloom.
-            val wt = ((t - 0.6f) / 0.4f).coerceIn(0f, 1f)
             if (wt > 0f) {
                 val ts = extent * 0.66f
                 wordPaint.textSize = ts
@@ -251,6 +269,21 @@ class BloomWallpaperService : WallpaperService() {
                 )
                 wordPaint.alpha = (255 * wt).toInt()
                 c.drawText("blumi", cx, baseY, wordPaint)
+            }
+
+            // 6) The wasp mascot rises in, centred over the bloom — the mascot
+            //    comes to life once the flower has opened.
+            val bmp = waspBmp
+            if (bmp != null && at > 0f) {
+                val ease = easeOutCubic(at)
+                val aspect = bmp.width.toFloat() / bmp.height.toFloat()
+                val waspW = min(w * 0.94f, h * 0.62f * aspect)
+                val waspH = waspW / aspect
+                val drift = (1f - ease) * 28f          // floats up into place
+                val left = cx - waspW / 2f
+                val top = cy - waspH / 2f + drift
+                waspPaint.alpha = (255 * ease).toInt().coerceIn(0, 255)
+                c.drawBitmap(bmp, null, RectF(left, top, left + waspW, top + waspH), waspPaint)
             }
         }
     }
