@@ -475,6 +475,25 @@ impl KnowledgeStore {
                 }
             }
         }
+        // Graph fill: when the structural graph is built and direct search left
+        // room, surface typed neighbors (callees/callers) of the top hits —
+        // related code the keyword/vector pass missed (scored below direct hits).
+        if self.graph_mode == GraphMode::Structural && out.len() < k {
+            let seeds: Vec<String> = out.iter().take(5).map(|h| h.name.clone()).collect();
+            'fill: for name in &seeds {
+                let mut nbrs = self.callees(name, 4).await;
+                nbrs.extend(self.callers(name, 4).await);
+                for mut h in nbrs {
+                    if seen.insert(hit_id(&h)) {
+                        h.score *= 0.5;
+                        out.push(h);
+                        if out.len() >= k {
+                            break 'fill;
+                        }
+                    }
+                }
+            }
+        }
         out.truncate(k);
         out
     }
@@ -1435,6 +1454,33 @@ mod tests {
         assert!(fan >= 1, "expected incoming refs, got {fan}");
         // An unknown file has none.
         assert_eq!(ks.file_fan_in("/nope/x.rs").await, 0);
+    }
+
+    #[cfg(feature = "code-graph")]
+    #[tokio::test]
+    async fn structural_search_expands_along_graph() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(
+            dir.path().join("engine.rs"),
+            "pub struct Engine {}\nimpl Engine {\n    pub fn run(&self) -> bool { self.check() }\n    fn check(&self) -> bool { true }\n}\n",
+        )
+        .unwrap();
+        let ks = KnowledgeStore::open_in_memory(None)
+            .await
+            .unwrap()
+            .with_graph_mode(GraphMode::Structural);
+        ks.ingest_path(dir.path(), "test", &IngestConfig::default())
+            .await
+            .unwrap();
+
+        // Searching `run` also surfaces `check` (its callee) via graph-fill, even
+        // though `check`'s text doesn't contain "run".
+        let hits = ks.search("run", 10).await;
+        assert!(hits.iter().any(|h| h.name == "run"));
+        assert!(
+            hits.iter().any(|h| h.name == "check"),
+            "graph-fill surfaced the callee"
+        );
     }
 
     #[tokio::test]
