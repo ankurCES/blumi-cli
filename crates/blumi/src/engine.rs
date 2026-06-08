@@ -166,6 +166,40 @@ pub async fn build_session(
         d
     });
 
+    // SEDM background curation for non-gateway (CLI/TUI) sessions. The gateway
+    // runs its own sweep + grid diffusion (see `web.rs`); standalone runs have no
+    // peers, so here we periodically (a) consolidate near-duplicates, (b) evict
+    // the weakest past the namespace cap, (c) rebuild the recall graph, and
+    // (d) mine recurring failures into recovery skills — none of which happened
+    // off the gateway before, leaving graph-augmented recall a silent no-op.
+    // `interval`'s first tick fires immediately so even a short session gets one
+    // curation pass; long-lived `blumi tui` keeps curating. Fully best-effort.
+    if let Some(mem) = semantic.clone() {
+        let period = config.memory.sweep_secs.max(15);
+        let heal = config.heal.clone();
+        let skills_dir = config.paths.skills.clone();
+        tokio::spawn(async move {
+            let mut tick = tokio::time::interval(std::time::Duration::from_secs(period));
+            tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+            loop {
+                tick.tick().await;
+                let (merged, evicted) = mem.sweep().await;
+                if merged > 0 || evicted > 0 {
+                    tracing::debug!("memory sweep: merged={merged} evicted={evicted}");
+                }
+                // Self-evolution: cluster recurring failures → low-risk recovery
+                // skill (auto) or proposal. Idempotent (markers dedup); the new
+                // skill loads on the next session reload.
+                if heal.enabled && !matches!(heal.evolve, blumi_config::HealEvolve::Off) {
+                    for action in crate::evolve::mine_once(&mem, &skills_dir, heal.evolve, 3).await
+                    {
+                        tracing::info!("self-evolve: {action}");
+                    }
+                }
+            }
+        });
+    }
+
     // Long-term `memory` tool: MEMORY.md/USER.md mirror + the semantic store.
     {
         let mut tool =
