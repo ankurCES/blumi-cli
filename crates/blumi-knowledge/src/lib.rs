@@ -10,6 +10,8 @@
 //! when embeddings are off, and to chunk-only when a language isn't recognized.
 
 pub mod extract;
+#[cfg(feature = "code-graph")]
+pub mod extract_ts;
 
 /// How the code reference graph is built. Mirrors `blumi_config::GraphMode`,
 /// kept config-dep-free here (like `blumi_persist::MemoryParams`).

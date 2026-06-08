@@ -20,12 +20,16 @@ tracing.workspace = true
 regex.workspace = true
 sha2.workspace = true
 ignore = "0.4"
+# Structural code graph (feature `code-graph`): tree-sitter parsers. Optional so
+# the default native-lite build never compiles a C grammar.
+tree-sitter = { version = "0.25", optional = true }
+tree-sitter-rust = { version = "0.24", optional = true }
 
 [features]
 default = []
-# Tier-1 structural code graph (tree-sitter parsers). Scaffold only in P0 —
-# parsers + the resolver land in P1/P2. Keeps the default build native-lite.
-code-graph = []
+# Tier-1 structural code graph: tree-sitter declaration/reference extraction
+# (P1). The P2 resolver turns reference sites into typed, resolved edges.
+code-graph = ["dep:tree-sitter", "dep:tree-sitter-rust"]
 
 [dev-dependencies]
 tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
