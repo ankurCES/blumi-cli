@@ -78,6 +78,9 @@ pub struct AgentTurnRunner {
     /// UserPromptSubmit lifecycle hooks: shell commands run on the latest prompt
     /// whose stdout is injected as background context. Empty = none (default).
     prompt_hooks: Vec<blumi_config::HookDef>,
+    /// RPL-Judgement: adversarial, regret-minimizing pre-execution review of
+    /// high-blast tool batches. `None` (or `enabled = false`) = no review.
+    rpl: Option<blumi_config::RplConfig>,
 }
 
 impl AgentTurnRunner {
@@ -115,6 +118,7 @@ impl AgentTurnRunner {
             heal: None,
             router: None,
             prompt_hooks: Vec::new(),
+            rpl: None,
         }
     }
 
@@ -157,6 +161,77 @@ impl AgentTurnRunner {
     pub fn with_router(mut self, router: Arc<Router>) -> Self {
         self.router = Some(router);
         self
+    }
+
+    /// Enable RPL-Judgement: an adversarial, regret-minimizing pre-execution
+    /// review of high-blast tool batches (blast radius → "Porfiry" judge →
+    /// Error-Delta learning). A no-op while `enabled` is false.
+    pub fn with_rpl(mut self, rpl: blumi_config::RplConfig) -> Self {
+        self.rpl = Some(rpl);
+        self
+    }
+
+    /// The Porfiry node: an adversarial LLM judge that must approve a high-blast
+    /// plan before it executes. Returns the verdict + a 0–100 predicted risk.
+    /// Fail-open (approve, risk = blast severity) when the judge is unavailable
+    /// or returns nothing parseable, so a flaky judge never deadlocks the agent.
+    async fn rpl_porfiry(
+        &self,
+        tool_calls: &[ToolCall],
+        blast: &crate::rpl::BlastRadius,
+        ct: &CancellationToken,
+    ) -> (crate::rpl::PorfiryVerdict, u8) {
+        let model = match &self.rpl {
+            Some(c) if !c.judge_model.trim().is_empty() => c.judge_model.clone(),
+            _ => self.options.model.clone(),
+        };
+        let plan = tool_calls
+            .iter()
+            .map(|c| {
+                format!(
+                    "- {} {}",
+                    c.name,
+                    serde_json::to_string(&c.arguments).unwrap_or_default()
+                )
+            })
+            .collect::<Vec<_>>()
+            .join("\n");
+        let user = format!(
+            "Plan (tool calls about to run):\n{plan}\n\n{}\n\nJudge this plan before it runs.",
+            blast.declaration()
+        );
+        let opts = LlmOptions {
+            model,
+            max_output_tokens: 120,
+            temperature: 0.0,
+            top_p: 1.0,
+            top_k: 0,
+            thinking: false,
+            prompt_cache: false,
+        };
+        let prompt = [Message::system(PORFIRY_POLICY), Message::user(user)];
+        let mut stream = match self.llm.stream_chat(&prompt, &[], &opts, ct.clone()).await {
+            Ok(s) => s,
+            Err(_) => {
+                return (
+                    crate::rpl::PorfiryVerdict {
+                        approved: true,
+                        flaw: None,
+                    },
+                    blast.severity(),
+                )
+            }
+        };
+        let mut out = String::new();
+        while let Some(chunk) = stream.next().await {
+            match chunk {
+                Ok(StreamChunk::Text { text: t }) => out.push_str(&t),
+                Ok(StreamChunk::Done { .. }) => break,
+                Err(_) => break,
+                _ => {}
+            }
+        }
+        parse_porfiry(&out, blast.severity())
     }
 
     /// Enable UserPromptSubmit hooks: shell commands run on the latest prompt
@@ -226,6 +301,9 @@ impl TurnRunner for AgentTurnRunner {
         // guided tool succeeds on a later iteration we emit a "confirmed" trace
         // (verified = true) and reinforce the learned fix. Used only when heal.verify.
         let mut recovery_pending: Vec<(String, Option<i64>)> = Vec::new();
+        // RPL-Judgement: how many times Porfiry has bounced a plan this turn
+        // (bounded by rpl.max_defend_rounds before we proceed under caution).
+        let mut rpl_defends: u8 = 0;
 
         // Snapshot the active persona for this turn: it layers extra
         // instructions onto the system prompt and may override the temperature.
@@ -574,6 +652,66 @@ impl TurnRunner for AgentTurnRunner {
             // A productive (non-repeating) step — reset the redirect counter.
             loop_nudges = 0;
 
+            // --- RPL-Judgement: adversarial pre-execution review --------------
+            // Map the planned batch's blast radius; if it clears the threshold an
+            // adversarial "Porfiry" judge must approve before we touch the live
+            // system. On rejection we bounce like the doom-loop guard above —
+            // drop the tool calls, keep reasoning, inject the flaw, and let the
+            // model re-plan (bounded by max_defend_rounds, then proceed under
+            // caution so the turn never deadlocks). Minimize regret, not just
+            // maximize success.
+            let mut rpl_predicted_risk: Option<u8> = None;
+            if let Some(rpl) = self.rpl.clone() {
+                if rpl.enabled {
+                    let caps: Vec<blumi_protocol::Capability> = tool_calls
+                        .iter()
+                        .flat_map(|c| {
+                            self.registry
+                                .get(&c.name)
+                                .map(|t| t.required_capabilities(&c.arguments))
+                                .unwrap_or_default()
+                        })
+                        .collect();
+                    let blast = crate::rpl::BlastRadius::assess(&caps);
+                    if blast.warrants_review(rpl.blast_threshold) {
+                        ctx.events.emit(Event::Notice {
+                            message: format!("RPL review — {}", blast.declaration()),
+                        });
+                        let (verdict, risk) = self.rpl_porfiry(&tool_calls, &blast, &ct).await;
+                        if !verdict.approved && rpl_defends < rpl.max_defend_rounds {
+                            rpl_defends += 1;
+                            let flaw = verdict.flaw.unwrap_or_else(|| {
+                                "the plan's risk is not justified — choose a safer, smaller, \
+                                 reversible approach"
+                                    .to_string()
+                            });
+                            if !text.is_empty() {
+                                state.lock().await.messages.push(Message::assistant(text));
+                            }
+                            state.lock().await.messages.push(Message::user(format!(
+                                "[RPL — Porfiry rejected this plan before execution]\n{flaw}\n\
+                                 Revise to shrink the blast radius (smaller, reversible steps; \
+                                 re-read current state first), or briefly justify why this \
+                                 action is necessary, then proceed."
+                            )));
+                            ctx.events.emit(Event::Notice {
+                                message: "RPL: plan rejected by Porfiry — re-planning".into(),
+                            });
+                            continue;
+                        }
+                        // Approved (or defend rounds exhausted) → proceed, and
+                        // remember the predicted risk for the Confession below.
+                        rpl_predicted_risk = Some(risk);
+                        if !verdict.approved {
+                            ctx.events.emit(Event::Notice {
+                                message: "RPL: defend rounds exhausted — proceeding under caution"
+                                    .into(),
+                            });
+                        }
+                    }
+                }
+            }
+
             // Record the assistant message (with its tool calls) before results.
             state
                 .lock()
@@ -599,6 +737,30 @@ impl TurnRunner for AgentTurnRunner {
                         ));
                     }
                 }
+            }
+
+            // RPL Confession (Phase 5): for a reviewed batch, record the gap
+            // between the predicted risk and the actual outcome (the "regret")
+            // as an episode memory — the reward signal value-based fitness reads.
+            if let (Some(risk), Some(mem)) = (rpl_predicted_risk, &self.memory) {
+                let failed = tool_calls.iter().any(|c| {
+                    results
+                        .get(c.id.as_str())
+                        .map(|r| !r.class.is_success())
+                        .unwrap_or(false)
+                });
+                let action = tool_calls
+                    .iter()
+                    .map(|c| c.name.as_str())
+                    .collect::<Vec<_>>()
+                    .join("+");
+                let delta = crate::rpl::ErrorDelta::compute(risk, failed);
+                ctx.events.emit(Event::Notice {
+                    message: format!("RPL confession — {}", delta.episode_text(&action)),
+                });
+                let _ = mem
+                    .remember("agent", "rpl_delta", &delta.episode_text(&action))
+                    .await;
             }
 
             // Durable-execution checkpoint: persist the turn after this tool
@@ -948,6 +1110,68 @@ struct ToolAccum {
     args: String,
 }
 
+/// The Porfiry node's system directive: an adversarial judge whose only job is
+/// to find the flaw in a plan before it runs.
+const PORFIRY_POLICY: &str = "\
+You are Porfiry, an adversarial reviewer for a coding agent. You are shown a \
+plan (a batch of tool calls the agent is about to execute) and its blast \
+radius. Your only job is to find the flaw: the ignored edge case, the state it \
+failed to re-read, the irreversible step taken for granted, the way this could \
+break the environment. The agent is biased toward finishing the task — be \
+skeptical. Approve ONLY if the plan is genuinely safe and the risk is \
+justified.\n\n\
+Respond with ONLY one line of JSON, no prose, no code fences:\n\
+{\"approved\":true|false,\"risk\":0-100,\"flaw\":\"<=20 words\"}";
+
+/// Parse Porfiry's JSON verdict, tolerating fences/prose around it. Fail-open
+/// (approve) when nothing parseable is found, using `default_risk` (the blast
+/// severity) so a noisy judge never blocks the agent.
+fn parse_porfiry(text: &str, default_risk: u8) -> (crate::rpl::PorfiryVerdict, u8) {
+    let json = match (text.find('{'), text.rfind('}')) {
+        (Some(s), Some(e)) if e > s => &text[s..=e],
+        _ => {
+            return (
+                crate::rpl::PorfiryVerdict {
+                    approved: true,
+                    flaw: None,
+                },
+                default_risk,
+            )
+        }
+    };
+    if let Ok(v) = serde_json::from_str::<serde_json::Value>(json) {
+        let approved = v.get("approved").and_then(|x| x.as_bool()).unwrap_or(true);
+        let risk = v
+            .get("risk")
+            .and_then(|x| x.as_u64())
+            .map(|r| r.min(100) as u8)
+            .unwrap_or(default_risk);
+        let flaw = v
+            .get("flaw")
+            .and_then(|x| x.as_str())
+            .map(|s| s.trim().to_string())
+            .filter(|s| !s.is_empty());
+        return (
+            crate::rpl::PorfiryVerdict {
+                approved,
+                flaw: if approved {
+                    None
+                } else {
+                    flaw.or_else(|| Some("unsafe plan".to_string()))
+                },
+            },
+            risk,
+        );
+    }
+    (
+        crate::rpl::PorfiryVerdict {
+            approved: true,
+            flaw: None,
+        },
+        default_risk,
+    )
+}
+
 fn finalize_tool_calls(accum: BTreeMap<u32, ToolAccum>) -> Vec<ToolCall> {
     accum
         .into_values()
@@ -1088,6 +1312,24 @@ mod tests {
     use crate::llm::{ProviderCaps, ToolSpec};
     use crate::tool::Tool;
     use crate::{ExecError, LlmError, PermissionEngine, ToolRegistry};
+
+    #[test]
+    fn porfiry_parse_reject_approve_and_failopen() {
+        // A clear rejection with a flaw + risk is parsed faithfully.
+        let (v, risk) =
+            parse_porfiry("{\"approved\":false,\"risk\":80,\"flaw\":\"deletes the repo\"}", 10);
+        assert!(!v.approved);
+        assert_eq!(risk, 80);
+        assert_eq!(v.flaw.as_deref(), Some("deletes the repo"));
+        // Approval clears the flaw, even with prose around the JSON.
+        let (v2, _) = parse_porfiry("sure: {\"approved\":true,\"risk\":5}", 50);
+        assert!(v2.approved && v2.flaw.is_none());
+        // Unparseable output ⇒ fail-open (approve) at the default (blast) risk,
+        // so a noisy judge never deadlocks the agent.
+        let (v3, risk3) = parse_porfiry("the model rambled with no json", 42);
+        assert!(v3.approved);
+        assert_eq!(risk3, 42);
+    }
     use blumi_config::PermissionConfig;
     use blumi_protocol::{Command, Envelope, FinishReason, SessionId, ToolCallDelta, ToolResult};
     use futures::stream::BoxStream;
