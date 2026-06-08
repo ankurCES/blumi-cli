@@ -836,6 +836,148 @@ impl KnowledgeStore {
             .collect()
     }
 
+    /// Symbols that reference a symbol named `name` (incoming `call`/`ref`
+    /// edges) — "who calls / uses X".
+    pub async fn callers(&self, name: &str, limit: usize) -> Vec<CodeHit> {
+        self.directional(name, true, &["call", "ref"], limit).await
+    }
+
+    /// Symbols that a symbol named `name` references (outgoing `call`/`ref`
+    /// edges) — "what X calls / uses".
+    pub async fn callees(&self, name: &str, limit: usize) -> Vec<CodeHit> {
+        self.directional(name, false, &["call", "ref"], limit).await
+    }
+
+    /// Types that implement a trait named `name` (incoming `implements` edges).
+    pub async fn implementers(&self, name: &str, limit: usize) -> Vec<CodeHit> {
+        self.directional(name, true, &["implements"], limit).await
+    }
+
+    /// Directional edge query. `incoming`: return the *source* of edges whose
+    /// destination is named `name` (callers); else the *destination* of edges
+    /// whose source is named `name` (callees). `kinds` are our own constants
+    /// (safe to inline). Score = best `resolved` flag among the edges.
+    async fn directional(
+        &self,
+        name: &str,
+        incoming: bool,
+        kinds: &[&str],
+        limit: usize,
+    ) -> Vec<CodeHit> {
+        let kind_list = kinds
+            .iter()
+            .map(|k| format!("'{k}'"))
+            .collect::<Vec<_>>()
+            .join(",");
+        let (want, given) = if incoming {
+            ("e.src", "e.dst")
+        } else {
+            ("e.dst", "e.src")
+        };
+        let sql = format!(
+            "SELECT f.path AS path, s.name AS name, s.kind AS kind,
+                    s.start_line AS sl, s.end_line AS el, s.snippet AS snippet,
+                    MAX(e.resolved) AS res
+             FROM code_edges e
+             JOIN code_symbols g ON g.id = {given}
+             JOIN code_symbols s ON s.id = {want}
+             JOIN code_files f ON f.id = s.file_id
+             WHERE g.name = ? AND e.kind IN ({kind_list})
+             GROUP BY s.id
+             ORDER BY res DESC, s.name LIMIT ?"
+        );
+        let rows = sqlx::query(&sql)
+            .bind(name)
+            .bind(limit as i64)
+            .fetch_all(&self.pool)
+            .await
+            .unwrap_or_default();
+        rows.iter()
+            .map(|r| CodeHit {
+                path: r.get("path"),
+                name: r.get("name"),
+                kind: r.get("kind"),
+                start_line: r.get("sl"),
+                end_line: r.get("el"),
+                snippet: r.get("snippet"),
+                score: r.get::<i64, _>("res") as f32,
+            })
+            .collect()
+    }
+
+    /// Transitive callers of a symbol named `name` — the **change blast radius**:
+    /// who breaks (transitively) if `name` changes. BFS over reverse `call`/`ref`
+    /// edges, bounded by `max_depth` hops and `cap` results.
+    pub async fn impact(&self, name: &str, max_depth: usize, cap: usize) -> Vec<CodeHit> {
+        let seed = sqlx::query("SELECT id FROM code_symbols WHERE name = ?")
+            .bind(name)
+            .fetch_all(&self.pool)
+            .await
+            .unwrap_or_default();
+        let mut frontier: Vec<i64> = seed.iter().map(|r| r.get::<i64, _>("id")).collect();
+        let mut seen: HashSet<i64> = frontier.iter().copied().collect();
+        let mut found: Vec<i64> = Vec::new();
+        for _ in 0..max_depth {
+            if frontier.is_empty() || found.len() >= cap {
+                break;
+            }
+            let inlist = frontier
+                .iter()
+                .map(|i| i.to_string())
+                .collect::<Vec<_>>()
+                .join(",");
+            let sql = format!(
+                "SELECT DISTINCT e.src AS id FROM code_edges e
+                 WHERE e.dst IN ({inlist}) AND e.kind IN ('call','ref')"
+            );
+            let rows = sqlx::query(&sql)
+                .fetch_all(&self.pool)
+                .await
+                .unwrap_or_default();
+            let mut next = Vec::new();
+            for r in &rows {
+                let id: i64 = r.get("id");
+                if seen.insert(id) {
+                    next.push(id);
+                    found.push(id);
+                    if found.len() >= cap {
+                        break;
+                    }
+                }
+            }
+            frontier = next;
+        }
+        if found.is_empty() {
+            return Vec::new();
+        }
+        let inlist = found
+            .iter()
+            .map(|i| i.to_string())
+            .collect::<Vec<_>>()
+            .join(",");
+        let sql = format!(
+            "SELECT f.path AS path, s.name AS name, s.kind AS kind,
+                    s.start_line AS sl, s.end_line AS el, s.snippet AS snippet
+             FROM code_symbols s JOIN code_files f ON f.id = s.file_id
+             WHERE s.id IN ({inlist}) ORDER BY s.name"
+        );
+        let rows = sqlx::query(&sql)
+            .fetch_all(&self.pool)
+            .await
+            .unwrap_or_default();
+        rows.iter()
+            .map(|r| CodeHit {
+                path: r.get("path"),
+                name: r.get("name"),
+                kind: r.get("kind"),
+                start_line: r.get("sl"),
+                end_line: r.get("el"),
+                snippet: r.get("snippet"),
+                score: 1.0,
+            })
+            .collect()
+    }
+
     /// Most-connected symbols ("god nodes"), by total degree (score = degree).
     pub async fn hubs(&self, limit: usize) -> Vec<CodeHit> {
         let rows = sqlx::query(
@@ -1209,6 +1351,48 @@ mod tests {
         .await
         .unwrap();
         assert!(contains >= 1, "contains edge into Engine::run");
+    }
+
+    #[cfg(feature = "code-graph")]
+    #[tokio::test]
+    async fn structural_graph_queries() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(
+            dir.path().join("engine.rs"),
+            "pub trait Runner { fn go(&self); }\npub struct Engine {}\nimpl Engine {\n    pub fn run(&self) -> bool { self.check() }\n    fn check(&self) -> bool { true }\n}\nimpl Runner for Engine {\n    fn go(&self) { let _ = self.run(); }\n}\n",
+        )
+        .unwrap();
+        let ks = KnowledgeStore::open_in_memory(None)
+            .await
+            .unwrap()
+            .with_graph_mode(GraphMode::Structural);
+        ks.ingest_path(dir.path(), "test", &IngestConfig::default())
+            .await
+            .unwrap();
+
+        // run -> check.
+        assert!(ks
+            .callees("run", 10)
+            .await
+            .iter()
+            .any(|h| h.name == "check"));
+        assert!(ks
+            .callers("check", 10)
+            .await
+            .iter()
+            .any(|h| h.name == "run"));
+        // Changing `check` transitively affects `run` (its caller).
+        assert!(ks
+            .impact("check", 4, 50)
+            .await
+            .iter()
+            .any(|h| h.name == "run"));
+        // Engine implements Runner.
+        assert!(ks
+            .implementers("Runner", 10)
+            .await
+            .iter()
+            .any(|h| h.name == "Engine"));
     }
 
     #[tokio::test]
