@@ -569,6 +569,45 @@ impl Default for AlwaysOnConfig {
 /// Native-lite code knowledge base. When enabled, `blumi knowledge ingest` and
 /// the `code_search` / `code_retrieve` tools index repos into `knowledge.db`
 /// (FTS5 + embeddings when available). Disable to drop the code-KB tools.
+/// How blumi builds the code reference graph (`knowledge.graph.mode`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "lowercase")]
+pub enum GraphMode {
+    /// Build no graph.
+    Off,
+    /// Name-co-occurrence heuristic — the always-available default (Tier 0).
+    #[default]
+    Lite,
+    /// Typed, scope-resolved structural graph (tree-sitter; needs the
+    /// `code-graph` build feature, else falls back to `lite`). Tier 1.
+    Structural,
+}
+
+/// Code reference-graph settings (under `knowledge.graph`).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct KnowledgeGraphConfig {
+    /// How edges are built. Default `lite` (today's behavior).
+    pub mode: GraphMode,
+    /// Resolve `import`/`use` statements when building structural edges.
+    pub resolve_imports: bool,
+    /// Cap outgoing edges per symbol (noise control). 0 = uncapped.
+    pub max_edges_per_symbol: u32,
+    /// Feed a symbol's caller fan-in into the RPL blast radius.
+    pub rpl_impact: bool,
+}
+
+impl Default for KnowledgeGraphConfig {
+    fn default() -> Self {
+        KnowledgeGraphConfig {
+            mode: GraphMode::Lite,
+            resolve_imports: true,
+            max_edges_per_symbol: 64,
+            rpl_impact: true,
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct KnowledgeConfig {
@@ -578,6 +617,8 @@ pub struct KnowledgeConfig {
     pub max_file_kb: u64,
     /// Extra path substrings to exclude (beyond .gitignore + default noise dirs).
     pub exclude: Vec<String>,
+    /// Code reference-graph settings (Tier-0 `lite` by default).
+    pub graph: KnowledgeGraphConfig,
 }
 
 impl Default for KnowledgeConfig {
@@ -586,6 +627,7 @@ impl Default for KnowledgeConfig {
             enabled: true,
             max_file_kb: 256,
             exclude: Vec::new(),
+            graph: KnowledgeGraphConfig::default(),
         }
     }
 }

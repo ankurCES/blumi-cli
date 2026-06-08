@@ -7,6 +7,24 @@
 use blumi_config::BlumiConfig;
 use blumi_knowledge::{IngestConfig, KnowledgeStore};
 
+/// Resolve the configured code-graph mode for this build. `structural` requires
+/// the `code-graph` build feature; without it we warn and fall back to `lite`.
+pub fn graph_mode(config: &BlumiConfig) -> blumi_knowledge::GraphMode {
+    use blumi_config::GraphMode as C;
+    use blumi_knowledge::GraphMode as K;
+    match config.knowledge.graph.mode {
+        C::Off => K::Off,
+        C::Lite => K::Lite,
+        C::Structural if cfg!(feature = "code-graph") => K::Structural,
+        C::Structural => {
+            tracing::warn!(
+                "knowledge.graph.mode=structural needs the `code-graph` build feature; using lite"
+            );
+            K::Lite
+        }
+    }
+}
+
 fn ingest_cfg(config: &BlumiConfig) -> IngestConfig {
     IngestConfig {
         max_file_kb: config.knowledge.max_file_kb,

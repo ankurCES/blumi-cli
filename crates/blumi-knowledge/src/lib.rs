@@ -11,6 +11,20 @@
 
 pub mod extract;
 
+/// How the code reference graph is built. Mirrors `blumi_config::GraphMode`,
+/// kept config-dep-free here (like `blumi_persist::MemoryParams`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum GraphMode {
+    /// Build no graph.
+    Off,
+    /// Name-co-occurrence heuristic — the always-available default (Tier 0).
+    #[default]
+    Lite,
+    /// Typed, scope-resolved structural graph (tree-sitter; the `code-graph`
+    /// build feature). Tier 1 — parsers land in P1/P2; treated as `Lite` until then.
+    Structural,
+}
+
 use blumi_core::EmbeddingClient;
 use sha2::{Digest, Sha256};
 use sqlx::sqlite::{SqliteConnectOptions, SqliteJournalMode, SqlitePoolOptions};
@@ -88,6 +102,7 @@ pub struct KnowledgeStatus {
 pub struct KnowledgeStore {
     pool: SqlitePool,
     embedder: Option<Arc<dyn EmbeddingClient>>,
+    graph_mode: GraphMode,
 }
 
 impl KnowledgeStore {
@@ -109,7 +124,11 @@ impl KnowledgeStore {
             .connect_with(opts)
             .await?;
         sqlx::migrate!("./migrations").run(&pool).await?;
-        Ok(KnowledgeStore { pool, embedder })
+        Ok(KnowledgeStore {
+            pool,
+            embedder,
+            graph_mode: GraphMode::default(),
+        })
     }
 
     /// In-memory store for tests.
@@ -122,7 +141,17 @@ impl KnowledgeStore {
             .connect_with(opts)
             .await?;
         sqlx::migrate!("./migrations").run(&pool).await?;
-        Ok(KnowledgeStore { pool, embedder })
+        Ok(KnowledgeStore {
+            pool,
+            embedder,
+            graph_mode: GraphMode::default(),
+        })
+    }
+
+    /// Set how the reference graph is built (default [`GraphMode::Lite`]).
+    pub fn with_graph_mode(mut self, mode: GraphMode) -> Self {
+        self.graph_mode = mode;
+        self
     }
 
     fn ready(&self) -> bool {
@@ -511,6 +540,11 @@ impl KnowledgeStore {
     /// Rebuild the symbol reference graph: an edge src→dst means src's body
     /// mentions dst's name. Full rebuild (cheap at native-lite scale).
     pub async fn build_graph(&self) -> Result<usize, KnowledgeError> {
+        // Tier-1 structural building lands in P2; for now Off skips, everything
+        // else uses the lite name-co-occurrence builder below.
+        if self.graph_mode == GraphMode::Off {
+            return Ok(0);
+        }
         let rows = sqlx::query("SELECT id, name, snippet FROM code_symbols")
             .fetch_all(&self.pool)
             .await?;

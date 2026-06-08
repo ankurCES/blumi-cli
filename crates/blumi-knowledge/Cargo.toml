@@ -21,6 +21,12 @@ regex.workspace = true
 sha2.workspace = true
 ignore = "0.4"
 
+[features]
+default = []
+# Tier-1 structural code graph (tree-sitter parsers). Scaffold only in P0 —
+# parsers + the resolver land in P1/P2. Keeps the default build native-lite.
+code-graph = []
+
 [dev-dependencies]
 tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
 tempfile = "3"

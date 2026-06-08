@@ -221,7 +221,7 @@ pub async fn build_session(
         .await
         {
             Ok(ks) => {
-                let ks = Arc::new(ks);
+                let ks = Arc::new(ks.with_graph_mode(crate::knowledge::graph_mode(config)));
                 registry.register(Arc::new(blumi_core::Typed(blumi_tools::CodeSearch::new(
                     ks.clone(),
                 ))));

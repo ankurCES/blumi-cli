@@ -76,6 +76,9 @@ local-embeddings = ["blumi-llm/local-embeddings"]
 gpu-cuda = ["blumi-llm/gpu-cuda"]
 # Explicit Apple CoreML opt-in (already the default on Apple Silicon).
 gpu-coreml = ["blumi-llm/gpu-coreml"]
+# Opt-in Tier-1 structural code graph (tree-sitter parsers; heavier build):
+#   cargo build --features code-graph
+code-graph = ["blumi-knowledge/code-graph"]
 
 [dev-dependencies]
 tempfile = "3"
