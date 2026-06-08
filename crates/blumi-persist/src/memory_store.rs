@@ -157,6 +157,23 @@ impl SemanticMemoryImpl {
         source_session: Option<&str>,
         origin: &str,
     ) -> Option<i64> {
+        self.add_inner(namespace, kind, text, source_session, origin)
+            .await
+            .map(|(id, _merged)| id)
+    }
+
+    /// Like [`add`](Self::add), but also reports whether the write *merged* into
+    /// an existing near-duplicate (`true`) rather than inserting a new row —
+    /// used by [`ingest_remote`](Self::ingest_remote) to detect cross-node
+    /// corroboration (consensus).
+    async fn add_inner(
+        &self,
+        namespace: &str,
+        kind: &str,
+        text: &str,
+        source_session: Option<&str>,
+        origin: &str,
+    ) -> Option<(i64, bool)> {
         let text = text.trim();
         if text.is_empty() {
             return None;
@@ -165,22 +182,24 @@ impl SemanticMemoryImpl {
             if let Some((id, sim)) = self.best_match(namespace, &qvec).await {
                 if sim >= self.params.dedup_threshold {
                     self.merge(id).await;
-                    return Some(id);
+                    return Some((id, true));
                 }
             }
             let id = self
                 .insert(namespace, kind, text, source_session, origin, "active")
                 .await?;
             self.insert_vector(id, &qvec).await;
-            Some(id)
+            Some((id, false))
         } else {
             // No embeddings: dedup on exact text, else insert (no vector).
             if let Some(id) = self.find_exact(namespace, text).await {
                 self.merge(id).await;
-                return Some(id);
+                return Some((id, true));
             }
-            self.insert(namespace, kind, text, source_session, origin, "active")
-                .await
+            let id = self
+                .insert(namespace, kind, text, source_session, origin, "active")
+                .await?;
+            Some((id, false))
         }
     }
 
@@ -193,9 +212,18 @@ impl SemanticMemoryImpl {
         text: &str,
         origin: &str,
     ) -> bool {
-        self.add(namespace, kind, text, None, origin)
-            .await
-            .is_some()
+        match self.add_inner(namespace, kind, text, None, origin).await {
+            Some((id, merged)) => {
+                // Cross-node consensus: a peer independently holds this memory,
+                // so corroboration raises its learned value (a fix confirmed on
+                // N nodes outranks one seen once) — F10.
+                if merged {
+                    self.reward(&[id], 0.3).await;
+                }
+                true
+            }
+            None => false,
+        }
     }
 
     /// Persist a memory as a *pending hypothesis*: embedded and stored but
@@ -403,6 +431,53 @@ impl SemanticMemoryImpl {
             .bind(now())
             .execute(self.pool())
             .await;
+    }
+
+    /// Resolve a conflict by superseding `loser` with `winner`: the loser is
+    /// marked `superseded` (excluded from recall/mining/diffusion like any
+    /// non-active row, but kept for audit/restore — reversible, never deleted),
+    /// with the winner recorded as provenance. The conflict-resolution actuator
+    /// for the mutually-exclusive case (F6).
+    pub async fn supersede(&self, loser: i64, winner: i64) {
+        let _ = sqlx::query(
+            "UPDATE memories
+                SET status = 'superseded', updated_at = ?,
+                    source_session = COALESCE(NULLIF(source_session, ''), ?)
+              WHERE id = ? AND status = 'active'",
+        )
+        .bind(now())
+        .bind(format!("superseded_by:{winner}"))
+        .bind(loser)
+        .execute(self.pool())
+        .await;
+    }
+
+    /// Candidate *conflict* pairs in `namespace`: active memories whose cosine
+    /// falls in the band `[lo, hi)` — same topic, but not near-duplicates (those
+    /// already merge on write). The LLM conflict resolver classifies these
+    /// (mutually-exclusive / temporal / granularity) and acts via [`supersede`]
+    /// / [`update_memory_text`]. Bounded by `limit` to cap resolver cost.
+    pub async fn conflict_candidates(
+        &self,
+        namespace: &str,
+        lo: f32,
+        hi: f32,
+        limit: usize,
+    ) -> Vec<(i64, String, i64, String)> {
+        let vecs = self.active_vectors(Some(namespace)).await;
+        let mut out = Vec::new();
+        for i in 0..vecs.len() {
+            for j in (i + 1)..vecs.len() {
+                let s = dot(&vecs[i].3, &vecs[j].3);
+                if s >= lo && s < hi {
+                    out.push((vecs[i].0, vecs[i].2.clone(), vecs[j].0, vecs[j].2.clone()));
+                    if out.len() >= limit {
+                        return out;
+                    }
+                }
+            }
+        }
+        out
     }
 
     /// Core search shared by recall (floored) and explicit query (floor 0).
@@ -784,7 +859,7 @@ impl SemanticMemoryImpl {
             "SELECT namespace, kind, text FROM memories
              WHERE status = 'active' AND origin = '' AND namespace NOT LIKE 'user%'
                    AND utility >= ?
-             ORDER BY utility DESC LIMIT ?",
+             ORDER BY value DESC, utility DESC LIMIT ?",
         )
         .bind(min_utility)
         .bind(limit)
@@ -1307,6 +1382,78 @@ mod tests {
         // value is surfaced (white-box editor) and reflects the reward.
         let ea = mem.get_memory(a).await.unwrap();
         assert!(ea.value > 1.5, "rewarded value rose, got {}", ea.value);
+    }
+
+    #[tokio::test]
+    async fn supersede_removes_from_recall_but_keeps_audit() {
+        let mem = store_with(Some(Arc::new(MockEmbedder))).await;
+        let old = mem
+            .remember("agent", "note", "rust ownership")
+            .await
+            .unwrap();
+        let new = mem
+            .remember("agent", "note", "rust and python")
+            .await
+            .unwrap();
+        mem.supersede(old, new).await;
+        // Superseded ⇒ excluded from recall/query (status != active)...
+        let hits = mem.query(Some("agent"), "rust ownership", 5).await;
+        assert!(hits.iter().all(|h| h.id != old), "superseded not recalled");
+        // ...but retained for audit/restore, with provenance to the winner.
+        let sup = mem
+            .list_memories(Some("agent"), Some("superseded"), 5)
+            .await;
+        assert_eq!(sup.len(), 1, "superseded row kept");
+        assert!(sup[0]
+            .source_session
+            .as_deref()
+            .unwrap_or("")
+            .contains("superseded_by"));
+    }
+
+    #[tokio::test]
+    async fn ingest_consensus_raises_value() {
+        let mem = store_with(Some(Arc::new(MockEmbedder))).await;
+        let id = mem
+            .remember("agent", "note", "rust ownership")
+            .await
+            .unwrap();
+        let v0 = mem.get_memory(id).await.unwrap().value;
+        // A peer independently holds the same memory ⇒ ingest merges + corroborates.
+        assert!(
+            mem.ingest_remote("agent", "note", "rust ownership", "peer-1")
+                .await
+        );
+        let v1 = mem.get_memory(id).await.unwrap().value;
+        assert!(v1 > v0, "consensus raised value: {v0} -> {v1}");
+    }
+
+    #[tokio::test]
+    async fn conflict_candidates_finds_band_pairs_only() {
+        let mem = store_with(Some(Arc::new(MockEmbedder))).await;
+        let a = mem
+            .remember("agent", "note", "rust ownership")
+            .await
+            .unwrap();
+        let b = mem
+            .remember("agent", "note", "rust and python")
+            .await
+            .unwrap();
+        let c = mem
+            .remember("agent", "note", "cooking a cake")
+            .await
+            .unwrap();
+        let pairs = mem.conflict_candidates("agent", 0.5, 0.92, 10).await;
+        assert!(
+            pairs
+                .iter()
+                .any(|(x, _, y, _)| (*x == a && *y == b) || (*x == b && *y == a)),
+            "the similar rust pair is a conflict candidate"
+        );
+        assert!(
+            pairs.iter().all(|(x, _, y, _)| *x != c && *y != c),
+            "the orthogonal cake is no one's candidate"
+        );
     }
 
     #[tokio::test]
