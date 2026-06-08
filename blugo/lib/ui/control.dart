@@ -1844,6 +1844,14 @@ class _KnowledgeTabState extends State<_KnowledgeTab>
                     color: cs.onSurface.withValues(alpha: 0.55),
                   ),
                 ),
+                IconButton(
+                  tooltip: 'Impact (change blast radius)',
+                  visualDensity: VisualDensity.compact,
+                  padding: EdgeInsets.zero,
+                  constraints: const BoxConstraints(),
+                  icon: const Icon(Icons.account_tree_outlined, size: 16),
+                  onPressed: () => _showImpact('${h['name'] ?? ''}'),
+                ),
               ],
             ),
             Text(
@@ -1860,6 +1868,75 @@ class _KnowledgeTabState extends State<_KnowledgeTab>
               style: const TextStyle(fontFamily: 'monospace', fontSize: 12),
             ),
           ],
+        ),
+      ),
+    );
+  }
+
+  /// Bottom sheet: the transitive callers of `symbol` from the code graph — the
+  /// change blast radius (what could break if you edit it).
+  Future<void> _showImpact(String symbol) async {
+    if (symbol.isEmpty) return;
+    List<Map<String, dynamic>> rel = [];
+    String? err;
+    try {
+      final r = await _api.knowledgeGraph('impact', symbol, limit: 40);
+      rel = ((r['hits'] as List?) ?? []).cast<Map<String, dynamic>>();
+    } catch (e) {
+      err = '$e';
+    }
+    if (!mounted) return;
+    final cs = Theme.of(context).colorScheme;
+    showModalBottomSheet(
+      context: context,
+      showDragHandle: true,
+      builder: (_) => SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                'Impact of $symbol',
+                style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 15),
+              ),
+              Text(
+                'Symbols that (transitively) depend on it — the change blast radius.',
+                style: TextStyle(
+                  fontSize: 12,
+                  color: cs.onSurface.withValues(alpha: 0.6),
+                ),
+              ),
+              const SizedBox(height: 12),
+              if (err != null)
+                Text(err, style: TextStyle(color: cs.error))
+              else if (rel.isEmpty)
+                Text(
+                  'No dependents found. Index with the structural graph '
+                  '(knowledge.graph.mode=structural) for precise edges.',
+                  style: TextStyle(color: cs.onSurface.withValues(alpha: 0.6)),
+                )
+              else
+                Flexible(
+                  child: ListView(
+                    shrinkWrap: true,
+                    children: [
+                      for (final h in rel)
+                        ListTile(
+                          dense: true,
+                          leading: Icon(Icons.code, size: 16, color: cs.primary),
+                          title: Text('${h['name'] ?? ''}'),
+                          subtitle: Text(
+                            '${h['path'] ?? ''}:${h['start_line'] ?? 0}',
+                            style: const TextStyle(fontSize: 11),
+                          ),
+                        ),
+                    ],
+                  ),
+                ),
+            ],
+          ),
         ),
       ),
     );

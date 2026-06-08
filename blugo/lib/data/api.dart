@@ -290,6 +290,17 @@ class ApiClient {
   Future<Map<String, dynamic>> knowledgeSearch(String query, {int limit = 10}) =>
       _postJson('/api/knowledge/search', {'query': query, 'limit': limit});
 
+  /// Typed code-graph query: relation = callers | callees | impact | implementers.
+  Future<Map<String, dynamic>> knowledgeGraph(
+    String relation,
+    String symbol, {
+    int limit = 20,
+  }) => _postJson('/api/knowledge/graph', {
+    'relation': relation,
+    'symbol': symbol,
+    'limit': limit,
+  });
+
   /// Start a background ingest of `path`. Poll [knowledgeStatus] for progress.
   Future<Map<String, dynamic>> knowledgeIngest(String path) =>
       _postJson('/api/knowledge/ingest', {'path': path});
