@@ -48,6 +48,8 @@ pub struct AgentTurnRunner {
     auto_continue: std::sync::atomic::AtomicU32,
     /// Token ceiling for one self-woken sequence (0 = no cap).
     auto_continue_tokens: u32,
+    /// Refresh the auto-continue budget on a context rollover (compaction).
+    wake_on_rollover: bool,
     system_prompt: String,
     working_dir: PathBuf,
     context: ContextManager,
@@ -105,6 +107,7 @@ impl AgentTurnRunner {
             max_iterations,
             auto_continue: std::sync::atomic::AtomicU32::new(0),
             auto_continue_tokens: 0,
+            wake_on_rollover: true,
             system_prompt,
             working_dir,
             context: ContextManager::new(context_size),
@@ -252,6 +255,13 @@ impl AgentTurnRunner {
     /// Set the token ceiling for one self-woken sequence (0 = no cap).
     pub fn with_auto_continue_tokens(mut self, n: u32) -> Self {
         self.auto_continue_tokens = n;
+        self
+    }
+
+    /// Refresh the auto-continue budget when the context rolls over (compaction)
+    /// so a long task continues past the rollover instead of pausing.
+    pub fn with_wake_on_rollover(mut self, b: bool) -> Self {
+        self.wake_on_rollover = b;
         self
     }
 
@@ -1060,6 +1070,10 @@ impl TurnRunner for AgentTurnRunner {
 
     fn auto_continue_token_budget(&self) -> u32 {
         self.auto_continue_tokens
+    }
+
+    fn wake_on_rollover(&self) -> bool {
+        self.wake_on_rollover
     }
 
     async fn compact(

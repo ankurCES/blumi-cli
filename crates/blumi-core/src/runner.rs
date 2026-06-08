@@ -108,6 +108,12 @@ pub trait TurnRunner: Send + Sync {
         0
     }
 
+    /// Whether to refresh the auto-continue budget when the context rolls over
+    /// (compaction), so a long task continues past the rollover. Default: on.
+    fn wake_on_rollover(&self) -> bool {
+        true
+    }
+
     /// Force a context compaction now (the manual `/compact`). Emits a
     /// `Compaction` event via `events` on success. Default: no-op → `false`.
     async fn compact(

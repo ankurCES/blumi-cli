@@ -28,6 +28,11 @@ not the end of the task — resume exactly where you left off, do not repeat ste
 you have already completed, and keep working until the task is genuinely done \
 (then stop).";
 
+/// Shown when a context rollover (compaction) refreshes the auto-continue token
+/// budget so the turn keeps going instead of pausing at the cumulative ceiling.
+const ROLLOVER_NOTICE: &str =
+    "↻ context rolled over — auto-continue token budget refreshed, continuing";
+
 /// Error returned when a command can't reach a shut-down session.
 #[derive(Debug, thiserror::Error)]
 #[error("session is closed")]
@@ -179,10 +184,13 @@ impl SessionActor {
                     None => break, // all handles dropped
                 },
                 Some(event) = self.event_rx.recv() => {
-                    if let Event::Usage { total, .. } = &event {
-                        self.turn_tokens = self.turn_tokens.saturating_add(*total);
-                    }
+                    let rolled_over = self.account_event(&event);
                     self.publish(event);
+                    if rolled_over {
+                        self.publish(Event::Notice {
+                            message: ROLLOVER_NOTICE.into(),
+                        });
+                    }
                 }
                 Some(ir) = self.interaction_rx.recv() => {
                     self.handle_interaction(ir);
@@ -357,15 +365,38 @@ impl SessionActor {
         });
     }
 
+    /// Per-turn token accounting from a streamed event. Returns true on a
+    /// context rollover (compaction) so the caller can narrate it.
+    fn account_event(&mut self, event: &Event) -> bool {
+        match event {
+            Event::Usage { total, .. } => {
+                self.turn_tokens = self.turn_tokens.saturating_add(*total);
+                false
+            }
+            // A rollover frees the context, so reset the cumulative token tally:
+            // the auto-continue token ceiling becomes per-epoch and a long task
+            // no longer pauses right after a rollover. The step budget still
+            // bounds the turn, so this can't loop forever.
+            Event::Compaction { .. } if self.runner.wake_on_rollover() => {
+                self.turn_tokens = 0;
+                true
+            }
+            _ => false,
+        }
+    }
+
     async fn finish_turn(&mut self, reason: blumi_protocol::DoneReason) {
         use blumi_protocol::DoneReason;
         // Drain any events the turn emitted before deciding what's next, so
         // ordering is preserved (and keep the token tally accurate).
         while let Ok(event) = self.event_rx.try_recv() {
-            if let Event::Usage { total, .. } = &event {
-                self.turn_tokens = self.turn_tokens.saturating_add(*total);
-            }
+            let rolled_over = self.account_event(&event);
             self.publish(event);
+            if rolled_over {
+                self.publish(Event::Notice {
+                    message: ROLLOVER_NOTICE.into(),
+                });
+            }
         }
         self.turn_token = None;
 
@@ -540,6 +571,46 @@ mod tests {
         }
     }
 
+    /// Stops at the cap each call AND rolls over (emits a `Compaction`) — to
+    /// exercise the rollover token-budget reset.
+    struct RolloverRunner {
+        budget: u32,
+        token_budget: u32,
+        per_call_tokens: u32,
+        calls: std::sync::atomic::AtomicU32,
+    }
+
+    #[async_trait]
+    impl TurnRunner for RolloverRunner {
+        async fn run_turn(
+            &self,
+            _state: Arc<Mutex<SessionState>>,
+            ctx: TurnContext,
+            _ct: CancellationToken,
+        ) -> DoneReason {
+            self.calls.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            ctx.events.emit(Event::Usage {
+                input: self.per_call_tokens,
+                output: 0,
+                total: self.per_call_tokens,
+                context: self.per_call_tokens,
+                cost_usd: None,
+            });
+            ctx.events.emit(Event::Compaction {
+                messages_compressed: 4,
+                checkpoint: 0,
+                tokens_after: 10,
+            });
+            DoneReason::MaxIterations
+        }
+        fn auto_continue_budget(&self) -> u32 {
+            self.budget
+        }
+        fn auto_continue_token_budget(&self) -> u32 {
+            self.token_budget
+        }
+    }
+
     /// Asks for approval, then echoes the decision into an assistant message.
     struct ApprovalRunner;
 
@@ -675,6 +746,43 @@ mod tests {
         assert!(events
             .iter()
             .any(|e| matches!(e, Event::Notice { message } if message.contains("token"))));
+    }
+
+    #[tokio::test]
+    async fn rollover_refreshes_token_budget_and_keeps_going() {
+        // Same numbers as the token-budget test (which stops at 3 calls on the
+        // 250 ceiling) — but each call also rolls over (compaction), which resets
+        // the token tally, so it runs to the STEP budget instead of pausing on
+        // tokens. Proves auto-wake survives a context rollover.
+        let runner = Arc::new(RolloverRunner {
+            budget: 5,
+            token_budget: 250,
+            per_call_tokens: 100,
+            calls: std::sync::atomic::AtomicU32::new(0),
+        });
+        let h = spawn_session(SessionId::from("ro"), "m", runner.clone());
+        let mut rx = h.subscribe();
+        h.send(Command::UserMessage {
+            text: "big task".into(),
+            attachments: vec![],
+            stream_id: None,
+        })
+        .await
+        .unwrap();
+
+        let events = collect_until_done(&mut rx).await;
+
+        // 1 original + 5 auto-continues = 6 calls (step budget), NOT 3 (the token
+        // ceiling) — the rollover reset the token tally each segment.
+        assert_eq!(
+            runner.calls.load(std::sync::atomic::Ordering::SeqCst),
+            6,
+            "ran to the step budget; the rollover reset the token ceiling"
+        );
+        // It narrated the rollover refresh.
+        assert!(events
+            .iter()
+            .any(|e| matches!(e, Event::Notice { message } if message.contains("rolled over"))));
     }
 
     #[tokio::test]

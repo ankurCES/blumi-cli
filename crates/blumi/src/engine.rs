@@ -541,6 +541,7 @@ pub async fn build_session(
     .with_personas(personas, &active)
     .with_auto_continue(config.llm.max_auto_continue)
     .with_auto_continue_tokens(config.llm.max_auto_continue_tokens)
+    .with_wake_on_rollover(config.llm.wake_on_rollover)
     .with_router(router.clone())
     .with_prompt_hooks(config.hooks.user_prompt_submit.clone())
     .with_rpl(config.rpl.clone());
