@@ -138,3 +138,99 @@ impl TypedTool for CodePath {
         )))
     }
 }
+
+/// Which typed relation to query over the code graph.
+#[derive(Deserialize, JsonSchema, Clone, Copy)]
+#[serde(rename_all = "lowercase")]
+pub enum GraphRelation {
+    /// Who calls / uses `symbol`.
+    Callers,
+    /// What `symbol` calls / uses.
+    Callees,
+    /// Transitive callers — the blast radius of changing `symbol`.
+    Impact,
+    /// Types that implement the trait `symbol`.
+    Implementers,
+}
+
+#[derive(Deserialize, JsonSchema)]
+pub struct CodeGraphInput {
+    /// The relation to query: callers | callees | impact | implementers.
+    pub relation: GraphRelation,
+    /// The symbol name (function / type / trait) to query around.
+    pub symbol: String,
+    /// Max results (default 20, max 100).
+    #[serde(default)]
+    pub limit: Option<u32>,
+}
+
+/// Typed code-graph queries: callers / callees / impact / implementers.
+pub struct CodeGraph {
+    store: Arc<KnowledgeStore>,
+}
+
+impl CodeGraph {
+    pub fn new(store: Arc<KnowledgeStore>) -> Self {
+        Self { store }
+    }
+}
+
+#[async_trait]
+impl TypedTool for CodeGraph {
+    type Input = CodeGraphInput;
+
+    fn name(&self) -> &str {
+        "code_graph"
+    }
+    fn description(&self) -> &str {
+        "Query the typed code graph around a symbol: `callers` (who calls/uses it), \
+         `callees` (what it calls), `impact` (transitive callers — the blast radius if you \
+         change it), or `implementers` (types implementing a trait). Returns file:line \
+         entries — far cheaper than reading files; use it before editing to see what depends \
+         on something. Needs an ingested repo (`blumi knowledge ingest <path>`); most precise \
+         with the structural graph (`knowledge.graph.mode = \"structural\"`)."
+    }
+    fn is_read_only(&self) -> bool {
+        true
+    }
+    fn is_concurrency_safe(&self) -> bool {
+        true
+    }
+
+    async fn run(
+        &self,
+        input: Self::Input,
+        _ctx: &ToolContext,
+        _ct: CancellationToken,
+    ) -> Result<ToolResult, ToolError> {
+        let limit = input.limit.unwrap_or(20).clamp(1, 100) as usize;
+        let hits = match input.relation {
+            GraphRelation::Callers => self.store.callers(&input.symbol, limit).await,
+            GraphRelation::Callees => self.store.callees(&input.symbol, limit).await,
+            GraphRelation::Impact => self.store.impact(&input.symbol, 5, limit).await,
+            GraphRelation::Implementers => self.store.implementers(&input.symbol, limit).await,
+        };
+        let rel = match input.relation {
+            GraphRelation::Callers => "caller",
+            GraphRelation::Callees => "callee",
+            GraphRelation::Impact => "impacted symbol",
+            GraphRelation::Implementers => "implementer",
+        };
+        if hits.is_empty() {
+            return Ok(ToolResult::success(format!(
+                "No {rel}s for '{}'. Index the repo (`blumi knowledge ingest <path>`), or \
+                 check the symbol name with code_search.",
+                input.symbol
+            )));
+        }
+        let mut out = format!("{} {rel}(s) of '{}':\n", hits.len(), input.symbol);
+        for h in &hits {
+            out.push_str(&format!(
+                "• {}:{} [{}] {}\n",
+                h.path, h.start_line, h.kind, h.name
+            ));
+        }
+        let payload = serde_json::to_value(&hits).unwrap_or_default();
+        Ok(ToolResult::success(out).with_payload(payload))
+    }
+}

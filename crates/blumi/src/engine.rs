@@ -232,7 +232,11 @@ pub async fn build_session(
                 registry.register(Arc::new(blumi_core::Typed(
                     blumi_tools::CodeNeighbors::new(ks.clone()),
                 )));
-                registry.register(Arc::new(blumi_core::Typed(blumi_tools::CodePath::new(ks))));
+                registry.register(Arc::new(blumi_core::Typed(blumi_tools::CodePath::new(
+                    ks.clone(),
+                ))));
+                // Typed graph queries (callers/callees/impact/implementers).
+                registry.register(Arc::new(blumi_core::Typed(blumi_tools::CodeGraph::new(ks))));
             }
             Err(e) => tracing::warn!("code knowledge base unavailable: {e}"),
         }

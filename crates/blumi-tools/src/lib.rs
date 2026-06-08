@@ -17,7 +17,7 @@ mod session_search;
 mod shell;
 mod todo;
 
-pub use code_graph::{CodeNeighbors, CodePath};
+pub use code_graph::{CodeGraph, CodeNeighbors, CodePath};
 pub use code_retrieve::CodeRetrieve;
 pub use code_search::CodeSearch;
 pub use delegate::Delegate;
