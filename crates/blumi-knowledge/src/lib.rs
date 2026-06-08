@@ -101,6 +101,19 @@ pub struct KnowledgeStatus {
 }
 
 /// The code knowledge store.
+/// One symbol row to insert during ingest — from the regex extractor (no
+/// enrichment) or the structural extractor (fqname / parent / signature).
+struct InsertRow {
+    name: String,
+    kind: String,
+    start_line: usize,
+    end_line: usize,
+    snippet: String,
+    fqname: Option<String>,
+    parent_fq: Option<String>,
+    signature: Option<String>,
+}
+
 pub struct KnowledgeStore {
     pool: SqlitePool,
     embedder: Option<Arc<dyn EmbeddingClient>>,
@@ -162,6 +175,45 @@ impl KnowledgeStore {
 
     // --- Ingest ----------------------------------------------------------
 
+    /// Parse a file into symbol rows. In `structural` mode (and with a bundled
+    /// grammar) this is tree-sitter — yielding `fqname` / parent / `signature`
+    /// enrichment; otherwise the regex extractor (no enrichment).
+    fn parse_symbols(&self, path: &str, content: &str, lang: &str) -> Vec<InsertRow> {
+        #[cfg(feature = "code-graph")]
+        if self.graph_mode == GraphMode::Structural {
+            if let Some(p) = crate::extract_ts::extract_structural(path, content, lang) {
+                return p
+                    .decls
+                    .into_iter()
+                    .map(|d| InsertRow {
+                        name: d.name,
+                        kind: d.kind,
+                        start_line: d.start_line,
+                        end_line: d.end_line,
+                        snippet: d.snippet,
+                        fqname: Some(d.fqname),
+                        parent_fq: d.parent,
+                        signature: Some(d.signature),
+                    })
+                    .collect();
+            }
+        }
+        let _ = lang;
+        extract::extract(path, content)
+            .into_iter()
+            .map(|s| InsertRow {
+                name: s.name,
+                kind: s.kind,
+                start_line: s.start_line,
+                end_line: s.end_line,
+                snippet: s.snippet,
+                fqname: None,
+                parent_fq: None,
+                signature: None,
+            })
+            .collect()
+    }
+
     /// Walk `root` (gitignore-aware) and index changed/new files under the
     /// `source` label. Diff-aware: unchanged files (by sha) are skipped.
     pub async fn ingest_path(
@@ -221,8 +273,8 @@ impl KnowledgeStore {
                 continue;
             }
 
-            let symbols = extract::extract(&path_str, &content);
             let lang = extract::lang_for(&path_str);
+            let rows = self.parse_symbols(&path_str, &content, lang);
             let now = now();
 
             // Replace the file's prior rows (cascade clears symbols/vec/fts).
@@ -239,38 +291,59 @@ impl KnowledgeStore {
             .bind(&path_str)
             .bind(lang)
             .bind(&sha)
-            .bind(symbols.len() as i64)
+            .bind(rows.len() as i64)
             .bind(&now)
             .execute(&mut *tx)
             .await?;
             let file_id = res.last_insert_rowid();
 
-            let mut sym_ids = Vec::with_capacity(symbols.len());
-            for s in &symbols {
+            let mut sym_ids = Vec::with_capacity(rows.len());
+            let mut fq_to_id: std::collections::HashMap<String, i64> =
+                std::collections::HashMap::new();
+            for row in &rows {
                 let r = sqlx::query(
-                    "INSERT INTO code_symbols (file_id, name, kind, start_line, end_line, snippet)
-                     VALUES (?, ?, ?, ?, ?, ?)",
+                    "INSERT INTO code_symbols
+                         (file_id, name, kind, start_line, end_line, snippet, fqname, signature)
+                     VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
                 )
                 .bind(file_id)
-                .bind(&s.name)
-                .bind(&s.kind)
-                .bind(s.start_line as i64)
-                .bind(s.end_line as i64)
-                .bind(&s.snippet)
+                .bind(&row.name)
+                .bind(&row.kind)
+                .bind(row.start_line as i64)
+                .bind(row.end_line as i64)
+                .bind(&row.snippet)
+                .bind(&row.fqname)
+                .bind(&row.signature)
                 .execute(&mut *tx)
                 .await?;
-                sym_ids.push(r.last_insert_rowid());
+                let id = r.last_insert_rowid();
+                if let Some(fq) = &row.fqname {
+                    fq_to_id.insert(fq.clone(), id);
+                }
+                sym_ids.push(id);
+            }
+            // Link each decl to its enclosing declaration (same-file parent).
+            for (row, &id) in rows.iter().zip(&sym_ids) {
+                if let Some(parent_fq) = &row.parent_fq {
+                    if let Some(&pid) = fq_to_id.get(parent_fq) {
+                        sqlx::query("UPDATE code_symbols SET parent_id = ? WHERE id = ?")
+                            .bind(pid)
+                            .bind(id)
+                            .execute(&mut *tx)
+                            .await?;
+                    }
+                }
             }
             tx.commit().await?;
 
             // Embed snippets in one batch per file (best-effort; FTS works without).
-            if self.ready() && !symbols.is_empty() {
-                let docs: Vec<String> = symbols.iter().map(|s| s.snippet.clone()).collect();
+            if self.ready() && !rows.is_empty() {
+                let docs: Vec<String> = rows.iter().map(|r| r.snippet.clone()).collect();
                 self.embed_and_store(&sym_ids, &docs).await;
             }
 
             stats.indexed += 1;
-            stats.symbols += symbols.len();
+            stats.symbols += rows.len();
         }
         // Rebuild the symbol reference graph over the (updated) index.
         let _ = self.build_graph().await;
@@ -920,6 +993,38 @@ mod tests {
 
     async fn store() -> KnowledgeStore {
         KnowledgeStore::open_in_memory(None).await.unwrap()
+    }
+
+    #[cfg(feature = "code-graph")]
+    #[tokio::test]
+    async fn structural_ingest_enriches_symbols() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(
+            dir.path().join("engine.rs"),
+            "pub struct Engine {}\nimpl Engine {\n    pub fn run(&self) -> bool { self.check() }\n    fn check(&self) -> bool { true }\n}\n",
+        )
+        .unwrap();
+        let ks = KnowledgeStore::open_in_memory(None)
+            .await
+            .unwrap()
+            .with_graph_mode(GraphMode::Structural);
+        ks.ingest_path(dir.path(), "test", &IngestConfig::default())
+            .await
+            .unwrap();
+
+        // The method is indexed with a scope-qualified fqname, a signature, and a
+        // parent_id linking it to the enclosing `impl Engine`.
+        let row = sqlx::query(
+            "SELECT signature, parent_id FROM code_symbols WHERE fqname = 'Engine::run'",
+        )
+        .fetch_optional(&ks.pool)
+        .await
+        .unwrap()
+        .expect("Engine::run indexed with a fqname");
+        let signature: String = row.get("signature");
+        let parent_id: Option<i64> = row.get("parent_id");
+        assert!(signature.contains("fn run"), "signature: {signature}");
+        assert!(parent_id.is_some(), "parent_id links to the impl");
     }
 
     #[tokio::test]
