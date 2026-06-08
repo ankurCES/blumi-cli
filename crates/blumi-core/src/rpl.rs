@@ -91,6 +91,27 @@ impl BlastRadius {
         !self.is_read_only() && self.severity() >= threshold
     }
 
+    /// Whether to engage the full loop, given whether *any* tool in the batch is
+    /// non-read-only (`any_mutating`, from the registry's `is_read_only` flag).
+    /// Beyond declared high-blast batches, this catches **opaque mutations** — a
+    /// tool that mutates but declared no [`Capability`]s (e.g. an MCP or
+    /// self-management tool), whose blast can't be assessed from capabilities —
+    /// so an undeclared side effect is reviewed rather than silently skipped.
+    pub fn should_review(&self, any_mutating: bool, threshold: u8) -> bool {
+        self.warrants_review(threshold) || (any_mutating && self.is_read_only())
+    }
+
+    /// Predicted risk fed to the Confession's [`ErrorDelta`]: the declared
+    /// `severity`, but **floored to `threshold`** for an opaque mutation (no
+    /// declared capabilities) so an unknown effect is never recorded as "safe".
+    pub fn predicted_risk(&self, any_mutating: bool, threshold: u8) -> u8 {
+        if any_mutating && self.is_read_only() {
+            self.severity().max(threshold)
+        } else {
+            self.severity()
+        }
+    }
+
     /// A one-line declaration of assumed risk (Raskolnikov's "Extraordinary Man"
     /// theory): what this action does and what protections it bypasses — for the
     /// trace and the Porfiry judge's prompt.
@@ -259,6 +280,23 @@ mod tests {
         let b = BlastRadius::assess(&caps);
         assert!(!b.reversible());
         assert!(b.warrants_review(30));
+    }
+
+    #[test]
+    fn opaque_mutation_is_reviewed_with_floored_risk() {
+        // A tool that mutates but declared no capabilities ⇒ empty blast radius.
+        let empty = BlastRadius::assess(&[]);
+        assert!(empty.is_read_only());
+        // Genuinely read-only batch (nothing mutating) ⇒ skip the loop.
+        assert!(!empty.should_review(false, 40));
+        // Opaque mutation (a non-read-only tool with no declared caps) ⇒ review,
+        // and its predicted risk is floored to the threshold (not "safe").
+        assert!(empty.should_review(true, 40));
+        assert_eq!(empty.predicted_risk(true, 40), 40);
+        // A declared high-blast batch reviews regardless, at its real severity.
+        let d = BlastRadius::assess(&[Capability::process_exec("rm -rf /x")]);
+        assert!(d.should_review(true, 40));
+        assert!(d.predicted_risk(false, 40) >= 60);
     }
 
     #[test]

@@ -685,9 +685,28 @@ impl TurnRunner for AgentTurnRunner {
                         })
                         .collect();
                     let blast = crate::rpl::BlastRadius::assess(&caps);
-                    if blast.warrants_review(rpl.blast_threshold) {
+                    // A tool that mutates but declared no capabilities (many MCP
+                    // and self-management tools) yields an empty blast radius —
+                    // review it anyway rather than let an undeclared effect slip
+                    // through unjudged.
+                    let any_mutating = tool_calls.iter().any(|c| {
+                        self.registry
+                            .get(&c.name)
+                            .map(|t| !t.is_read_only())
+                            .unwrap_or(true)
+                    });
+                    if blast.should_review(any_mutating, rpl.blast_threshold) {
+                        let opaque = any_mutating && blast.is_read_only();
                         ctx.events.emit(Event::Notice {
-                            message: format!("RPL review — {}", blast.declaration()),
+                            message: format!(
+                                "RPL review — {}{}",
+                                blast.declaration(),
+                                if opaque {
+                                    " (undeclared tool effects)"
+                                } else {
+                                    ""
+                                }
+                            ),
                         });
                         let (verdict, risk) = self.rpl_porfiry(&tool_calls, &blast, &ct).await;
                         if !verdict.approved && rpl_defends < rpl.max_defend_rounds {
@@ -712,8 +731,10 @@ impl TurnRunner for AgentTurnRunner {
                             continue;
                         }
                         // Approved (or defend rounds exhausted) → proceed, and
-                        // remember the predicted risk for the Confession below.
-                        rpl_predicted_risk = Some(risk);
+                        // remember the predicted risk for the Confession below
+                        // (floored for opaque mutations — never recorded "safe").
+                        rpl_predicted_risk =
+                            Some(risk.max(blast.predicted_risk(any_mutating, rpl.blast_threshold)));
                         if !verdict.approved {
                             ctx.events.emit(Event::Notice {
                                 message: "RPL: defend rounds exhausted — proceeding under caution"
