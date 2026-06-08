@@ -55,6 +55,14 @@ pub trait SemanticMemory: Send + Sync {
         self.note_used(&[id]).await;
     }
 
+    /// Adjust the learned *value* (fitness) of these memories by `delta` (may be
+    /// negative), clamped at zero — the outcome signal eviction ranks by, fed by
+    /// turn success/failure and RPL regret. Distinct from [`note_used`], which
+    /// only measures retrieval engagement. Default: no-op.
+    async fn reward(&self, ids: &[i64], delta: f64) {
+        let _ = (ids, delta);
+    }
+
     /// Explicit search (the `memory` tool's `query` action). `namespace = None`
     /// searches all namespaces; no relevance floor is applied (returns best k).
     async fn query(&self, namespace: Option<&str>, q: &str, k: usize) -> Vec<RecalledMemory>;

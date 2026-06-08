@@ -66,6 +66,8 @@ pub struct MemoryEntry {
     pub hits: i64,
     pub last_used_at: Option<String>,
     pub utility: f64,
+    /// Learned fitness (outcome-driven), distinct from engagement `utility`.
+    pub value: f64,
     pub status: String,
     pub pinned: bool,
 }
@@ -83,6 +85,7 @@ fn row_to_entry(r: &sqlx::sqlite::SqliteRow) -> MemoryEntry {
         hits: r.get("hits"),
         last_used_at: r.get("last_used_at"),
         utility: r.get("utility"),
+        value: r.get("value"),
         status: r.get("status"),
         pinned: r.get::<i64, _>("pinned") != 0,
     }
@@ -378,6 +381,30 @@ impl SemanticMemoryImpl {
         .await;
     }
 
+    /// Adjust the learned *value* (fitness) of memories by `delta` (may be
+    /// negative), clamped at zero. ids are i64 from our own DB → safe to inline.
+    /// This is the outcome-driven signal eviction ranks by — distinct from
+    /// `utility`, which only measures retrieval engagement.
+    pub async fn reward(&self, ids: &[i64], delta: f64) {
+        if ids.is_empty() || delta == 0.0 {
+            return;
+        }
+        let inlist = ids
+            .iter()
+            .map(|i| i.to_string())
+            .collect::<Vec<_>>()
+            .join(",");
+        let sql = format!(
+            "UPDATE memories SET value = MAX(0.0, value + ?), updated_at = ?
+             WHERE id IN ({inlist})"
+        );
+        let _ = sqlx::query(&sql)
+            .bind(delta)
+            .bind(now())
+            .execute(self.pool())
+            .await;
+    }
+
     /// Core search shared by recall (floored) and explicit query (floor 0).
     async fn search_inner(
         &self,
@@ -499,7 +526,7 @@ impl SemanticMemoryImpl {
     ) -> Vec<MemoryEntry> {
         let rows = sqlx::query(
             "SELECT id, namespace, kind, text, origin, source_session, created_at,
-                    updated_at, hits, last_used_at, utility, status, pinned
+                    updated_at, hits, last_used_at, utility, value, status, pinned
              FROM memories
              WHERE (?1 IS NULL OR namespace = ?1) AND (?2 IS NULL OR status = ?2)
              ORDER BY pinned DESC, utility DESC, updated_at DESC
@@ -518,7 +545,7 @@ impl SemanticMemoryImpl {
     pub async fn get_memory(&self, id: i64) -> Option<MemoryEntry> {
         let row = sqlx::query(
             "SELECT id, namespace, kind, text, origin, source_session, created_at,
-                    updated_at, hits, last_used_at, utility, status, pinned
+                    updated_at, hits, last_used_at, utility, value, status, pinned
              FROM memories WHERE id = ?",
         )
         .bind(id)
@@ -687,7 +714,7 @@ impl SemanticMemoryImpl {
              WHERE id IN (
                  SELECT id FROM memories
                  WHERE namespace = ? AND status = 'active' AND pinned = 0
-                 ORDER BY utility ASC, updated_at ASC LIMIT ?
+                 ORDER BY value ASC, utility ASC, updated_at ASC LIMIT ?
              )",
         )
         .bind(namespace)
@@ -1085,6 +1112,10 @@ impl SemanticMemory for SemanticMemoryImpl {
         self.promote(id, provenance).await;
     }
 
+    async fn reward(&self, ids: &[i64], delta: f64) {
+        SemanticMemoryImpl::reward(self, ids, delta).await;
+    }
+
     async fn query(&self, namespace: Option<&str>, q: &str, k: usize) -> Vec<RecalledMemory> {
         self.search_inner(namespace, q, k, 0.0).await
     }
@@ -1248,6 +1279,34 @@ mod tests {
             pen(dbridge) < pen(deg.get(&a).copied().unwrap_or(0)),
             "the hub is penalized more than a leaf"
         );
+    }
+
+    #[tokio::test]
+    async fn value_fitness_rewards_and_evicts_least_valuable() {
+        let mem = store_with(Some(Arc::new(MockEmbedder))).await;
+        let a = mem
+            .remember("agent", "note", "rust ownership")
+            .await
+            .unwrap();
+        let b = mem.remember("agent", "note", "python lists").await.unwrap();
+        // `a` proves useful over productive turns; `b` proves useless.
+        mem.reward(&[a], 1.0).await; // value 1.0 → 2.0
+        mem.reward(&[b], -0.9).await; // value 1.0 → 0.1 (clamped ≥ 0)
+
+        // Cap of 1 ⇒ evict the lowest-VALUE row (b), not the least-retrieved.
+        assert_eq!(mem.evict("agent", 1).await, 1, "one over cap");
+        let active: Vec<i64> = mem
+            .list_memories(Some("agent"), Some("active"), 50)
+            .await
+            .iter()
+            .map(|e| e.id)
+            .collect();
+        assert!(active.contains(&a), "high-value memory survives");
+        assert!(!active.contains(&b), "low-value memory evicted");
+
+        // value is surfaced (white-box editor) and reflects the reward.
+        let ea = mem.get_memory(a).await.unwrap();
+        assert!(ea.value > 1.5, "rewarded value rose, got {}", ea.value);
     }
 
     #[tokio::test]
