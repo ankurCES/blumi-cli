@@ -14,13 +14,21 @@ tracks its own Flutter version (`x.y.z+build`).
 - **Structural code graph (opt-in).** A new `code-graph` build feature +
   `knowledge.graph.mode = "structural"` upgrades the code knowledge base from
   name-co-occurrence edges to a **typed, scope-resolved** graph via tree-sitter
-  (Rust first): declarations carry a fully-qualified name / parent / signature,
-  and reference sites resolve into typed `code_edges` (`call` / `type` /
-  `implements` / `contains`; `resolved=1` when unambiguous). A unified
-  **`code_graph`** agent tool exposes `callers` / `callees` / `impact` /
-  `implementers` — `impact` being the transitive *change blast radius* of a
-  symbol. The default build stays native-lite (regex symbols, no C grammars); the
-  tool degrades gracefully over the lite graph.
+  for **Rust, Python, Go, JavaScript, and TypeScript**: declarations carry a
+  fully-qualified name / parent / signature, and reference sites resolve into
+  typed `code_edges` (`call` / `type` / `implements` / `contains`; `resolved=1`
+  when unambiguous). A unified **`code_graph`** agent tool exposes `callers` /
+  `callees` / `impact` / `implementers` — `impact` being the transitive *change
+  blast radius* of a symbol — and the same queries are surfaced via
+  `blumi knowledge callers|callees|impact|implementers <symbol>`, the gateway
+  `POST /api/knowledge/graph` endpoint, the TUI `/knowledge` hot-spots, and the
+  blugo Code tab's per-result **Impact** sheet. The default build stays
+  native-lite (regex symbols, no C grammars); the tool degrades gracefully over
+  the lite graph.
+- **Graph-aware code search.** When the structural graph is built, `code_search`
+  fills any spare result slots with typed neighbors (callees/callers) of the top
+  hits — surfacing related code the keyword/vector pass missed, without displacing
+  direct matches.
 - **RPL blast radius reads the code graph.** With `knowledge.graph.rpl_impact`
   (default on), editing a heavily-referenced file raises the RPL severity (file
   fan-in folds into the blast radius), so the adversarial Porfiry review is
