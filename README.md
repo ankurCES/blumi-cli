@@ -37,10 +37,36 @@
   <strong>⭐ If blumi puts your idle compute to work, <a href="https://github.com/ankurCES/blumi-cli">give it a star</a> — it helps others find it.</strong>
 </p>
 
-`blumi` is a single Rust binary whose UI-agnostic core emits one typed event stream, so every
+## What is blumi?
+
+**blumi** is a local-first, open-source, provider-agnostic AI coding agent you run on your own machines — one Rust core with a terminal UI, a web UI, an always-on gateway, and a phone app (blugo). It is **BYOK** (bring your own key): you point blumi at any model provider you choose, your code and keys stay on your hardware, and the bundled local embedding model means memory and code search need **no API key and nothing leaves your machines**.
+
+Concretely, `blumi` is a single Rust binary whose UI-agnostic core emits one typed event stream, so every
 surface shows the same session: a [crush](https://github.com/charmbracelet/crush)-inspired
 **terminal UI**, an embedded React **web UI**, an always-on **gateway**, and **blugo** — a
-Flutter **phone app** that's a 1:1 mirror of the TUI, optimized for foldables.
+Flutter **phone app** that's a 1:1 mirror of the TUI (terminal UI), optimized for foldables. Several gateways that share one secret form a **distributed grid** that fans a single task across every machine you own.
+
+## At a glance / Key facts
+
+| Fact | Detail |
+|---|---|
+| **What it is** | Local-first, provider-agnostic AI coding agent (one Rust binary) |
+| **License** | [Apache-2.0](LICENSE) — permissive, with an explicit patent grant |
+| **Version** | 0.5.0 |
+| **Platforms** | macOS, Linux (the CLI); Android (the blugo phone app) |
+| **Model access** | **BYOK** (bring your own key) — any provider: OpenAI-compatible, Anthropic, Azure Foundry, Gemini, or a local server (Ollama / vLLM / llama.cpp) |
+| **Privacy** | Local-first; your code, keys, and private `user` memory stay on your machines |
+| **No key needed for memory** | Bundled local embedding model (`bge-small`, 384-dim) powers RAG (retrieval-augmented generation) memory + code search offline |
+| **The three faces** | Terminal UI (`blumi tui`), web UI (`blumi web`), phone app (blugo) — plus an always-on gateway (`blumi serve`) |
+| **The grid** | Same-secret gateways auto-discover over the LAN (mDNS `_blumi._tcp`) and share work |
+| **Built with** | Rust (core/CLI), Flutter (blugo), SQLite (persistence) |
+| **Self-hosted** | Runs entirely on hardware you own — no cloud server, no daemon required |
+
+**One-line install:**
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/ankurCES/blumi-cli/main/install.sh | sh
+```
 
 |  Terminal UI (`blumi tui`) | Phone app (blugo) |
 |---|---|
@@ -62,6 +88,10 @@ Flutter **phone app** that's a 1:1 mirror of the TUI, optimized for foldables.
   <br>
   <sub>Full setup &amp; step-by-step guides → <a href="https://github.com/ankurCES/blumi-cli/wiki">the Wiki</a></sub>
 </p>
+
+## How is blumi different?
+
+blumi is different from typical cloud AI coding tools in three ways: it runs **on your own machines** (local-first, self-hosted), it is **provider-agnostic** (BYOK — bring any model, no vendor lock-in), and it turns **every device you own into one distributed AI grid**. The same Rust core drives a terminal UI, a web UI, an always-on gateway, and a phone app, so one session is live everywhere at once. Memory and code search use a bundled local embedder, so they work offline with no API key. The three highlights below — the grid, private compounding memory, and self-healing — are what set blumi apart.
 
 ### 🌐 One grid, every machine you own
 
@@ -112,7 +142,9 @@ otherwise. → **[Self-healing & evolution](#self-healing--evolution)** · **[GP
 The agent itself: a terminal UI, a one-shot headless runner, an embedded web UI, and an
 always-on gateway. One binary, no daemon required.
 
-## Install
+## How do I install blumi?
+
+Install blumi with a single shell command on macOS or Linux:
 
 ```sh
 curl -fsSL https://raw.githubusercontent.com/ankurCES/blumi-cli/main/install.sh | sh
@@ -481,6 +513,42 @@ Permissions are interactive by default; a toggleable **YOLO mode** skips prompts
 because it hit the per-turn tool cap, the runtime **auto-continues** in the same session and
 narrates each step, bounded by a step budget and a token ceiling — so long tasks finish without
 nudging. See the [Wiki](https://github.com/ankurCES/blumi-cli/wiki) for the full feature tour.
+
+---
+
+## FAQ
+
+### Is blumi free?
+
+Yes. blumi is free and open source under the [Apache License 2.0](LICENSE), which is permissive and includes an explicit patent grant. You only pay your own model provider for usage when you bring your own key, and even that is optional — you can run a local model server (Ollama / vLLM / llama.cpp) at no per-token cost.
+
+### Is my code or data sent anywhere?
+
+No — blumi is local-first and self-hosted, so your code, your keys, and your private `user` memory stay on your own machines. The bundled local embedding model powers memory and code search offline with no API key. The only data that leaves your hardware is whatever you send to the model provider you choose; if you point blumi at a local model server, nothing leaves at all.
+
+### Does blumi need an internet connection?
+
+Not for its local features. Memory (RAG), the code knowledge base, and the LAN grid all run offline once the bundled embedding model has been downloaded once (~130 MB on first use). You only need a connection to reach a remote model provider; with a local model server, blumi runs fully offline.
+
+### What models and providers does blumi support?
+
+blumi is **BYOK** (bring your own key) and provider-agnostic. It supports OpenAI-compatible APIs, Anthropic, Azure Foundry, and Gemini, plus local model servers via the `ollama`, `local-mlx`, and `local-cuda` presets that ship in config. Run `blumi login` to pick a provider, paste a key or endpoint, and choose a model.
+
+### What platforms does blumi run on?
+
+The blumi CLI runs on macOS and Linux. The blugo phone app runs on Android (built for the Pixel 9 Pro Fold) and talks to a `blumi serve` gateway over your LAN. The core is written in Rust; blugo is built with Flutter.
+
+### What is the blumi grid?
+
+The grid is blumi's distributed mode: point several `blumi serve` gateways at the same shared secret and they auto-discover each other on the LAN over mDNS (`_blumi._tcp`), then fan one task across all of them. Each machine runs its share and reports back tagged by hostname and OS — from the terminal, the web UI, or your phone. No model tool-calling is required for the deterministic phone delegation path.
+
+### How is blumi different from other AI coding tools?
+
+Unlike most cloud-hosted AI coding assistants, blumi is local-first, self-hosted, and provider-agnostic — you run it on hardware you own and bring any model you like, with no vendor lock-in. It is also the only one that turns every machine you own into a single distributed AI grid, and it ships private compounding memory (SEDM — self-evolving, distributed memory) plus self-healing tool recovery that learn and diffuse across that grid. An opt-in **RPL (Raskolnikov's Psychological Loop)** adds adversarial, regret-minimizing review before high-blast-radius tool batches run.
+
+### What is blugo?
+
+**blugo** is blumi's Flutter phone app — a 1:1 mirror of the terminal UI, optimized for foldables. It connects to a `blumi serve` gateway over your LAN (REST + SSE with token auth) so the same session is live on your phone, in the TUI, and in the web UI at once, including streaming chat, approvals, voice, and the grid.
 
 ---
 
