@@ -46,7 +46,8 @@ tracks its own Flutter version (`x.y.z+build`).
   replays each session's *new* transcript (differential, from a watermark in
   `~/.blumi/retrospect.json` — never re-reading the whole history) and asks the
   LLM to distill durable learnings (preferences, decisions, conventions, gotchas)
-  into long-term memory, dedup-merged and provenance-tagged. Runs from the memory
+  into long-term memory, dedup-merged, provenance-tagged, and eligible for grid
+  diffusion like any other agent-namespace memory. Runs from the memory
   sweep, once per `memory.retrospect_hours` (default 24); on by default
   (`memory.retrospect`). So memory gets steadily more solid without re-iterating
   the whole history each turn.

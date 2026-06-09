@@ -128,8 +128,13 @@ pub async fn retrospect_once(
             continue;
         }
         for line in extract(llm, model, &transcript).await {
+            // origin = "" marks these as locally-authored, so they diffuse across
+            // the grid like any other agent-namespace memory. Provenance is kept
+            // via source_session + the "retrospection" kind, not via origin (a
+            // non-empty origin means "received from a peer" and is excluded from
+            // diffusion to prevent bounce-back).
             if mem
-                .add("agent", "retrospection", &line, Some(&sid), "retrospect")
+                .add("agent", "retrospection", &line, Some(&sid), "")
                 .await
                 .is_some()
             {
