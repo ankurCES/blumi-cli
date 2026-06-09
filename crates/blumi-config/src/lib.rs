@@ -395,6 +395,11 @@ pub struct MemoryConfig {
     pub diffuse: bool,
     /// Seconds between background consolidation/eviction + diffusion sweeps.
     pub sweep_secs: u64,
+    /// Opt-in: during the sweep, ask the LLM to classify same-topic memory pairs
+    /// and supersede the outdated side (conflict resolution). Off by default — it
+    /// adds bounded background LLM calls.
+    #[serde(default)]
+    pub resolve_conflicts: bool,
 }
 
 impl Default for MemoryConfig {
@@ -406,6 +411,7 @@ impl Default for MemoryConfig {
             max_per_namespace: 2000,
             diffuse: true,
             sweep_secs: 60,
+            resolve_conflicts: false,
         }
     }
 }

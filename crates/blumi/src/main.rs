@@ -18,6 +18,7 @@ mod playbook;
 mod prompt;
 mod providers;
 mod remote;
+mod resolve;
 mod run;
 mod serve;
 mod session;

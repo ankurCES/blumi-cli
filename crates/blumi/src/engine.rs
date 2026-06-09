@@ -178,6 +178,10 @@ pub async fn build_session(
         let period = config.memory.sweep_secs.max(15);
         let heal = config.heal.clone();
         let skills_dir = config.paths.skills.clone();
+        let resolve_conflicts = config.memory.resolve_conflicts;
+        let resolver_llm = llm.clone();
+        let resolver_model = config.llm.model.clone();
+        let dedup_threshold = config.memory.dedup_threshold;
         tokio::spawn(async move {
             let mut tick = tokio::time::interval(std::time::Duration::from_secs(period));
             tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
@@ -194,6 +198,21 @@ pub async fn build_session(
                     for action in crate::evolve::mine_once(&mem, &skills_dir, heal.evolve, 3).await
                     {
                         tracing::info!("self-evolve: {action}");
+                    }
+                }
+                // Conflict resolution (opt-in): classify same-topic memory pairs
+                // and supersede the outdated side. Bounded per tick; off by default.
+                if resolve_conflicts {
+                    let n = crate::resolve::resolve_once(
+                        &mem,
+                        &resolver_llm,
+                        &resolver_model,
+                        dedup_threshold,
+                        5,
+                    )
+                    .await;
+                    if n > 0 {
+                        tracing::info!("conflict resolver: superseded {n} stale memory(ies)");
                     }
                 }
             }

@@ -33,6 +33,15 @@ tracks its own Flutter version (`x.y.z+build`).
   (default on), editing a heavily-referenced file raises the RPL severity (file
   fan-in folds into the blast radius), so the adversarial Porfiry review is
   likelier to fire on high-impact edits.
+- **Pinned session goal.** `/goal` now sets a standing objective stored on the
+  session and re-injected as a cache-safe reminder every turn (`Command::SetGoal`),
+  so a long autonomous task keeps its objective across context rollovers instead
+  of relying on the compaction summary to retain it.
+- **Memory conflict resolver (opt-in).** With `memory.resolve_conflicts` on, the
+  background memory sweep asks the LLM to classify same-topic memory pairs that
+  didn't merge on write and supersedes the outdated side — wiring the conflict
+  taxonomy (`conflict_candidates` / `supersede`) to an actuator at last. Bounded
+  per tick, conservative (ambiguous → leave both untouched), off by default.
 
 ### Changed
 
@@ -41,6 +50,12 @@ tracks its own Flutter version (`x.y.z+build`).
   resets the cumulative token tally (`llm.wake_on_rollover`, default **on**), so
   the task keeps going across rollovers without a manual nudge. The per-turn step
   budget still bounds the turn.
+
+### Fixed
+
+- **Memory fitness guards.** `reward` / `note_used` now update only *active*
+  memories, so a row superseded mid-turn can't accrue value/hits from a stale
+  recalled-id list (matching eviction/consolidation).
 
 ## [0.5.0] — 2026-06-08
 
