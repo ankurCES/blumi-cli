@@ -80,6 +80,12 @@ impl Paths {
         self.home.join("fcm.json")
     }
 
+    /// Retrospection watermark — the last daily transcript-replay run and its
+    /// differential boundary, `<home>/retrospect.json`.
+    pub fn retrospect_store(&self) -> PathBuf {
+        self.home.join("retrospect.json")
+    }
+
     /// Create the home, skills, memory, sessions, and models directories.
     pub fn ensure_dirs(&self) -> std::io::Result<()> {
         for dir in [

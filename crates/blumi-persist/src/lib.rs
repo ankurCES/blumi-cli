@@ -218,6 +218,34 @@ impl Store {
         Ok(Some(StoredSession { meta, messages }))
     }
 
+    /// Messages across *all* sessions whose timestamp is strictly after `since`
+    /// (RFC3339), oldest-first, capped at `limit` — the differential feed for
+    /// retrospection (daily replay of only what's new). Returns
+    /// `(session_id, Message)` pairs in global time order; group by session id.
+    pub async fn messages_since(
+        &self,
+        since: &str,
+        limit: i64,
+    ) -> Result<Vec<(String, Message)>, StoreError> {
+        let rows = sqlx::query(
+            "SELECT session_id, json FROM messages
+             WHERE ts > ? ORDER BY ts, ordinal LIMIT ?",
+        )
+        .bind(since)
+        .bind(limit)
+        .fetch_all(&self.pool)
+        .await?;
+        let mut out = Vec::with_capacity(rows.len());
+        for r in &rows {
+            let sid: String = r.get("session_id");
+            let json: String = r.get("json");
+            if let Ok(m) = serde_json::from_str::<Message>(&json) {
+                out.push((sid, m));
+            }
+        }
+        Ok(out)
+    }
+
     /// Full-text search over message content; one hit per session, best first.
     pub async fn search(&self, query: &str, limit: i64) -> Result<Vec<SearchHit>, StoreError> {
         let fts_query = to_fts_query(query);

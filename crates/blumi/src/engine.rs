@@ -182,6 +182,10 @@ pub async fn build_session(
         let resolver_llm = llm.clone();
         let resolver_model = config.llm.model.clone();
         let dedup_threshold = config.memory.dedup_threshold;
+        let retrospect_on = config.memory.retrospect && config.llm.provider != "mock";
+        let retrospect_hours = config.memory.retrospect_hours;
+        let retro_path = config.paths.retrospect_store();
+        let retro_store = history_store.clone();
         tokio::spawn(async move {
             let mut tick = tokio::time::interval(std::time::Duration::from_secs(period));
             tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
@@ -213,6 +217,29 @@ pub async fn build_session(
                     .await;
                     if n > 0 {
                         tracing::info!("conflict resolver: superseded {n} stale memory(ies)");
+                    }
+                }
+                // Daily retrospection: replay each session's new transcript
+                // (differential, from the watermark) and consolidate durable
+                // learnings into memory. Gated to once per retrospect_hours.
+                if retrospect_on {
+                    if let Some(st) = &retro_store {
+                        if crate::retrospect::due(&retro_path, retrospect_hours) {
+                            let (seen, stored) = crate::retrospect::retrospect_once(
+                                st,
+                                &mem,
+                                &resolver_llm,
+                                &resolver_model,
+                                &retro_path,
+                                4000,
+                            )
+                            .await;
+                            if stored > 0 {
+                                tracing::info!(
+                                    "retrospection: consolidated {stored} learning(s) from {seen} session(s)"
+                                );
+                            }
+                        }
                     }
                 }
             }

@@ -19,6 +19,7 @@ mod prompt;
 mod providers;
 mod remote;
 mod resolve;
+mod retrospect;
 mod run;
 mod serve;
 mod session;

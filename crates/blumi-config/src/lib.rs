@@ -400,6 +400,12 @@ pub struct MemoryConfig {
     /// adds bounded background LLM calls.
     #[serde(default)]
     pub resolve_conflicts: bool,
+    /// Daily retrospection: replay each session's *new* transcript (differential,
+    /// from a watermark) and consolidate durable learnings into memory, so future
+    /// sessions recall them without re-reading the whole history. On by default.
+    pub retrospect: bool,
+    /// Minimum hours between retrospection passes.
+    pub retrospect_hours: u64,
 }
 
 impl Default for MemoryConfig {
@@ -412,6 +418,8 @@ impl Default for MemoryConfig {
             diffuse: true,
             sweep_secs: 60,
             resolve_conflicts: false,
+            retrospect: true,
+            retrospect_hours: 24,
         }
     }
 }
