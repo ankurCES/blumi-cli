@@ -424,7 +424,7 @@ impl SemanticMemoryImpl {
             .join(",");
         let sql = format!(
             "UPDATE memories SET value = MAX(0.0, value + ?), updated_at = ?
-             WHERE id IN ({inlist})"
+             WHERE id IN ({inlist}) AND status = 'active'"
         );
         let _ = sqlx::query(&sql)
             .bind(delta)
@@ -1166,7 +1166,7 @@ impl SemanticMemory for SemanticMemoryImpl {
         let now = now();
         for id in ids {
             let _ = sqlx::query(
-                "UPDATE memories SET hits = hits + 1, utility = utility + 0.25, last_used_at = ? WHERE id = ?",
+                "UPDATE memories SET hits = hits + 1, utility = utility + 0.25, last_used_at = ? WHERE id = ? AND status = 'active'",
             )
             .bind(&now)
             .bind(id)
