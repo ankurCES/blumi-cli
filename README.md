@@ -11,7 +11,7 @@
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/version-0.5.0-FF4F87?style=for-the-badge" alt="version 0.5.0">
+  <img src="https://img.shields.io/badge/version-0.6.0-FF4F87?style=for-the-badge" alt="version 0.6.0">
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-Apache--2.0-6B50FF?style=for-the-badge" alt="License: Apache-2.0"></a>
   <img src="https://img.shields.io/badge/local--first-%E2%9C%93-68FFD6?style=for-the-badge&labelColor=222" alt="local-first">
   <img src="https://img.shields.io/badge/BYOK-any%20provider-9B86FF?style=for-the-badge" alt="bring your own key">
@@ -52,7 +52,7 @@ Flutter **phone app** that's a 1:1 mirror of the TUI (terminal UI), optimized fo
 |---|---|
 | **What it is** | Local-first, provider-agnostic AI coding agent (one Rust binary) |
 | **License** | [Apache-2.0](LICENSE) — permissive, with an explicit patent grant |
-| **Version** | 0.5.0 |
+| **Version** | 0.6.0 |
 | **Platforms** | macOS, Linux (the CLI); Android (the blugo phone app) |
 | **Model access** | **BYOK** (bring your own key) — any provider: OpenAI-compatible, Anthropic, Azure Foundry, Gemini, or a local server (Ollama / vLLM / llama.cpp) |
 | **Privacy** | Local-first; your code, keys, and private `user` memory stay on your machines |

@@ -9,6 +9,8 @@ tracks its own Flutter version (`x.y.z+build`).
 
 ## [Unreleased]
 
+## [0.6.0] — 2026-06-09
+
 ### Added
 
 - **Structural code graph (opt-in).** A new `code-graph` build feature +
@@ -51,6 +53,11 @@ tracks its own Flutter version (`x.y.z+build`).
   sweep, once per `memory.retrospect_hours` (default 24); on by default
   (`memory.retrospect`). So memory gets steadily more solid without re-iterating
   the whole history each turn.
+- **Retrospection logs + manual trigger.** A per-node run-log (`GET /api/retrospect`)
+  plus **Run now** (differential) / **Rebuild** (full re-process) triggers
+  (`POST /api/retrospect/run`); a compact per-node summary rides the grid-metrics
+  fan-out, so blugo's new Control-Center **Retro** tab shows retrospection logs +
+  controls across the whole grid.
 
 ### Changed
 
@@ -59,6 +66,9 @@ tracks its own Flutter version (`x.y.z+build`).
   resets the cumulative token tally (`llm.wake_on_rollover`, default **on**), so
   the task keeps going across rollovers without a manual nudge. The per-turn step
   budget still bounds the turn.
+- **blugo Control Center is its own screen.** Outgrew the draggable bottom sheet
+  (now 12 tabs incl. Code, Graph, and Retro) — promoted to a full-screen route
+  with a back button and per-tab scrolling.
 
 ### Fixed
 

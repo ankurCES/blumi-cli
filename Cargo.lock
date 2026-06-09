@@ -511,7 +511,7 @@ dependencies = [
 
 [[package]]
 name = "blumi"
-version = "0.5.0"
+version = "0.6.0"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -555,7 +555,7 @@ dependencies = [
 
 [[package]]
 name = "blumi-config"
-version = "0.5.0"
+version = "0.6.0"
 dependencies = [
  "dirs 5.0.1",
  "figment",
@@ -566,7 +566,7 @@ dependencies = [
 
 [[package]]
 name = "blumi-core"
-version = "0.5.0"
+version = "0.6.0"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -589,7 +589,7 @@ dependencies = [
 
 [[package]]
 name = "blumi-cron"
-version = "0.5.0"
+version = "0.6.0"
 dependencies = [
  "serde",
  "serde_json",
@@ -599,7 +599,7 @@ dependencies = [
 
 [[package]]
 name = "blumi-exec"
-version = "0.5.0"
+version = "0.6.0"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -612,7 +612,7 @@ dependencies = [
 
 [[package]]
 name = "blumi-gateway"
-version = "0.5.0"
+version = "0.6.0"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -632,7 +632,7 @@ dependencies = [
 
 [[package]]
 name = "blumi-knowledge"
-version = "0.5.0"
+version = "0.6.0"
 dependencies = [
  "anyhow",
  "blumi-core",
@@ -657,7 +657,7 @@ dependencies = [
 
 [[package]]
 name = "blumi-llm"
-version = "0.5.0"
+version = "0.6.0"
 dependencies = [
  "anyhow",
  "async-stream",
@@ -681,7 +681,7 @@ dependencies = [
 
 [[package]]
 name = "blumi-lsp"
-version = "0.5.0"
+version = "0.6.0"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -697,7 +697,7 @@ dependencies = [
 
 [[package]]
 name = "blumi-mcp"
-version = "0.5.0"
+version = "0.6.0"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -712,7 +712,7 @@ dependencies = [
 
 [[package]]
 name = "blumi-persist"
-version = "0.5.0"
+version = "0.6.0"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -730,7 +730,7 @@ dependencies = [
 
 [[package]]
 name = "blumi-playbook"
-version = "0.5.0"
+version = "0.6.0"
 dependencies = [
  "serde",
  "serde_json",
@@ -740,7 +740,7 @@ dependencies = [
 
 [[package]]
 name = "blumi-protocol"
-version = "0.5.0"
+version = "0.6.0"
 dependencies = [
  "serde",
  "serde_json",
@@ -750,7 +750,7 @@ dependencies = [
 
 [[package]]
 name = "blumi-skills"
-version = "0.5.0"
+version = "0.6.0"
 dependencies = [
  "async-trait",
  "blumi-config",
@@ -769,7 +769,7 @@ dependencies = [
 
 [[package]]
 name = "blumi-task"
-version = "0.5.0"
+version = "0.6.0"
 dependencies = [
  "blumi-config",
  "serde",
@@ -780,7 +780,7 @@ dependencies = [
 
 [[package]]
 name = "blumi-tools"
-version = "0.5.0"
+version = "0.6.0"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -803,7 +803,7 @@ dependencies = [
 
 [[package]]
 name = "blumi-tui"
-version = "0.5.0"
+version = "0.6.0"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -836,7 +836,7 @@ dependencies = [
 
 [[package]]
 name = "blumi-voice"
-version = "0.5.0"
+version = "0.6.0"
 dependencies = [
  "anyhow",
  "reqwest",
@@ -847,7 +847,7 @@ dependencies = [
 
 [[package]]
 name = "blumi-web"
-version = "0.5.0"
+version = "0.6.0"
 dependencies = [
  "anyhow",
  "argon2",
