@@ -869,6 +869,7 @@ pub async fn run(model: &mut Model, session: &SessionHandle, line: &str) {
                 model
                     .entries
                     .push(Entry::Notice(format!("goal set: {arg}")));
+                let _ = session.send(Command::SetGoal { text: arg.clone() }).await;
                 model.goal = arg;
             }
         }

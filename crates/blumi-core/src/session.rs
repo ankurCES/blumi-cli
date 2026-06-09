@@ -12,6 +12,10 @@ pub struct SessionState {
     pub todos: Vec<Todo>,
     /// Active model id (mutable via `Command::SetModel`).
     pub model: String,
+    /// Standing objective for this session (set via `Command::SetGoal` / `/goal`).
+    /// Re-injected as a trailing reminder each turn so a long autonomous task
+    /// keeps its objective across context rollovers.
+    pub goal: Option<String>,
     pub total_input_tokens: u32,
     pub total_output_tokens: u32,
     pub total_cache_read_tokens: u32,
@@ -31,6 +35,7 @@ impl SessionState {
             messages: Vec::new(),
             todos: Vec::new(),
             model: model.into(),
+            goal: None,
             total_input_tokens: 0,
             total_output_tokens: 0,
             total_cache_read_tokens: 0,

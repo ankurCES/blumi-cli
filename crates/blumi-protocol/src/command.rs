@@ -65,6 +65,9 @@ pub enum Command {
     /// Set the auto-continue step budget at runtime (the `/autocontinue`
     /// command). 0 disables self-wake on the per-turn iteration cap.
     SetAutoContinue { n: u32 },
+    /// Set (empty clears) the session's standing goal — re-injected each turn so a
+    /// long autonomous task keeps its objective across context rollovers.
+    SetGoal { text: String },
     /// Force a context compaction now (manual `/compact`).
     Compact,
     /// Revert the most recent file change (manual `/undo`).

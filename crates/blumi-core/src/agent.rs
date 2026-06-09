@@ -454,6 +454,15 @@ impl TurnRunner for AgentTurnRunner {
                     msgs.push(Message::system(effective_prompt.clone()));
                 }
                 msgs.extend(st.messages.iter().cloned());
+                // Standing objective: re-injected every turn so a long autonomous
+                // run never loses the goal after a context rollover. Cache-safe
+                // trailing message, never the system prefix.
+                if let Some(goal) = st.goal.as_deref().map(str::trim).filter(|g| !g.is_empty()) {
+                    msgs.push(Message::user(format!(
+                        "[Session goal — the standing objective for this task. Keep working \
+                         toward it; don't consider the task done until it's met.]\n{goal}"
+                    )));
+                }
                 // Trailing background-context message (never the system prefix).
                 if let Some(mb) = &memory_block {
                     msgs.push(Message::user(mb.clone()));

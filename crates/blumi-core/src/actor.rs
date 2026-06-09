@@ -265,6 +265,14 @@ impl SessionActor {
             Command::SetAutoContinue { n } => {
                 self.runner.set_auto_continue(n);
             }
+            Command::SetGoal { text } => {
+                let t = text.trim();
+                self.state.lock().await.goal = if t.is_empty() {
+                    None
+                } else {
+                    Some(t.to_string())
+                };
+            }
             Command::Compact => {
                 if self.turn_token.is_some() {
                     self.publish(Event::Error {
