@@ -9,145 +9,88 @@ import '../state/app.dart';
 import 'kit/kit.dart';
 import 'theme.dart';
 
-/// The control center — a draggable sheet mirroring the TUI/web control tabs:
-/// Settings (model/persona/theme/yolo), Usage, Skills, Memory.
+/// Open the control center as a full screen of its own (pushed route).
 Future<void> showControlCenter(BuildContext context, AppController app) {
-  return showModalBottomSheet(
-    context: context,
-    isScrollControlled: true,
-    showDragHandle: true,
-    backgroundColor: Theme.of(context).colorScheme.surface,
-    builder: (_) => _ControlSheet(app),
+  return Navigator.of(context).push(
+    MaterialPageRoute<void>(builder: (_) => ControlCenterScreen(app)),
   );
 }
 
-/// Hosts the draggable sheet and grows it toward full height when the soft
-/// keyboard opens (so a focused field has room above the keyboard), shrinking
-/// back to the glance size when it closes.
-class _ControlSheet extends StatefulWidget {
+/// The control center as a standalone screen — a tabbed Scaffold mirroring the
+/// TUI/web control tabs (Agent · Work · Grid · Knowledge). Each tab gets its
+/// own ScrollController (one controller can't attach to multiple TabBarView
+/// children), and the Scaffold lifts focused fields above the soft keyboard.
+class ControlCenterScreen extends StatefulWidget {
   final AppController app;
-  const _ControlSheet(this.app);
+  const ControlCenterScreen(this.app, {super.key});
   @override
-  State<_ControlSheet> createState() => _ControlSheetState();
+  State<ControlCenterScreen> createState() => _ControlCenterScreenState();
 }
 
-class _ControlSheetState extends State<_ControlSheet> {
-  static const _rest = 0.7;
-  static const _full = 0.96;
-  final _sheet = DraggableScrollableController();
-  bool _raised = false;
+class _ControlCenterScreenState extends State<ControlCenterScreen> {
+  static const _tabCount = 11;
+  final List<ScrollController> _scrolls =
+      List.generate(_tabCount, (_) => ScrollController());
 
   @override
   void dispose() {
-    _sheet.dispose();
+    for (final c in _scrolls) {
+      c.dispose();
+    }
     super.dispose();
   }
-
-  void _animateTo(double size) {
-    if (!_sheet.isAttached) return;
-    _sheet.animateTo(size,
-        duration: const Duration(milliseconds: 220), curve: Curves.easeOut);
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final keyboardUp = MediaQuery.of(context).viewInsets.bottom > 0;
-    if (keyboardUp && !_raised) {
-      _raised = true;
-      WidgetsBinding.instance
-          .addPostFrameCallback((_) => mounted ? _animateTo(_full) : null);
-    } else if (!keyboardUp && _raised) {
-      _raised = false;
-      WidgetsBinding.instance
-          .addPostFrameCallback((_) => mounted ? _animateTo(_rest) : null);
-    }
-    return DraggableScrollableSheet(
-      controller: _sheet,
-      expand: false,
-      initialChildSize: _rest,
-      minChildSize: 0.4,
-      maxChildSize: _full,
-      builder: (context, scroll) => _ControlCenter(widget.app, scroll),
-    );
-  }
-}
-
-class _ControlCenter extends StatelessWidget {
-  final AppController app;
-  final ScrollController scroll;
-  const _ControlCenter(this.app, this.scroll);
 
   @override
   Widget build(BuildContext context) {
     final cs = Theme.of(context).colorScheme;
-    // Lift the sheet's content above the soft keyboard so focused text fields
-    // (Code search/ingest, Grid prompt, Memory editor, …) aren't covered. The
-    // bottom inset shrinks the tab body, and the focused field auto-scrolls into
-    // the now-visible viewport.
-    return AnimatedPadding(
-      duration: const Duration(milliseconds: 150),
-      curve: Curves.easeOut,
-      padding: EdgeInsets.only(
-        bottom: MediaQuery.of(context).viewInsets.bottom,
-      ),
-      child: DefaultTabController(
-        length: 11,
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Padding(
-              padding: const EdgeInsets.fromLTRB(16, 4, 16, 2),
-              child: Row(
-                children: const [
-                  GradientText(
-                    '✿ control center',
-                    style:
-                        TextStyle(fontWeight: FontWeight.w800, fontSize: 16),
-                  ),
-                ],
-              ),
-            ),
+    final app = widget.app;
+    return DefaultTabController(
+      length: _tabCount,
+      child: Scaffold(
+        appBar: AppBar(
+          titleSpacing: 12,
+          title: const GradientText(
+            '✿ control center',
+            style: TextStyle(fontWeight: FontWeight.w800, fontSize: 18),
+          ),
+          bottom: TabBar(
+            isScrollable: true,
+            tabAlignment: TabAlignment.start,
+            labelColor: cs.primary,
+            indicatorColor: cs.primary,
             // Tabs ordered by cluster: Agent · Work · Grid · Knowledge.
-            TabBar(
-              isScrollable: true,
-              tabAlignment: TabAlignment.start,
-              labelColor: cs.primary,
-              indicatorColor: cs.primary,
-              tabs: [
-                // Agent
-                _IconTab(Icons.tune, 'Settings'),
-                _IconTab(Icons.monitor_heart_outlined, 'Status'),
-                _IconTab(Icons.bar_chart, 'Usage'),
-                // Work
-                _IconTab(Icons.checklist, 'Tasks'),
-                _IconTab(Icons.assignment_outlined, 'Plans'),
-                _IconTab(Icons.healing, 'Heal'),
-                // Grid
-                _IconTab(Icons.hub_outlined, 'Grid'),
-                // Knowledge
-                _IconTab(Icons.auto_awesome, 'Skills'),
-                _IconTab(Icons.psychology_outlined, 'Memory'),
-                _IconTab(Icons.code, 'Code'),
-                _IconTab(Icons.account_tree_outlined, 'Graph'),
-              ],
-            ),
-            Expanded(
-              child: TabBarView(
-                children: [
-                  _SettingsTab(app, scroll),
-                  _StatusTab(app, scroll),
-                  _UsageTab(app, scroll),
-                  _TasksTab(app, scroll),
-                  _PlansTab(app, scroll),
-                  _HealTab(app, scroll),
-                  _GridTab(app, scroll),
-                  _SkillsTab(app, scroll),
-                  _MemoryTab(app, scroll),
-                  _KnowledgeTab(app, scroll),
-                  _GraphTab(app, scroll),
-                ],
-              ),
-            ),
+            tabs: const [
+              // Agent
+              _IconTab(Icons.tune, 'Settings'),
+              _IconTab(Icons.monitor_heart_outlined, 'Status'),
+              _IconTab(Icons.bar_chart, 'Usage'),
+              // Work
+              _IconTab(Icons.checklist, 'Tasks'),
+              _IconTab(Icons.assignment_outlined, 'Plans'),
+              _IconTab(Icons.healing, 'Heal'),
+              // Grid
+              _IconTab(Icons.hub_outlined, 'Grid'),
+              // Knowledge
+              _IconTab(Icons.auto_awesome, 'Skills'),
+              _IconTab(Icons.psychology_outlined, 'Memory'),
+              _IconTab(Icons.code, 'Code'),
+              _IconTab(Icons.account_tree_outlined, 'Graph'),
+            ],
+          ),
+        ),
+        body: TabBarView(
+          children: [
+            _SettingsTab(app, _scrolls[0]),
+            _StatusTab(app, _scrolls[1]),
+            _UsageTab(app, _scrolls[2]),
+            _TasksTab(app, _scrolls[3]),
+            _PlansTab(app, _scrolls[4]),
+            _HealTab(app, _scrolls[5]),
+            _GridTab(app, _scrolls[6]),
+            _SkillsTab(app, _scrolls[7]),
+            _MemoryTab(app, _scrolls[8]),
+            _KnowledgeTab(app, _scrolls[9]),
+            _GraphTab(app, _scrolls[10]),
           ],
         ),
       ),
