@@ -28,6 +28,21 @@ use tokio_util::sync::CancellationToken;
 const EPOCH: &str = "1970-01-01T00:00:00Z";
 const MAX_PER_MSG_CHARS: usize = 1500;
 const MAX_TRANSCRIPT_CHARS: usize = 16000;
+const MAX_RUNS: usize = 20;
+
+/// One recorded retrospection pass — the run-log surfaced in the UI.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct RetrospectRun {
+    /// RFC3339 time the pass ran.
+    pub at: String,
+    /// Sessions whose new transcript was seen this pass.
+    pub sessions: usize,
+    /// Learnings consolidated into memory this pass.
+    pub stored: usize,
+    /// How it was triggered: "auto" | "manual" | "rebuild".
+    #[serde(default)]
+    pub kind: String,
+}
 
 /// Persisted retrospection state (`~/.blumi/retrospect.json`).
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -39,6 +54,15 @@ pub struct RetrospectState {
     /// RFC3339 timestamp of when the pass last ran — the cadence gate.
     #[serde(default)]
     pub last_run: Option<String>,
+    /// Recent passes (oldest→newest, capped at `MAX_RUNS`) — the run-log.
+    #[serde(default)]
+    pub runs: Vec<RetrospectRun>,
+    /// A manual differential run was requested (consumed on the next pass).
+    #[serde(default)]
+    pub force: bool,
+    /// A full rebuild was requested — reset the watermark and replay all history.
+    #[serde(default)]
+    pub rebuild: bool,
 }
 
 impl RetrospectState {
@@ -75,6 +99,43 @@ pub fn due(path: &Path, hours: u64) -> bool {
     }
 }
 
+/// Whether a manual run (differential or rebuild) has been queued.
+pub fn pending(path: &Path) -> bool {
+    let s = RetrospectState::load(path);
+    s.force || s.rebuild
+}
+
+/// Queue a manual run — differential (`rebuild=false`) or a full re-process
+/// (`rebuild=true`, which resets the watermark and replays all history on the
+/// next pass). Consumed by the next sweep tick or the trigger endpoint.
+pub fn request_run(path: &Path, rebuild: bool) {
+    let mut s = RetrospectState::load(path);
+    s.force = true;
+    if rebuild {
+        s.rebuild = true;
+    }
+    s.save(path);
+}
+
+/// The persisted state as JSON (watermark, last_run, runs) for the UI.
+pub fn status_json(path: &Path) -> serde_json::Value {
+    serde_json::to_value(RetrospectState::load(path)).unwrap_or_default()
+}
+
+/// Append a pass to the bounded run-log.
+fn record_run(state: &mut RetrospectState, at: &str, sessions: usize, stored: usize, kind: &str) {
+    state.runs.push(RetrospectRun {
+        at: at.to_string(),
+        sessions,
+        stored,
+        kind: kind.to_string(),
+    });
+    let n = state.runs.len();
+    if n > MAX_RUNS {
+        state.runs.drain(0..n - MAX_RUNS);
+    }
+}
+
 /// One retrospection pass: consolidate every session's transcript since the
 /// watermark into memory. Returns `(sessions_seen, learnings_stored)`. Advances
 /// the watermark to the newest message processed and always stamps `last_run`
@@ -88,7 +149,21 @@ pub async fn retrospect_once(
     max_messages: i64,
 ) -> (usize, usize) {
     let mut state = RetrospectState::load(state_path);
-    let since = state.watermark.clone().unwrap_or_else(|| EPOCH.to_string());
+    let rebuild = state.rebuild;
+    let kind = if rebuild {
+        "rebuild"
+    } else if state.force {
+        "manual"
+    } else {
+        "auto"
+    };
+    // A rebuild ignores the watermark and replays all history; otherwise read
+    // only what's new since the last pass.
+    let since = if rebuild {
+        EPOCH.to_string()
+    } else {
+        state.watermark.clone().unwrap_or_else(|| EPOCH.to_string())
+    };
     let rows = match store.messages_since(&since, max_messages).await {
         Ok(r) => r,
         Err(_) => return (0, 0),
@@ -97,9 +172,13 @@ pub async fn retrospect_once(
     let now = OffsetDateTime::now_utc()
         .format(&Rfc3339)
         .unwrap_or_else(|_| since.clone());
+    // Consume the manual-run flags regardless of outcome.
+    state.force = false;
+    state.rebuild = false;
 
     if rows.is_empty() {
-        state.last_run = Some(now);
+        state.last_run = Some(now.clone());
+        record_run(&mut state, &now, 0, 0, kind);
         state.save(state_path);
         return (0, 0);
     }
@@ -144,7 +223,8 @@ pub async fn retrospect_once(
     }
 
     state.watermark = Some(newest);
-    state.last_run = Some(now);
+    state.last_run = Some(now.clone());
+    record_run(&mut state, &now, sessions_seen, stored, kind);
     state.save(state_path);
     (sessions_seen, stored)
 }

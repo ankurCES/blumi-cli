@@ -301,6 +301,15 @@ class ApiClient {
     'limit': limit,
   });
 
+  /// Retrospection status for this node:
+  /// `{ enabled, hours, node, last_run, watermark, runs[], learnings[] }`.
+  Future<Map<String, dynamic>> retrospectStatus() => _getJson('/api/retrospect');
+
+  /// Trigger a retrospection pass now — differential, or a full `rebuild`
+  /// (reset the watermark + replay all history). Returns `{ ok, sessions, stored }`.
+  Future<Map<String, dynamic>> retrospectRun({bool rebuild = false}) =>
+      _postJson('/api/retrospect/run', {'rebuild': rebuild});
+
   /// Start a background ingest of `path`. Poll [knowledgeStatus] for progress.
   Future<Map<String, dynamic>> knowledgeIngest(String path) =>
       _postJson('/api/knowledge/ingest', {'path': path});

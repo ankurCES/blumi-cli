@@ -28,7 +28,7 @@ class ControlCenterScreen extends StatefulWidget {
 }
 
 class _ControlCenterScreenState extends State<ControlCenterScreen> {
-  static const _tabCount = 11;
+  static const _tabCount = 12;
   final List<ScrollController> _scrolls =
       List.generate(_tabCount, (_) => ScrollController());
 
@@ -75,6 +75,7 @@ class _ControlCenterScreenState extends State<ControlCenterScreen> {
               _IconTab(Icons.psychology_outlined, 'Memory'),
               _IconTab(Icons.code, 'Code'),
               _IconTab(Icons.account_tree_outlined, 'Graph'),
+              _IconTab(Icons.history, 'Retro'),
             ],
           ),
         ),
@@ -91,6 +92,7 @@ class _ControlCenterScreenState extends State<ControlCenterScreen> {
             _MemoryTab(app, _scrolls[8]),
             _KnowledgeTab(app, _scrolls[9]),
             _GraphTab(app, _scrolls[10]),
+            _RetroTab(app, _scrolls[11]),
           ],
         ),
       ),
@@ -2376,3 +2378,298 @@ Widget _label(String t, ColorScheme cs) => Padding(
     ),
   ),
 );
+
+/// Retrospection tab: this node's run-log + recent learnings + Run now / Rebuild,
+/// plus a per-node summary across the grid.
+class _RetroTab extends StatefulWidget {
+  final AppController app;
+  final ScrollController scroll;
+  const _RetroTab(this.app, this.scroll);
+  @override
+  State<_RetroTab> createState() => _RetroTabState();
+}
+
+class _RetroTabState extends State<_RetroTab>
+    with AutomaticKeepAliveClientMixin {
+  @override
+  bool get wantKeepAlive => true;
+
+  ApiClient get _api => widget.app.session!.api;
+  Map<String, dynamic> _status = {};
+  List<Map<String, dynamic>> _nodes = [];
+  bool _loading = true;
+  bool _busy = false;
+  String? _error;
+
+  @override
+  void initState() {
+    super.initState();
+    _load();
+  }
+
+  Future<void> _load() async {
+    setState(() => _loading = true);
+    try {
+      final st = await _api.retrospectStatus();
+      final nodes = <Map<String, dynamic>>[];
+      try {
+        final g = await _api.gridMetrics();
+        final self = (g['self'] as Map?)?.cast<String, dynamic>();
+        if (self != null && self['retrospect'] != null) {
+          nodes.add({
+            'name': '${st['node'] ?? 'this node'}',
+            'retrospect': self['retrospect'],
+            'online': true,
+            'self': true,
+          });
+        }
+        for (final p in (g['peers'] as List?) ?? const []) {
+          final pm = (p as Map).cast<String, dynamic>();
+          final m = (pm['metrics'] as Map?)?.cast<String, dynamic>();
+          nodes.add({
+            'name': pm['name'] ?? '?',
+            'retrospect': m?['retrospect'],
+            'online': pm['online'] == true,
+            'self': false,
+          });
+        }
+      } catch (_) {}
+      if (!mounted) return;
+      setState(() {
+        _status = st;
+        _nodes = nodes;
+        _error = null;
+        _loading = false;
+      });
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _error = '$e';
+        _loading = false;
+      });
+    }
+  }
+
+  Future<void> _run({required bool rebuild}) async {
+    if (rebuild) {
+      final ok = await showDialog<bool>(
+        context: context,
+        builder: (_) => AlertDialog(
+          title: const Text('Rebuild memory from all chat?'),
+          content: const Text(
+            'Resets the watermark and replays the full history into memory. '
+            'This can make many LLM calls; duplicates are merged.',
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context, false),
+              child: const Text('Cancel'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.pop(context, true),
+              child: const Text('Rebuild'),
+            ),
+          ],
+        ),
+      );
+      if (ok != true) return;
+    }
+    setState(() => _busy = true);
+    try {
+      final r = await _api.retrospectRun(rebuild: rebuild);
+      if (!mounted) return;
+      final ok = r['ok'] == true;
+      final msg = ok
+          ? 'Consolidated ${r['stored'] ?? 0} learning(s) from ${r['sessions'] ?? 0} session(s)'
+          : 'Failed: ${r['error'] ?? 'unknown'}';
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(msg)));
+      await _load();
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context)
+            .showSnackBar(SnackBar(content: Text('$e')));
+      }
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    super.build(context);
+    final cs = Theme.of(context).colorScheme;
+    if (_loading) return const Center(child: CircularProgressIndicator());
+    final enabled = _status['enabled'] == true;
+    final runs = (((_status['runs'] as List?) ?? const []).reversed).toList();
+    final learnings = (_status['learnings'] as List?) ?? const [];
+    return ListView(
+      controller: widget.scroll,
+      padding: const EdgeInsets.all(16),
+      children: [
+        Row(children: [
+          _label('Retrospection', cs),
+          const Spacer(),
+          IconButton(
+            tooltip: 'Refresh',
+            visualDensity: VisualDensity.compact,
+            icon: const Icon(Icons.refresh, size: 18),
+            onPressed: _busy ? null : _load,
+          ),
+        ]),
+        Text(
+          enabled
+              ? 'Daily memory consolidation · every ${_status['hours'] ?? 24}h · last ${_fmt(_status['last_run'])}'
+              : 'Disabled — set memory.retrospect',
+          style: TextStyle(
+              color: cs.onSurface.withValues(alpha: 0.7), fontSize: 12.5),
+        ),
+        if (_error != null)
+          Padding(
+            padding: const EdgeInsets.only(top: 8),
+            child: Text(_error!, style: TextStyle(color: cs.error)),
+          ),
+        const SizedBox(height: 12),
+        Row(children: [
+          Expanded(
+            child: OutlinedButton.icon(
+              onPressed: _busy ? null : () => _run(rebuild: false),
+              icon: _busy
+                  ? const SizedBox(
+                      width: 14,
+                      height: 14,
+                      child: CircularProgressIndicator(strokeWidth: 2))
+                  : const Icon(Icons.play_arrow, size: 18),
+              label: const Text('Run now'),
+            ),
+          ),
+          const SizedBox(width: 10),
+          Expanded(
+            child: OutlinedButton.icon(
+              onPressed: _busy ? null : () => _run(rebuild: true),
+              icon: const Icon(Icons.restart_alt, size: 18),
+              label: const Text('Rebuild'),
+            ),
+          ),
+        ]),
+        const SizedBox(height: 18),
+        _label('Run log (${runs.length})', cs),
+        if (runs.isEmpty)
+          Padding(
+            padding: const EdgeInsets.symmetric(vertical: 6),
+            child: Text('No runs yet.',
+                style: TextStyle(color: cs.onSurface.withValues(alpha: 0.55))),
+          )
+        else
+          for (final r in runs) _runRow((r as Map).cast<String, dynamic>(), cs),
+        const SizedBox(height: 18),
+        _label('Recent learnings (${learnings.length})', cs),
+        if (learnings.isEmpty)
+          Padding(
+            padding: const EdgeInsets.symmetric(vertical: 6),
+            child: Text('Nothing consolidated yet.',
+                style: TextStyle(color: cs.onSurface.withValues(alpha: 0.55))),
+          )
+        else
+          for (final l in learnings)
+            Padding(
+              padding: const EdgeInsets.symmetric(vertical: 3),
+              child:
+                  Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                Icon(Icons.psychology_outlined, size: 15, color: cs.primary),
+                const SizedBox(width: 6),
+                Expanded(
+                    child:
+                        Text('$l', style: const TextStyle(fontSize: 12.5))),
+              ]),
+            ),
+        const SizedBox(height: 18),
+        _label('Across the grid (${_nodes.length})', cs),
+        if (_nodes.isEmpty)
+          Padding(
+            padding: const EdgeInsets.symmetric(vertical: 6),
+            child: Text('No grid peers (or grid disabled).',
+                style: TextStyle(color: cs.onSurface.withValues(alpha: 0.55))),
+          )
+        else
+          for (final n in _nodes) _nodeCard(n, cs),
+      ],
+    );
+  }
+
+  Widget _runRow(Map<String, dynamic> r, ColorScheme cs) => Padding(
+        padding: const EdgeInsets.symmetric(vertical: 3),
+        child: Row(children: [
+          _kindChip('${r['kind'] ?? 'auto'}', cs),
+          const SizedBox(width: 8),
+          Expanded(
+              child: Text(_fmt(r['at']), style: const TextStyle(fontSize: 12))),
+          Text('+${r['stored'] ?? 0} · ${r['sessions'] ?? 0} sess',
+              style: TextStyle(
+                  fontSize: 11, color: cs.onSurface.withValues(alpha: 0.6))),
+        ]),
+      );
+
+  Widget _nodeCard(Map<String, dynamic> n, ColorScheme cs) {
+    final retro = (n['retrospect'] as Map?)?.cast<String, dynamic>();
+    final last = (retro?['last'] as Map?)?.cast<String, dynamic>();
+    final online = n['online'] == true;
+    final sub = retro == null
+        ? (online ? 'no data' : 'offline')
+        : 'last ${_fmt(retro['last_run'])} · ${retro['runs'] ?? 0} runs${last != null ? ' · +${last['stored'] ?? 0}' : ''}';
+    return Card(
+      margin: const EdgeInsets.only(bottom: 8),
+      child: Padding(
+        padding: const EdgeInsets.all(10),
+        child: Row(children: [
+          Icon(n['self'] == true ? Icons.smartphone : Icons.hub_outlined,
+              size: 16, color: cs.primary),
+          const SizedBox(width: 8),
+          Expanded(
+            child:
+                Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              Text('${n['name']}',
+                  style: const TextStyle(
+                      fontWeight: FontWeight.bold, fontSize: 13)),
+              Text(sub,
+                  style: TextStyle(
+                      fontSize: 11,
+                      color: cs.onSurface.withValues(alpha: 0.6))),
+            ]),
+          ),
+          if (retro != null && retro['enabled'] == false)
+            Text('off',
+                style: TextStyle(
+                    fontSize: 10, color: cs.onSurface.withValues(alpha: 0.5))),
+        ]),
+      ),
+    );
+  }
+
+  Widget _kindChip(String kind, ColorScheme cs) {
+    final c = kind == 'rebuild'
+        ? cs.tertiary
+        : kind == 'manual'
+            ? cs.primary
+            : cs.onSurface.withValues(alpha: 0.5);
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1),
+      decoration: BoxDecoration(
+          color: c.withValues(alpha: 0.15),
+          borderRadius: BorderRadius.circular(4)),
+      child: Text(kind,
+          style:
+              TextStyle(fontSize: 10, color: c, fontWeight: FontWeight.w600)),
+    );
+  }
+
+  String _fmt(dynamic ts) {
+    if (ts == null) return 'never';
+    final dt = DateTime.tryParse('$ts');
+    if (dt == null) return '$ts';
+    final diff = DateTime.now().difference(dt.toLocal());
+    if (diff.inMinutes < 1) return 'just now';
+    if (diff.inMinutes < 60) return '${diff.inMinutes}m ago';
+    if (diff.inHours < 24) return '${diff.inHours}h ago';
+    return '${diff.inDays}d ago';
+  }
+}

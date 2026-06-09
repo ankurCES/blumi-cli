@@ -325,6 +325,71 @@ impl Management for WebManagement {
         serde_json::json!({ "hits": hits })
     }
 
+    async fn retrospect_status(&self) -> serde_json::Value {
+        let path = self.config.paths.retrospect_store();
+        let mut v = crate::retrospect::status_json(&path);
+        let learnings = if let Some(mem) = &self.mem {
+            mem.episodes_by_kind("retrospection", 40).await
+        } else {
+            Vec::new()
+        };
+        let node = if self.config.grid.node_name.trim().is_empty() {
+            whoami::fallible::hostname().unwrap_or_else(|_| "blumi".to_string())
+        } else {
+            self.config.grid.node_name.clone()
+        };
+        if let Some(obj) = v.as_object_mut() {
+            obj.insert(
+                "enabled".into(),
+                serde_json::json!(self.config.memory.retrospect),
+            );
+            obj.insert(
+                "hours".into(),
+                serde_json::json!(self.config.memory.retrospect_hours),
+            );
+            obj.insert("node".into(), serde_json::json!(node));
+            obj.insert("learnings".into(), serde_json::json!(learnings));
+        }
+        v
+    }
+
+    fn retrospect_summary(&self) -> serde_json::Value {
+        let path = self.config.paths.retrospect_store();
+        let v = crate::retrospect::status_json(&path);
+        let runs = v.get("runs").and_then(|r| r.as_array());
+        serde_json::json!({
+            "enabled": self.config.memory.retrospect,
+            "last_run": v.get("last_run").cloned().unwrap_or(serde_json::Value::Null),
+            "runs": runs.map(|a| a.len()).unwrap_or(0),
+            "last": runs.and_then(|a| a.last()).cloned().unwrap_or(serde_json::Value::Null),
+        })
+    }
+
+    async fn retrospect_run(&self, rebuild: bool) -> serde_json::Value {
+        let (Some(store), Some(mem)) = (&self.store, &self.mem) else {
+            return serde_json::json!({ "ok": false, "error": "memory or history store disabled" });
+        };
+        let Some(provider) = self.config.active_provider() else {
+            return serde_json::json!({ "ok": false, "error": "no active provider" });
+        };
+        let llm = match blumi_llm::build_client(provider) {
+            Ok(c) => c,
+            Err(e) => return serde_json::json!({ "ok": false, "error": format!("{e}") }),
+        };
+        let path = self.config.paths.retrospect_store();
+        crate::retrospect::request_run(&path, rebuild);
+        let (sessions, stored) = crate::retrospect::retrospect_once(
+            store,
+            mem,
+            &llm,
+            &self.config.llm.model,
+            &path,
+            4000,
+        )
+        .await;
+        serde_json::json!({ "ok": true, "sessions": sessions, "stored": stored, "rebuild": rebuild })
+    }
+
     async fn knowledge_ingest(&self, path: &str) -> serde_json::Value {
         let Some(ks) = &self.knowledge else {
             return serde_json::json!({ "ok": false, "error": "knowledge disabled" });

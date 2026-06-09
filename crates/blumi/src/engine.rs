@@ -224,7 +224,9 @@ pub async fn build_session(
                 // learnings into memory. Gated to once per retrospect_hours.
                 if retrospect_on {
                     if let Some(st) = &retro_store {
-                        if crate::retrospect::due(&retro_path, retrospect_hours) {
+                        if crate::retrospect::due(&retro_path, retrospect_hours)
+                            || crate::retrospect::pending(&retro_path)
+                        {
                             let (seen, stored) = crate::retrospect::retrospect_once(
                                 st,
                                 &mem,

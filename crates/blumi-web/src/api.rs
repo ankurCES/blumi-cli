@@ -931,6 +931,24 @@ pub async fn knowledge_graph(
     )
 }
 
+pub async fn retrospect_get(State(state): State<AppState>) -> Json<Value> {
+    Json(state.mgmt().retrospect_status().await)
+}
+
+#[derive(Deserialize)]
+pub struct RetrospectRunBody {
+    /// Full re-process (reset watermark + replay all history) vs differential.
+    #[serde(default)]
+    pub rebuild: bool,
+}
+
+pub async fn retrospect_run(
+    State(state): State<AppState>,
+    Json(b): Json<RetrospectRunBody>,
+) -> Json<Value> {
+    Json(state.mgmt().retrospect_run(b.rebuild).await)
+}
+
 pub async fn memory_search(
     State(state): State<AppState>,
     Json(b): Json<KbSearchBody>,
@@ -1146,6 +1164,7 @@ async fn node_metrics(state: &AppState) -> Value {
         "tasks_local": total - remote,
         "accel": state.mgmt().accel(),  // compute accelerator (GPU routing)
         "loop": loop_state,
+        "retrospect": state.mgmt().retrospect_summary(),
     })
 }
 

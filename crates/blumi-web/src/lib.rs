@@ -302,6 +302,20 @@ pub trait Management: Send + Sync {
     ) -> serde_json::Value {
         serde_json::json!({ "hits": [] })
     }
+    /// Retrospection status for this node: enabled/hours + watermark + run-log +
+    /// recent consolidated learnings. Default: disabled.
+    async fn retrospect_status(&self) -> serde_json::Value {
+        serde_json::json!({ "enabled": false })
+    }
+    /// Compact retrospection summary for grid fan-out (last run + run count).
+    fn retrospect_summary(&self) -> serde_json::Value {
+        serde_json::json!({ "enabled": false })
+    }
+    /// Trigger a retrospection pass now — differential, or a full `rebuild`
+    /// (reset the watermark + replay all history). Default: disabled.
+    async fn retrospect_run(&self, _rebuild: bool) -> serde_json::Value {
+        serde_json::json!({ "ok": false, "error": "memory disabled" })
+    }
     /// Start a background ingest of `path`. Default: disabled.
     async fn knowledge_ingest(&self, _path: &str) -> serde_json::Value {
         serde_json::json!({ "ok": false, "error": "knowledge disabled" })
@@ -651,6 +665,8 @@ pub fn router(state: AppState) -> Router {
         .route("/api/knowledge/sources", get(api::knowledge_sources))
         .route("/api/knowledge/search", post(api::knowledge_search))
         .route("/api/knowledge/graph", post(api::knowledge_graph))
+        .route("/api/retrospect", get(api::retrospect_get))
+        .route("/api/retrospect/run", post(api::retrospect_run))
         .route("/api/knowledge/ingest", post(api::knowledge_ingest))
         .route("/api/knowledge/remove", post(api::knowledge_remove))
         .route("/api/memory/search", post(api::memory_search))
