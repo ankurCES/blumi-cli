@@ -296,11 +296,17 @@ impl KnowledgeStore {
                 stats.skipped += 1;
                 continue;
             }
-            let content = match std::fs::read_to_string(path) {
-                Ok(c) => c, // non-UTF8 (binary) read fails → skipped
-                Err(_) => {
-                    stats.skipped += 1;
-                    continue;
+            // Offload the file read (the heavy blocking I/O) to the blocking pool
+            // so a large-repo ingest doesn't stall the async runtime. The cheap
+            // metadata stat above stays inline.
+            let content = {
+                let p = path.to_path_buf();
+                match tokio::task::spawn_blocking(move || std::fs::read_to_string(&p)).await {
+                    Ok(Ok(c)) => c, // non-UTF8 (binary) read fails → skipped
+                    _ => {
+                        stats.skipped += 1;
+                        continue;
+                    }
                 }
             };
             if content.trim().is_empty() {

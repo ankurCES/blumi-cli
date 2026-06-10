@@ -67,10 +67,35 @@ pub struct RetrospectState {
 
 impl RetrospectState {
     fn load(path: &Path) -> RetrospectState {
-        std::fs::read_to_string(path)
+        // Cache the parsed state keyed on the file's mtime. The sweep calls this
+        // (via `due` + `pending`) every tick, but the file only changes on a run
+        // or a manual trigger — so an unchanged file is read + parsed at most once
+        // instead of twice per tick forever.
+        #[allow(clippy::type_complexity)]
+        static CACHE: std::sync::OnceLock<
+            std::sync::Mutex<Option<(std::path::PathBuf, std::time::SystemTime, RetrospectState)>>,
+        > = std::sync::OnceLock::new();
+        let cache = CACHE.get_or_init(|| std::sync::Mutex::new(None));
+        let mtime = std::fs::metadata(path).and_then(|m| m.modified()).ok();
+        if let Some(mt) = mtime {
+            if let Ok(guard) = cache.lock() {
+                if let Some((p, cmt, st)) = guard.as_ref() {
+                    if p == path && *cmt == mt {
+                        return st.clone();
+                    }
+                }
+            }
+        }
+        let state: RetrospectState = std::fs::read_to_string(path)
             .ok()
             .and_then(|s| serde_json::from_str(&s).ok())
-            .unwrap_or_default()
+            .unwrap_or_default();
+        if let Some(mt) = mtime {
+            if let Ok(mut guard) = cache.lock() {
+                *guard = Some((path.to_path_buf(), mt, state.clone()));
+            }
+        }
+        state
     }
 
     fn save(&self, path: &Path) {
