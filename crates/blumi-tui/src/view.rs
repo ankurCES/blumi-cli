@@ -20,8 +20,6 @@ const DASHBOARD_WIDTH: u16 = 34;
 /// Left sidebar (workspaces + sessions) width.
 const SIDEBAR_WIDTH: u16 = 26;
 
-const MAX_CONTENT_WIDTH: u16 = 100;
-
 /// Below this chat height the bordered chat box is dropped (borderless) so tiny
 /// terminals keep every row for the conversation.
 const MIN_PANELED_CHAT_H: u16 = 12;
@@ -158,8 +156,10 @@ pub fn render(model: &mut Model, f: &mut Frame) {
         render_slash_popup(model, f, editor, &theme);
     }
 
-    // Motion cues (scoped): a coalesce when an overlay opens (over its popup
-    // rect) and a short settle when the transcript grows (over the chat column).
+    // Motion cue (scoped): a coalesce when an overlay opens, over its popup rect.
+    // (No per-message effect over the chat — coalesce captures a cell snapshot and
+    // re-applies it across frames, which ghosts when the chat changes underneath
+    // it mid-animation, e.g. while streaming.)
     let (ovl_id, ovl_rect) = if model.pending.is_some() {
         (1u8, centered_rect(70, 50, area))
     } else if model.plan_review.is_some() {
@@ -192,7 +192,6 @@ pub fn render(model: &mut Model, f: &mut Frame) {
         (0, area)
     };
     model.motion.cue_overlay(ovl_id, ovl_rect);
-    model.motion.cue_message(model.entries.len(), chat);
 
     // Cinematic motion (tachyonfx) — applied last, over the fully-drawn frame.
     model.motion.process(f.buffer_mut(), area);
@@ -1773,7 +1772,8 @@ fn render_chat(model: &Model, f: &mut Frame, area: Rect, theme: &Theme) {
     } else {
         area
     };
-    let width = inner.width.min(MAX_CONTENT_WIDTH).saturating_sub(2) as usize;
+    // Cards span the full pane width (a closed box edge-to-edge inside the pane).
+    let width = inner.width as usize;
     let lines = build_lines(model, width, theme);
     let total = lines.len() as u16;
     let height = inner.height;
@@ -1785,7 +1785,8 @@ fn render_chat(model: &Model, f: &mut Frame, area: Rect, theme: &Theme) {
 
 fn build_lines(model: &Model, width: usize, theme: &Theme) -> Vec<Line<'static>> {
     let mut lines = Vec::new();
-    let inner = width.saturating_sub(2).max(8); // content width inside the gutter
+    // Content width inside the closed frame: `│ ` (2) + content + ` │` (2).
+    let inner = width.saturating_sub(4).max(8);
 
     for entry in &model.entries {
         match entry {
@@ -1917,27 +1918,60 @@ fn push_card(
     content: Vec<Line<'static>>,
     width: usize,
 ) {
-    let head = format!("{} {glyph} {label} ", icons::tl());
-    let used = head.chars().count();
-    let rule = icons::h().repeat(width.saturating_sub(used).max(1));
+    let w = width.max(6);
+    let interior = w.saturating_sub(4); // inside `│ ` … ` │`
+    let border = Style::default().fg(color);
+    // Header: ╭─ glyph label ─…─╮
+    let head = format!("{}{} {glyph} {label} ", icons::tl(), icons::h());
+    let used = UnicodeWidthStr::width(head.as_str());
+    let fill = icons::h().repeat(w.saturating_sub(used + 1));
     out.push(Line::from(Span::styled(
-        format!("{head}{rule}"),
-        Style::default().fg(color).add_modifier(Modifier::BOLD),
+        format!("{head}{fill}{}", icons::tr()),
+        border.add_modifier(Modifier::BOLD),
     )));
-    let gutter = Style::default().fg(color);
+    // Content rows, each padded/clipped to the interior + closed on the right.
     for l in content {
-        let mut spans = vec![Span::styled(format!("{} ", icons::v()), gutter)];
-        spans.extend(l.spans);
-        out.push(Line::from(spans));
+        out.push(frame_line(l.spans, interior, border));
     }
+    // Bottom: ╰─…─╯
     out.push(Line::from(Span::styled(
         format!(
-            "{}{}",
+            "{}{}{}",
             icons::bl(),
-            icons::h().repeat(width.saturating_sub(1).max(1))
+            icons::h().repeat(w.saturating_sub(2)),
+            icons::br()
         ),
-        gutter,
+        border,
     )));
+}
+
+/// Frame one content line inside a card: `│ ` + content (space-padded, or clipped
+/// when it would overrun) + ` │`, so the right border lines up at a fixed column
+/// regardless of the content's display width.
+fn frame_line(spans: Vec<Span<'static>>, interior: usize, border: Style) -> Line<'static> {
+    let mut out: Vec<Span<'static>> = Vec::with_capacity(spans.len() + 3);
+    out.push(Span::styled(format!("{} ", icons::v()), border));
+    let mut used = 0usize;
+    for sp in spans {
+        if used >= interior {
+            break;
+        }
+        let sw = UnicodeWidthStr::width(sp.content.as_ref());
+        if used + sw <= interior {
+            used += sw;
+            out.push(sp);
+        } else {
+            let clipped = truncate(sp.content.as_ref(), interior - used);
+            used += UnicodeWidthStr::width(clipped.as_str());
+            out.push(Span::styled(clipped, sp.style));
+            break;
+        }
+    }
+    if used < interior {
+        out.push(Span::raw(" ".repeat(interior - used)));
+    }
+    out.push(Span::styled(format!(" {}", icons::v()), border));
+    Line::from(out)
 }
 
 /// A textual progress bar like `███████░░░`.

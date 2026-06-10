@@ -98,6 +98,12 @@ pub fn tl() -> &'static str {
 pub fn bl() -> &'static str {
     pick("╰", "╰", "+")
 }
+pub fn tr() -> &'static str {
+    pick("╮", "╮", "+")
+}
+pub fn br() -> &'static str {
+    pick("╯", "╯", "+")
+}
 pub fn h() -> &'static str {
     pick("─", "─", "-")
 }

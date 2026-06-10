@@ -19,9 +19,6 @@ const SCENE_MS_REDUCED: u32 = 120;
 /// A modal/overlay coalescing into view (scoped to the popup rect).
 const OVERLAY_MS: u32 = 240;
 const OVERLAY_MS_REDUCED: u32 = 100;
-/// A new chat message settling in (kept short so it never feels busy).
-const MSG_MS: u32 = 170;
-const MSG_MS_REDUCED: u32 = 80;
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum MotionLevel {
@@ -38,8 +35,6 @@ pub struct Motion {
     active_until: Option<Instant>,
     /// Last-seen overlay discriminant, so `cue_overlay` fires once per opening.
     last_overlay: u8,
-    /// Last-seen transcript length, so `cue_message` fires once per new entry.
-    last_msgs: usize,
 }
 
 impl Default for Motion {
@@ -50,7 +45,6 @@ impl Default for Motion {
             last: None,
             active_until: None,
             last_overlay: 0,
-            last_msgs: 0,
         }
     }
 }
@@ -126,21 +120,6 @@ impl Motion {
         }
     }
 
-    /// Fire a short coalesce over the chat `area` when the transcript grows (a
-    /// new message/tool/notice settled in). Fires once per new entry.
-    pub fn cue_message(&mut self, count: usize, area: Rect) {
-        let grew = count > self.last_msgs;
-        self.last_msgs = count;
-        let ms = match self.level {
-            MotionLevel::Off => return,
-            MotionLevel::Reduced => MSG_MS_REDUCED,
-            MotionLevel::Full => MSG_MS,
-        };
-        if grew {
-            self.schedule(fx::coalesce(ms).with_area(area), ms);
-        }
-    }
-
     /// Advance + apply active effects onto `area`. Call last in `view::render`.
     /// A no-op when off or idle (and it resets the clock so the next effect
     /// starts from a fresh delta).
@@ -194,18 +173,5 @@ mod tests {
         assert!(!m.is_active(), "same overlay id does not re-trigger");
         m.cue_overlay(0, area); // closed → no effect
         assert!(!m.is_active());
-    }
-
-    #[test]
-    fn cue_message_fires_when_transcript_grows() {
-        let area = Rect::new(0, 0, 40, 20);
-        let mut m = Motion::default();
-        m.cue_message(3, area); // 0 → 3 (e.g. resume): grew
-        assert!(m.is_active());
-        m.active_until = None;
-        m.cue_message(3, area); // unchanged → no fire
-        assert!(!m.is_active());
-        m.cue_message(4, area); // new entry → fire
-        assert!(m.is_active());
     }
 }
