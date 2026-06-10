@@ -470,9 +470,19 @@ impl KnowledgeStore {
             }
         }
 
-        // Vector fill for the remaining slots (semantic recall).
+        // Recall fill for the remaining slots (after the FTS precision hits,
+        // which stay pinned).
         if out.len() < k {
-            if let Some(qvec) = self.embed_one(query).await {
+            let qvec = self.embed_one(query).await;
+            if self.graph_mode == GraphMode::Structural {
+                // P5: graph-aware re-rank — blend semantic similarity with
+                // structural proximity to the precision (FTS) hits and
+                // hub-suppression. Works with or without embeddings (graph
+                // expansion of the FTS hits happens either way).
+                self.fill_recall_reranked(qvec.as_deref(), &mut out, &mut seen, k)
+                    .await;
+            } else if let Some(qvec) = qvec {
+                // Lite / Off: pure semantic fill (unchanged).
                 let mut scored = self.vector_candidates(&qvec).await;
                 scored.sort_by(|a, b| {
                     b.score
@@ -489,27 +499,131 @@ impl KnowledgeStore {
                 }
             }
         }
-        // Graph fill: when the structural graph is built and direct search left
-        // room, surface typed neighbors (callees/callers) of the top hits —
-        // related code the keyword/vector pass missed (scored below direct hits).
-        if self.graph_mode == GraphMode::Structural && out.len() < k {
-            let seeds: Vec<String> = out.iter().take(5).map(|h| h.name.clone()).collect();
-            'fill: for name in &seeds {
-                let mut nbrs = self.callees(name, 4).await;
-                nbrs.extend(self.callers(name, 4).await);
-                for mut h in nbrs {
-                    if seen.insert(hit_id(&h)) {
-                        h.score *= 0.5;
-                        out.push(h);
-                        if out.len() >= k {
-                            break 'fill;
-                        }
-                    }
-                }
-            }
-        }
         out.truncate(k);
         out
+    }
+
+    /// P5 graph-aware recall fill (structural mode). Builds a bounded candidate
+    /// pool from the semantic (vector) hits ∪ the structural neighbors of the
+    /// precision (FTS) hits already in `out`, then scores each candidate as
+    /// `(semantic_sim + edge_affinity) · hub_factor` — rewarding code that is
+    /// both semantically close *and* structurally connected to a confirmed hit,
+    /// while suppressing hub "god nodes" referenced from everywhere. The FTS hits
+    /// in `out` are never reordered, so exact-symbol precision is preserved.
+    async fn fill_recall_reranked(
+        &self,
+        qvec: Option<&[f32]>,
+        out: &mut Vec<CodeHit>,
+        seen: &mut HashSet<i64>,
+        k: usize,
+    ) {
+        const SEM_POOL: usize = 24; // top semantic candidates to consider
+        const EDGE_BONUS: f32 = 0.15; // β: connected to a precision hit
+        const HUB_GAMMA: f32 = 0.3; // γ: hub-suppression strength
+        const GRAPH_BASE: f32 = 0.3; // base for a graph-only neighbor (no vector)
+
+        // Semantic candidates (top SEM_POOL by cosine) — empty without an
+        // embedder, in which case this degrades to pure graph expansion.
+        let mut sem = match qvec {
+            Some(qv) => self.vector_candidates(qv).await,
+            None => Vec::new(),
+        };
+        sem.sort_by(|a, b| {
+            b.score
+                .partial_cmp(&a.score)
+                .unwrap_or(std::cmp::Ordering::Equal)
+        });
+        sem.truncate(SEM_POOL);
+
+        // Structural neighbors of the precision (FTS) hits get an edge bonus;
+        // bounded to the top few seeds. Mark them score = -1.0 (assigned a real
+        // base below) so a resolved-flag score can't masquerade as a cosine.
+        let seeds: Vec<String> = out.iter().take(5).map(|h| h.name.clone()).collect();
+        let mut neighbor_names: HashSet<String> = HashSet::new();
+        let mut graph_only: Vec<CodeHit> = Vec::new();
+        for name in &seeds {
+            let mut nbrs = self.callees(name, 6).await;
+            nbrs.extend(self.callers(name, 6).await);
+            for mut h in nbrs {
+                neighbor_names.insert(h.name.clone());
+                h.score = -1.0;
+                graph_only.push(h);
+            }
+        }
+
+        // Candidate pool = semantic ∪ graph neighbors (dedup by hit id; the
+        // semantic entry wins for a symbol present in both, keeping its cosine).
+        let mut pool: Vec<CodeHit> = Vec::new();
+        let mut pool_ids: HashSet<i64> = HashSet::new();
+        for h in sem.into_iter().chain(graph_only) {
+            if pool_ids.insert(hit_id(&h)) {
+                pool.push(h);
+            }
+        }
+        if pool.is_empty() {
+            return;
+        }
+
+        // Hub-suppression needs each candidate's total degree.
+        let names: Vec<String> = pool.iter().map(|h| h.name.clone()).collect();
+        let deg = self.degrees(&names).await;
+
+        for h in &mut pool {
+            let base = if h.score >= 0.0 { h.score } else { GRAPH_BASE };
+            let affinity = if neighbor_names.contains(&h.name) {
+                EDGE_BONUS
+            } else {
+                0.0
+            };
+            let d = *deg.get(&h.name).unwrap_or(&0) as f32;
+            let hub_factor = 1.0 / (1.0 + HUB_GAMMA * d.ln_1p());
+            h.score = (base + affinity) * hub_factor;
+        }
+        pool.sort_by(|a, b| {
+            b.score
+                .partial_cmp(&a.score)
+                .unwrap_or(std::cmp::Ordering::Equal)
+        });
+
+        for h in pool {
+            if out.len() >= k {
+                break;
+            }
+            if seen.insert(hit_id(&h)) {
+                out.push(h);
+            }
+        }
+    }
+
+    /// Total reference-graph degree (in + out) for each of `names`, in one query.
+    /// Symbols with no edges are simply absent from the map (degree 0).
+    async fn degrees(&self, names: &[String]) -> std::collections::HashMap<String, usize> {
+        if names.is_empty() {
+            return std::collections::HashMap::new();
+        }
+        let placeholders = vec!["?"; names.len()].join(",");
+        let sql = format!(
+            "SELECT s.name AS name, COUNT(*) AS deg
+             FROM (SELECT src AS id FROM code_edges UNION ALL SELECT dst FROM code_edges) e
+             JOIN code_symbols s ON s.id = e.id
+             WHERE s.name IN ({placeholders})
+             GROUP BY s.name"
+        );
+        let mut q = sqlx::query(&sql);
+        for n in names {
+            q = q.bind(n);
+        }
+        q.fetch_all(&self.pool)
+            .await
+            .unwrap_or_default()
+            .iter()
+            .map(|r| {
+                (
+                    r.get::<String, _>("name"),
+                    r.get::<i64, _>("deg").max(0) as usize,
+                )
+            })
+            .collect()
     }
 
     /// All symbols with a vector, scored by cosine against `qvec` (≥ floor).
