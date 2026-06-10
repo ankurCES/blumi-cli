@@ -85,6 +85,8 @@ pub struct AgentTurnRunner {
     rpl: Option<blumi_config::RplConfig>,
     /// Code-graph fan-in oracle for the RPL blast radius (None = unwired).
     impact_oracle: Option<Arc<dyn crate::rpl::ImpactOracle>>,
+    /// Learned code-symbol fitness, rewarded by turn outcome (None = unwired).
+    code_fitness: Option<Arc<dyn crate::CodeFitness>>,
 }
 
 impl AgentTurnRunner {
@@ -125,6 +127,7 @@ impl AgentTurnRunner {
             prompt_hooks: Vec::new(),
             rpl: None,
             impact_oracle: None,
+            code_fitness: None,
         }
     }
 
@@ -181,6 +184,13 @@ impl AgentTurnRunner {
     /// depended-upon the edited file is. `None` = no fan-in signal.
     pub fn with_impact_oracle(mut self, oracle: Option<Arc<dyn crate::rpl::ImpactOracle>>) -> Self {
         self.impact_oracle = oracle;
+        self
+    }
+
+    /// Inject a code-graph fitness store; the runner rewards the symbols it
+    /// surfaced each step by turn outcome (P8). `None` = no fitness learning.
+    pub fn with_code_fitness(mut self, cf: Option<Arc<dyn crate::CodeFitness>>) -> Self {
+        self.code_fitness = cf;
         self
     }
 
@@ -819,16 +829,24 @@ impl TurnRunner for AgentTurnRunner {
             // for a productive step, decay them when the step failed — outcome,
             // not engagement. Eviction ranks by this so genuinely-useful memories
             // survive (RPL-reviewed failures flow through here too).
-            if !recalled_ids.is_empty() {
-                if let Some(mem) = &self.memory {
-                    let any_fail = tool_calls.iter().any(|c| {
-                        results
-                            .get(c.id.as_str())
-                            .map(|r| !r.class.is_success())
-                            .unwrap_or(false)
-                    });
-                    mem.reward(&recalled_ids, if any_fail { -0.1 } else { 0.1 })
-                        .await;
+            if (!recalled_ids.is_empty() && self.memory.is_some()) || self.code_fitness.is_some() {
+                let any_fail = tool_calls.iter().any(|c| {
+                    results
+                        .get(c.id.as_str())
+                        .map(|r| !r.class.is_success())
+                        .unwrap_or(false)
+                });
+                let delta = if any_fail { -0.1 } else { 0.1 };
+                if !recalled_ids.is_empty() {
+                    if let Some(mem) = &self.memory {
+                        mem.reward(&recalled_ids, delta).await;
+                    }
+                }
+                // Code-graph fitness (P8): reward the symbols code_search surfaced
+                // this step by the same outcome signal, so genuinely-useful
+                // symbols float up in the recall re-rank over time.
+                if let Some(cf) = &self.code_fitness {
+                    cf.reward_surfaced(delta).await;
                 }
             }
 

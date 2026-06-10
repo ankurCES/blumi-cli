@@ -42,7 +42,7 @@ pub use eventlog::EventLog;
 pub use exec::{DirEntry, ExecOutput, ExecRequest, Executor};
 pub use hooks::run_prompt_hooks;
 pub use llm::{EmbeddingClient, LlmClient, LlmOptions, ProviderCaps, ToolSpec};
-pub use memory::{RecalledMemory, SemanticMemory};
+pub use memory::{CodeFitness, RecalledMemory, SemanticMemory};
 pub use permissions::{PermissionEngine, PermissionOutcome};
 pub use persona::{builtin_personas, Persona};
 pub use pipeline::execute_tool_call;

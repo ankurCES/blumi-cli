@@ -293,6 +293,16 @@ pub async fn build_session(
         }
     }
     let mut impact_oracle: Option<Arc<dyn blumi_core::rpl::ImpactOracle>> = None;
+    // Adapter: expose the code knowledge store as the P8 code-graph fitness sink
+    // (keeps blumi-core free of a blumi-knowledge dependency).
+    struct KnowledgeFitness(Arc<blumi_knowledge::KnowledgeStore>);
+    #[async_trait::async_trait]
+    impl blumi_core::CodeFitness for KnowledgeFitness {
+        async fn reward_surfaced(&self, delta: f64) {
+            self.0.reward_surfaced(delta).await
+        }
+    }
+    let mut code_fitness: Option<Arc<dyn blumi_core::CodeFitness>> = None;
 
     // Code knowledge base (native-lite): code_search + code_retrieve over an
     // indexed repo (knowledge.db). Shares the process-global embeddings model;
@@ -326,6 +336,9 @@ pub async fn build_session(
                 if config.knowledge.graph.rpl_impact {
                     impact_oracle = Some(Arc::new(KnowledgeImpactOracle(ks.clone())));
                 }
+                // Code-graph fitness (P8): the runner rewards surfaced symbols by
+                // turn outcome so genuinely-useful code floats up in the re-rank.
+                code_fitness = Some(Arc::new(KnowledgeFitness(ks.clone())));
                 // Typed graph queries (callers/callees/impact/implementers).
                 registry.register(Arc::new(blumi_core::Typed(blumi_tools::CodeGraph::new(ks))));
             }
@@ -640,6 +653,7 @@ pub async fn build_session(
     .with_router(router.clone())
     .with_prompt_hooks(config.hooks.user_prompt_submit.clone())
     .with_impact_oracle(impact_oracle)
+    .with_code_fitness(code_fitness)
     .with_rpl(config.rpl.clone());
     // Durable execution: checkpoint the turn after each tool step (shares the
     // history DB) so a crash/restart resumes from the last step.

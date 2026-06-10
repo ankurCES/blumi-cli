@@ -18,6 +18,17 @@ pub struct RecalledMemory {
     pub score: f32,
 }
 
+/// Learned per-symbol fitness for code search. The agent runner reports turn
+/// outcome via [`reward_surfaced`](CodeFitness::reward_surfaced); the store
+/// applies it to whatever symbols it surfaced since the last call (mirroring
+/// `SemanticMemory`'s value-fitness). Best-effort — must never break a turn.
+#[async_trait]
+pub trait CodeFitness: Send + Sync {
+    /// Reward (positive `delta`) or penalize (negative) the code symbols surfaced
+    /// since the last call, then clear the surfaced set.
+    async fn reward_surfaced(&self, delta: f64);
+}
+
 /// Long-term semantic memory: recall relevant facts, record that they were used
 /// (the SEDM utility signal), and persist new ones through a write-admission
 /// (dedup) gate. Every method is best-effort — a backing-store error must never

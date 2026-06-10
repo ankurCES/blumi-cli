@@ -132,6 +132,9 @@ pub struct KnowledgeStore {
     /// structural graph builder, so it's dead when `code-graph` is compiled out.
     #[cfg_attr(not(feature = "code-graph"), allow(dead_code))]
     edge_cap: usize,
+    /// Symbol names surfaced by `search` since the last fitness reward (P8).
+    /// Drained by `reward_surfaced`; bounded so an un-rewarded run can't grow it.
+    surfaced: std::sync::Mutex<HashSet<String>>,
 }
 
 impl KnowledgeStore {
@@ -159,6 +162,7 @@ impl KnowledgeStore {
             embedder,
             graph_mode: GraphMode::default(),
             edge_cap: 64,
+            surfaced: std::sync::Mutex::new(HashSet::new()),
         })
     }
 
@@ -177,6 +181,7 @@ impl KnowledgeStore {
             embedder,
             graph_mode: GraphMode::default(),
             edge_cap: 64,
+            surfaced: std::sync::Mutex::new(HashSet::new()),
         })
     }
 
@@ -500,7 +505,41 @@ impl KnowledgeStore {
             }
         }
         out.truncate(k);
+        self.note_surfaced(&out);
         out
+    }
+
+    /// Record the symbol names a `search` surfaced, for later fitness reward
+    /// (P8). Bounded so a run that never rewards can't grow it without limit.
+    fn note_surfaced(&self, hits: &[CodeHit]) {
+        if let Ok(mut b) = self.surfaced.lock() {
+            if b.len() < 4096 {
+                for h in hits {
+                    b.insert(h.name.clone());
+                }
+            }
+        }
+    }
+
+    /// Apply a fitness `delta` to every symbol surfaced since the last call, then
+    /// clear the surfaced set (P8) — positive on a productive turn, negative on a
+    /// failure; clamped at zero. Best-effort. (On a shared gateway the surfaced
+    /// set spans concurrent sessions, so the signal is coarse — acceptable for a
+    /// slowly-accruing ranking prior.)
+    pub async fn reward_surfaced(&self, delta: f64) {
+        let names: Vec<String> = match self.surfaced.lock() {
+            Ok(mut b) if !b.is_empty() => b.drain().collect(),
+            _ => return,
+        };
+        let placeholders = vec!["?"; names.len()].join(",");
+        let sql = format!(
+            "UPDATE code_symbols SET value = MAX(0.0, value + ?) WHERE name IN ({placeholders})"
+        );
+        let mut q = sqlx::query(&sql).bind(delta);
+        for n in &names {
+            q = q.bind(n);
+        }
+        let _ = q.execute(&self.pool).await;
     }
 
     /// P5 graph-aware recall fill (structural mode). Builds a bounded candidate
@@ -637,7 +676,8 @@ impl KnowledgeStore {
         const MAX_VEC_SCAN: i64 = 20_000;
         let rows = sqlx::query(
             "SELECT f.path AS path, s.name AS name, s.kind AS kind,
-                    s.start_line AS sl, s.end_line AS el, s.snippet AS snippet, v.vec AS vec
+                    s.start_line AS sl, s.end_line AS el, s.snippet AS snippet,
+                    s.value AS val, v.vec AS vec
              FROM code_vec v
              JOIN code_symbols s ON s.id = v.symbol_id
              JOIN code_files f ON f.id = s.file_id
@@ -657,10 +697,15 @@ impl KnowledgeStore {
         rows.iter()
             .filter_map(|r| {
                 let blob: Vec<u8> = r.get("vec");
-                let score = dot(qvec, &blob_to_vec(&blob));
-                if score < 0.25 {
+                let cos = dot(qvec, &blob_to_vec(&blob));
+                if cos < 0.25 {
                     return None;
                 }
+                // P8: value-weight the rank (1.0 = neutral) so symbols proven
+                // useful in past productive turns float up; the recall floor
+                // stays on the raw cosine.
+                let val: f64 = r.get("val");
+                let score = cos * (val as f32).clamp(0.25, 3.0);
                 Some(CodeHit {
                     path: r.get("path"),
                     name: r.get("name"),
