@@ -62,8 +62,11 @@ pub struct ToolCall {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Message {
     pub role: Role,
+    /// `Arc<[…]>` so cloning a `Message` (per agentic step the whole window is
+    /// cloned to snapshot it under the state lock) is O(1) — a refcount bump, not
+    /// a deep copy of the content. Built once at construction; never mutated.
     #[serde(default)]
-    pub content: Vec<ContentPart>,
+    pub content: std::sync::Arc<[ContentPart]>,
     /// Tool calls emitted by an assistant message.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub tool_calls: Vec<ToolCall>,
@@ -81,7 +84,7 @@ impl Message {
     fn new(role: Role, content: Vec<ContentPart>) -> Self {
         Message {
             role,
-            content,
+            content: content.into(),
             tool_calls: Vec::new(),
             tool_call_id: None,
             tool_name: None,
