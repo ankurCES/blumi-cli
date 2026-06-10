@@ -95,6 +95,10 @@ pub struct SemanticMemoryImpl {
     store: Arc<Store>,
     embedder: Option<Arc<dyn EmbeddingClient>>,
     params: MemoryParams,
+    /// Last similarity-graph build signature: `(active count, max rowid, ticks
+    /// since a full rebuild)`. Lets `sweep` skip the O(N²) all-pairs rebuild when
+    /// the active-memory set is unchanged. See [`sweep`](Self::sweep).
+    graph_sig: std::sync::Mutex<(i64, i64, u32)>,
 }
 
 impl SemanticMemoryImpl {
@@ -107,6 +111,7 @@ impl SemanticMemoryImpl {
             store,
             embedder,
             params,
+            graph_sig: std::sync::Mutex::new((-1, -1, 0)),
         }
     }
 
@@ -844,8 +849,41 @@ impl SemanticMemoryImpl {
         // Reap pending hypotheses never confirmed within a week (their fix was
         // never observed to work) so unconfirmed episodes don't pile up.
         self.prune_pending(7 * 24 * 3600).await;
-        // Rebuild the similarity graph (enrichment for graph recall + the view).
-        let _ = self.build_memory_graph(0.55, 6).await;
+        // Rebuild the similarity graph (enrichment for graph recall + the view) —
+        // but only when the active-memory set actually changed since the last
+        // sweep. An idle gateway otherwise re-runs an O(N²) all-pairs cosine every
+        // tick for nothing. A forced rebuild after FORCE_EVERY consecutive skips
+        // bounds the staleness an in-place text edit (invisible to the
+        // count/rowid signature) could introduce.
+        const FORCE_EVERY: u32 = 20;
+        let sig = sqlx::query(
+            "SELECT COUNT(*) AS c, COALESCE(MAX(rowid), 0) AS m \
+             FROM memories WHERE status = 'active'",
+        )
+        .fetch_one(self.pool())
+        .await
+        .ok()
+        .map(|r| (r.get::<i64, _>("c"), r.get::<i64, _>("m")));
+        let rebuild = {
+            let mut g = self.graph_sig.lock().unwrap();
+            match (sig, *g) {
+                // Same set and not yet due for a forced refresh → skip.
+                (Some((c, m)), (lc, lm, ticks)) if c == lc && m == lm && ticks < FORCE_EVERY => {
+                    *g = (lc, lm, ticks + 1);
+                    false
+                }
+                // Set changed (or forced refresh) → rebuild and re-baseline.
+                (Some((c, m)), _) => {
+                    *g = (c, m, 0);
+                    true
+                }
+                // Signature query failed → rebuild to be safe.
+                (None, _) => true,
+            }
+        };
+        if rebuild {
+            let _ = self.build_memory_graph(0.55, 6).await;
+        }
         (merged, evicted)
     }
 
