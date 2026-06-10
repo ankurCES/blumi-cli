@@ -1359,14 +1359,14 @@ pub async fn run(
         // weakest locally, then diffuse worth-sharing, non-`user` memories to live
         // peers. Each receiver re-admits through its own dedup gate; origin-tagging
         // stops A→B→A bounce-back. The `user` namespace never leaves the node.
-        if let Some(mem) = mem.clone() {
+        // Diffusion-only loop: the SEDM curation sweep (consolidate/evict, mine,
+        // resolve, retrospect) runs once process-wide via `engine::build_session`
+        // → `spawn_curation` (the gateway's own sessions trigger it). Here we only
+        // fan high-value memories out to live grid peers.
+        if let (Some(mem), true) = (mem.clone(), provider.config.memory.diffuse) {
             let reg = reg.clone();
             let secret = grid_secret.clone().unwrap_or_default();
-            let diffuse = provider.config.memory.diffuse;
             let period = provider.config.memory.sweep_secs.max(15);
-            // Self-healing evolution: mine recurring failures into recovery skills.
-            let heal = provider.config.heal.clone();
-            let skills_dir = provider.config.paths.skills.clone();
             let origin = if provider.config.grid.node_name.trim().is_empty() {
                 whoami::fallible::hostname().unwrap_or_else(|_| "blumi".to_string())
             } else {
@@ -1377,25 +1377,8 @@ pub async fn run(
                 tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
                 loop {
                     tick.tick().await;
-                    let (merged, evicted) = mem.sweep().await;
-                    if merged > 0 || evicted > 0 {
-                        tracing::debug!("memory sweep: merged={merged} evicted={evicted}");
-                    }
-                    // Self-evolution: cluster recurring failures → low-risk recovery
-                    // skill (auto) or proposal. Idempotent (markers dedup); the new
-                    // skill loads on the next session reload.
-                    if heal.enabled && !matches!(heal.evolve, blumi_config::HealEvolve::Off) {
-                        for action in
-                            crate::evolve::mine_once(&mem, &skills_dir, heal.evolve, 3).await
-                        {
-                            tracing::info!("self-evolve: {action}");
-                        }
-                    }
-                    if !diffuse {
-                        continue;
-                    }
                     // utility ≥ 1.0 = remembered at least once (fresh memories
-                    // qualify); the dedup gate on the receiver makes re-sends cheap.
+                    // qualify); the receiver's dedup gate makes re-sends cheap.
                     let export = mem.high_utility(1.0, 32).await;
                     if export.is_empty() {
                         continue;

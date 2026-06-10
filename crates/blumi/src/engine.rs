@@ -49,6 +49,104 @@ fn mock_demo() -> Vec<StreamChunk> {
     chunks
 }
 
+/// Process-global guard so the SEDM curation loop spawns **at most once**, no
+/// matter how many sessions `build_session` builds (TUI swaps, gateway sessions,
+/// dispatch threads, self-reloads). They all share one loop over the shared DB,
+/// instead of each leaking its own forever-running sweep task.
+static CURATION_STARTED: OnceLock<()> = OnceLock::new();
+
+/// One background curation tick: governance sweep (consolidate/evict + rebuild
+/// the recall graph), mine recurring failures into recovery skills, resolve
+/// memory conflicts (opt-in), and run daily retrospection. Fully best-effort.
+async fn curate_once(
+    config: &BlumiConfig,
+    mem: &blumi_persist::SemanticMemoryImpl,
+    store: Option<&Arc<blumi_persist::Store>>,
+    llm: &Arc<dyn LlmClient>,
+) {
+    let (merged, evicted) = mem.sweep().await;
+    if merged > 0 || evicted > 0 {
+        tracing::debug!("memory sweep: merged={merged} evicted={evicted}");
+    }
+    // Self-evolution: cluster recurring failures → low-risk recovery skill (auto)
+    // or proposal. Idempotent (markers dedup); loads on the next session reload.
+    if config.heal.enabled && !matches!(config.heal.evolve, blumi_config::HealEvolve::Off) {
+        for action in
+            crate::evolve::mine_once(mem, &config.paths.skills, config.heal.evolve, 3).await
+        {
+            tracing::info!("self-evolve: {action}");
+        }
+    }
+    // Conflict resolution (opt-in): classify same-topic pairs, supersede the
+    // outdated side. Bounded per tick; off by default.
+    if config.memory.resolve_conflicts {
+        let n = crate::resolve::resolve_once(
+            mem,
+            llm,
+            &config.llm.model,
+            config.memory.dedup_threshold,
+            5,
+        )
+        .await;
+        if n > 0 {
+            tracing::info!("conflict resolver: superseded {n} stale memory(ies)");
+        }
+    }
+    // Daily retrospection: replay each session's new transcript (differential,
+    // from the watermark) into durable memory. Gated to once per retrospect_hours.
+    if config.memory.retrospect && config.llm.provider != "mock" {
+        if let Some(st) = store {
+            let path = config.paths.retrospect_store();
+            if crate::retrospect::due(&path, config.memory.retrospect_hours)
+                || crate::retrospect::pending(&path)
+            {
+                let (seen, stored) = crate::retrospect::retrospect_once(
+                    st,
+                    mem,
+                    llm,
+                    &config.llm.model,
+                    &path,
+                    4000,
+                )
+                .await;
+                if stored > 0 {
+                    tracing::info!(
+                        "retrospection: consolidated {stored} learning(s) from {seen} session(s)"
+                    );
+                }
+            }
+        }
+    }
+}
+
+/// Spawn the SEDM curation loop — **once per process** (guarded by
+/// `CURATION_STARTED`). Every `build_session` calls this, but only the first
+/// actually starts the loop, so a long-lived gateway / TUI doesn't accumulate one
+/// sweep task per session. The gateway additionally runs a diffusion-only loop
+/// (see `web.rs`) to fan high-value memories out to grid peers.
+fn spawn_curation(
+    config: &BlumiConfig,
+    mem: Arc<blumi_persist::SemanticMemoryImpl>,
+    store: Option<Arc<blumi_persist::Store>>,
+    llm: Arc<dyn LlmClient>,
+) {
+    if CURATION_STARTED.set(()).is_err() {
+        return; // a curation loop is already running in this process
+    }
+    let period = config.memory.sweep_secs.max(15);
+    let config = config.clone();
+    tokio::spawn(async move {
+        // `interval`'s first tick fires immediately so even a short session gets
+        // one curation pass.
+        let mut tick = tokio::time::interval(std::time::Duration::from_secs(period));
+        tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+        loop {
+            tick.tick().await;
+            curate_once(&config, &mem, store.as_ref(), &llm).await;
+        }
+    });
+}
+
 /// Build and spawn a session actor from config. `yolo` forces auto-approval
 /// (used by headless `run`); the TUI passes `false` so approvals are interactive.
 /// `seed` resumes an existing conversation (its messages become the new actor's
@@ -166,86 +264,13 @@ pub async fn build_session(
         d
     });
 
-    // SEDM background curation for non-gateway (CLI/TUI) sessions. The gateway
-    // runs its own sweep + grid diffusion (see `web.rs`); standalone runs have no
-    // peers, so here we periodically (a) consolidate near-duplicates, (b) evict
-    // the weakest past the namespace cap, (c) rebuild the recall graph, and
-    // (d) mine recurring failures into recovery skills — none of which happened
-    // off the gateway before, leaving graph-augmented recall a silent no-op.
-    // `interval`'s first tick fires immediately so even a short session gets one
-    // curation pass; long-lived `blumi tui` keeps curating. Fully best-effort.
+    // SEDM background curation — consolidate/evict, rebuild the recall graph, mine
+    // failures into skills, resolve conflicts, retrospect. Spawned at most ONCE
+    // per process (see `spawn_curation`), so the always-on gateway and the TUI
+    // don't leak a sweep loop per session built. The gateway additionally runs a
+    // diffusion-only loop (see `web.rs`) to share high-value memories with peers.
     if let Some(mem) = semantic.clone() {
-        let period = config.memory.sweep_secs.max(15);
-        let heal = config.heal.clone();
-        let skills_dir = config.paths.skills.clone();
-        let resolve_conflicts = config.memory.resolve_conflicts;
-        let resolver_llm = llm.clone();
-        let resolver_model = config.llm.model.clone();
-        let dedup_threshold = config.memory.dedup_threshold;
-        let retrospect_on = config.memory.retrospect && config.llm.provider != "mock";
-        let retrospect_hours = config.memory.retrospect_hours;
-        let retro_path = config.paths.retrospect_store();
-        let retro_store = history_store.clone();
-        tokio::spawn(async move {
-            let mut tick = tokio::time::interval(std::time::Duration::from_secs(period));
-            tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
-            loop {
-                tick.tick().await;
-                let (merged, evicted) = mem.sweep().await;
-                if merged > 0 || evicted > 0 {
-                    tracing::debug!("memory sweep: merged={merged} evicted={evicted}");
-                }
-                // Self-evolution: cluster recurring failures → low-risk recovery
-                // skill (auto) or proposal. Idempotent (markers dedup); the new
-                // skill loads on the next session reload.
-                if heal.enabled && !matches!(heal.evolve, blumi_config::HealEvolve::Off) {
-                    for action in crate::evolve::mine_once(&mem, &skills_dir, heal.evolve, 3).await
-                    {
-                        tracing::info!("self-evolve: {action}");
-                    }
-                }
-                // Conflict resolution (opt-in): classify same-topic memory pairs
-                // and supersede the outdated side. Bounded per tick; off by default.
-                if resolve_conflicts {
-                    let n = crate::resolve::resolve_once(
-                        &mem,
-                        &resolver_llm,
-                        &resolver_model,
-                        dedup_threshold,
-                        5,
-                    )
-                    .await;
-                    if n > 0 {
-                        tracing::info!("conflict resolver: superseded {n} stale memory(ies)");
-                    }
-                }
-                // Daily retrospection: replay each session's new transcript
-                // (differential, from the watermark) and consolidate durable
-                // learnings into memory. Gated to once per retrospect_hours.
-                if retrospect_on {
-                    if let Some(st) = &retro_store {
-                        if crate::retrospect::due(&retro_path, retrospect_hours)
-                            || crate::retrospect::pending(&retro_path)
-                        {
-                            let (seen, stored) = crate::retrospect::retrospect_once(
-                                st,
-                                &mem,
-                                &resolver_llm,
-                                &resolver_model,
-                                &retro_path,
-                                4000,
-                            )
-                            .await;
-                            if stored > 0 {
-                                tracing::info!(
-                                    "retrospection: consolidated {stored} learning(s) from {seen} session(s)"
-                                );
-                            }
-                        }
-                    }
-                }
-            }
-        });
+        spawn_curation(config, mem, history_store.clone(), llm.clone());
     }
 
     // Long-term `memory` tool: MEMORY.md/USER.md mirror + the semantic store.
