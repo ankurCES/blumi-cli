@@ -47,6 +47,8 @@ pub struct SessionMeta {
 pub struct StoredSession {
     pub meta: SessionMeta,
     pub messages: Vec<Message>,
+    /// Standing objective (`/goal`), restored into the resumed session.
+    pub goal: Option<String>,
 }
 
 /// One full-text search hit (deduplicated to one per session).
@@ -133,11 +135,12 @@ impl Store {
         let mut tx = self.pool.begin().await?;
 
         sqlx::query(
-            "INSERT INTO sessions (id, title, model, created_at, updated_at, input_tokens, output_tokens)
-             VALUES (?, ?, ?, ?, ?, ?, ?)
+            "INSERT INTO sessions (id, title, model, created_at, updated_at, input_tokens, output_tokens, goal)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?)
              ON CONFLICT(id) DO UPDATE SET
                 title=excluded.title, model=excluded.model, updated_at=excluded.updated_at,
-                input_tokens=excluded.input_tokens, output_tokens=excluded.output_tokens",
+                input_tokens=excluded.input_tokens, output_tokens=excluded.output_tokens,
+                goal=excluded.goal",
         )
         .bind(snap.id.as_str())
         .bind(&title)
@@ -146,6 +149,7 @@ impl Store {
         .bind(&now)
         .bind(snap.total_input_tokens as i64)
         .bind(snap.total_output_tokens as i64)
+        .bind(snap.goal.as_deref().unwrap_or(""))
         .execute(&mut *tx)
         .await?;
 
@@ -192,7 +196,7 @@ impl Store {
 
     pub async fn load_session(&self, id: &str) -> Result<Option<StoredSession>, StoreError> {
         let srow = sqlx::query(
-            "SELECT id, title, model, updated_at, input_tokens, output_tokens, 0 AS cnt
+            "SELECT id, title, model, updated_at, input_tokens, output_tokens, goal, 0 AS cnt
              FROM sessions WHERE id = ?",
         )
         .bind(id)
@@ -216,7 +220,12 @@ impl Store {
 
         let mut meta = row_to_meta(&srow);
         meta.message_count = messages.len() as i64;
-        Ok(Some(StoredSession { meta, messages }))
+        let goal: String = srow.get("goal");
+        Ok(Some(StoredSession {
+            meta,
+            messages,
+            goal: (!goal.is_empty()).then_some(goal),
+        }))
     }
 
     /// Messages across *all* sessions whose timestamp is strictly after `since`
@@ -580,6 +589,7 @@ mod tests {
             messages: msgs,
             todos: vec![],
             model: "m".into(),
+            goal: None,
             total_input_tokens: 10,
             total_output_tokens: 5,
             turn_count: 1,

@@ -255,6 +255,22 @@ pub async fn set_yolo(State(state): State<AppState>, Json(body): Json<YoloBody>)
 }
 
 #[derive(Deserialize)]
+pub struct GoalBody {
+    /// The standing objective for this session; an empty string clears it.
+    pub goal: String,
+}
+
+pub async fn set_goal(State(state): State<AppState>, Json(body): Json<GoalBody>) -> Json<Value> {
+    let ok = state
+        .current()
+        .await
+        .send(Command::SetGoal { text: body.goal })
+        .await
+        .is_ok();
+    Json(json!({ "ok": ok }))
+}
+
+#[derive(Deserialize)]
 pub struct PlanModeBody {
     pub on: bool,
 }

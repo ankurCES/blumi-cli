@@ -47,6 +47,7 @@ impl blumi_tui::SessionFactory for TuiSessionFactory {
         state.messages = stored.messages;
         state.total_input_tokens = stored.meta.input_tokens.max(0) as u32;
         state.total_output_tokens = stored.meta.output_tokens.max(0) as u32;
+        state.goal = stored.goal;
 
         build_session(&self.config, false, Some(state)).await
     }
@@ -69,6 +70,7 @@ impl blumi_tui::SessionFactory for TuiSessionFactory {
         state.total_input_tokens = snapshot.total_input_tokens;
         state.total_output_tokens = snapshot.total_output_tokens;
         state.turn_count = snapshot.turn_count;
+        state.goal = snapshot.goal;
 
         build_session(&config, false, Some(state)).await
     }
@@ -145,6 +147,7 @@ impl blumi_tui::SessionFactory for TuiSessionFactory {
         }
         let mut state = SessionState::new(SessionId::new(), model);
         state.messages = seed;
+        state.goal = snapshot.goal;
         build_session(&config, false, Some(state)).await
     }
 

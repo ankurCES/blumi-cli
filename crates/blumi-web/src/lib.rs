@@ -640,6 +640,7 @@ pub fn router(state: AppState) -> Router {
         .route("/api/compact", post(api::compact))
         .route("/api/undo", post(api::undo))
         .route("/api/yolo", post(api::set_yolo))
+        .route("/api/goal", post(api::set_goal))
         .route("/api/plan/mode", post(api::set_plan_mode))
         .route("/api/brain/mode", post(api::set_brain_mode))
         .route("/api/autocontinue", post(api::set_autocontinue))

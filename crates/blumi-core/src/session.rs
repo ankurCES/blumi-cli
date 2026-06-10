@@ -69,6 +69,7 @@ impl SessionState {
             messages: self.messages.clone(),
             todos: self.todos.clone(),
             model: self.model.clone(),
+            goal: self.goal.clone(),
             total_input_tokens: self.total_input_tokens,
             total_output_tokens: self.total_output_tokens,
             turn_count: self.turn_count,
@@ -84,6 +85,8 @@ pub struct SessionSnapshot {
     pub messages: Vec<Message>,
     pub todos: Vec<Todo>,
     pub model: String,
+    /// Standing objective, carried across reload / resume / rollover.
+    pub goal: Option<String>,
     pub total_input_tokens: u32,
     pub total_output_tokens: u32,
     pub turn_count: u32,
