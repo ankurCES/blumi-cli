@@ -165,7 +165,9 @@ pub fn parse_input<T: DeserializeOwned>(input: serde_json::Value) -> Result<T, T
         let hint = if raw.contains("missing field") {
             " — include every required field as a JSON object matching the tool's schema. \
              For file tools, pass the file path as `path` (absolute preferred) and the file \
-             contents as `content`."
+             contents as `content`. If the contents are very large, write the file in parts \
+             with FileWrite — the first call normally, then `append: true` for each remaining \
+             chunk — rather than one oversized call."
         } else {
             " — send the arguments as a JSON object matching the tool's schema."
         };

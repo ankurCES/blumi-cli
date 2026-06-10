@@ -18,6 +18,13 @@ Assume they are a skilled developer, but know almost nothing about our toolset o
 **Save plans to:** `docs/superpowers/plans/YYYY-MM-DD-<feature-name>.md`
 - (User preferences for plan location override this default)
 
+**Write the plan to that file — never dump the full plan into the chat instead.** Plans are long and routinely exceed what fits in one response. Do NOT try to emit the whole plan in a single `FileWrite` call; if it gets truncated the write fails and nothing is saved. Write it incrementally:
+1. `FileWrite` the header (and the first task) to the plan path.
+2. For every remaining task, call `FileWrite` again with the **same path** and **`append: true`**, adding one task (or a couple) per call.
+3. Never shorten, summarize, or `TODO`-out parts of the plan to make it fit — append another chunk instead.
+
+Then run the Self-Review below against the saved file.
+
 ## Scope Check
 
 If the spec covers multiple independent subsystems, it should have been broken into sub-project specs during brainstorming. If it wasn't, suggest breaking this into separate plans — one per subsystem. Each plan should produce working, testable software on its own.

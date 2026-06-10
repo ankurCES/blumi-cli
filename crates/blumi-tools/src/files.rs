@@ -109,9 +109,15 @@ pub struct FileWriteInput {
     /// resolved against the working directory). Accepts `path` or `file_path`.
     #[serde(alias = "file_path", alias = "filepath", alias = "file")]
     pub path: String,
-    /// Full file contents.
+    /// File contents (this call's chunk when appending).
     #[serde(alias = "contents", alias = "text")]
     pub content: String,
+    /// Append `content` to the file instead of overwriting it. Use this to write
+    /// a file too large to emit in one response across several calls: write the
+    /// first part normally, then call again with the same `path` and
+    /// `append: true` for each remaining part. A missing file is created.
+    #[serde(default)]
+    pub append: bool,
 }
 
 pub struct FileWrite;
@@ -124,7 +130,11 @@ impl TypedTool for FileWrite {
         "FileWrite"
     }
     fn description(&self) -> &str {
-        "Create a new file or overwrite an existing one with the given contents."
+        "Create a new file or overwrite an existing one with the given contents. \
+         For content too large to emit in a single response, write it in parts: \
+         the first call normally, then call again with the same `path` and \
+         `append: true` to append each remaining part. Never truncate or \
+         summarize the content to make it fit — append more parts instead."
     }
     fn required_capabilities(&self, input: &Self::Input) -> Vec<Capability> {
         vec![Capability::file_write(&input.path)]
@@ -137,15 +147,31 @@ impl TypedTool for FileWrite {
         _ct: CancellationToken,
     ) -> Result<ToolResult, ToolError> {
         let path = resolve(&ctx.working_dir, &input.path);
-        let bytes = input.content.as_bytes();
-        journal_before(ctx, &path, "write").await;
-        ctx.executor.write_file(&path, bytes).await.map_err(|e| {
+        let chunk_len = input.content.len();
+        journal_before(ctx, &path, if input.append { "append" } else { "write" }).await;
+        // Append is a read-modify-write so it works across every executor; the
+        // journal above already captured the prior contents for undo.
+        let bytes: Vec<u8> = if input.append {
+            let mut existing = ctx.executor.read_file(&path).await.unwrap_or_default();
+            existing.extend_from_slice(input.content.as_bytes());
+            existing
+        } else {
+            input.content.into_bytes()
+        };
+        let total = bytes.len();
+        ctx.executor.write_file(&path, &bytes).await.map_err(|e| {
             ToolError::Execution(format!("could not write {}: {e}", path.display()))
         })?;
-        Ok(
-            ToolResult::success(format!("Wrote {} bytes to {}", bytes.len(), input.path))
-                .with_side_effects(vec![SideEffect::file_write(input.path, bytes.len() as u64)]),
-        )
+        let msg = if input.append {
+            format!(
+                "Appended {chunk_len} bytes to {} (total {total} bytes)",
+                input.path
+            )
+        } else {
+            format!("Wrote {total} bytes to {}", input.path)
+        };
+        Ok(ToolResult::success(msg)
+            .with_side_effects(vec![SideEffect::file_write(input.path, total as u64)]))
     }
 }
 
@@ -393,6 +419,58 @@ mod tests {
         let create = journal.pop().unwrap();
         assert_eq!(create.op, "write");
         assert!(create.before.is_none());
+    }
+
+    #[tokio::test]
+    async fn write_append_accumulates() {
+        let dir = tempfile::tempdir().unwrap();
+        let c = ctx(dir.path());
+        let w = blumi_core::Typed(FileWrite);
+
+        // First chunk: a normal write creates the file.
+        blumi_core::Tool::execute(
+            &w,
+            json!({ "path": "plan.md", "content": "part 1\n" }),
+            &c,
+            CancellationToken::new(),
+        )
+        .await
+        .unwrap();
+        // Subsequent chunks append rather than overwrite — this is how a large
+        // file is written across several calls without one giant tool call.
+        let res = blumi_core::Tool::execute(
+            &w,
+            json!({ "path": "plan.md", "content": "part 2\n", "append": true }),
+            &c,
+            CancellationToken::new(),
+        )
+        .await
+        .unwrap();
+        assert!(!res.is_error());
+        assert_eq!(
+            std::fs::read_to_string(dir.path().join("plan.md")).unwrap(),
+            "part 1\npart 2\n"
+        );
+    }
+
+    #[tokio::test]
+    async fn append_creates_missing_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let c = ctx(dir.path());
+        let w = blumi_core::Typed(FileWrite);
+        // `append: true` on a non-existent file just creates it.
+        blumi_core::Tool::execute(
+            &w,
+            json!({ "path": "fresh.md", "content": "hello", "append": true }),
+            &c,
+            CancellationToken::new(),
+        )
+        .await
+        .unwrap();
+        assert_eq!(
+            std::fs::read_to_string(dir.path().join("fresh.md")).unwrap(),
+            "hello"
+        );
     }
 
     #[tokio::test]
