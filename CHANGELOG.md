@@ -9,6 +9,35 @@ tracks its own Flutter version (`x.y.z+build`).
 
 ## [Unreleased]
 
+### Fixed
+
+- **Gateway background-task leak.** `build_session` spawned a per-session memory
+  curation loop that never stopped, so a long-lived gateway or TUI accumulated
+  one forever-running (O(N²) graph-rebuilding) sweep per session created — and
+  the gateway *also* ran its own sweep, doubling the work. Curation now runs as a
+  single process-global loop (guarded); the gateway's own loop is diffusion-only;
+  and conflict-resolution + retrospection keep running on the gateway.
+- **`/goal` is now durable and reachable everywhere.** A standing `/goal` was
+  kept only in memory and silently dropped on session reload, resume, or
+  context-rollover, and could only be set from the TUI. It now persists (a
+  `sessions.goal` column) and is restored on every seed path, and a new
+  `POST /api/goal` lets the gateway / blugo set it — where an always-on
+  autonomous host needs it most.
+- **Dead `knowledge.graph` config knobs.** `resolve_imports` and
+  `max_edges_per_symbol` were settable but never read. `max_edges_per_symbol` is
+  now a real cap on outgoing reference edges per symbol; `resolve_imports` is
+  removed until import-scoped resolution ships.
+
+### Performance
+
+- Code-search vector scan is bounded (most-recent 20k symbols) so a very large
+  monorepo can't blow up per-search latency; logs when capped.
+- The memory similarity graph is rebuilt only when the active-memory set changes
+  (with a periodic forced refresh), instead of every sweep tick — no more idle
+  O(N²) all-pairs cosine on an established gateway.
+- `busy_timeout` (5s) on the persistence + knowledge SQLite pools to ride out
+  brief writer contention.
+
 ## [0.6.0] — 2026-06-09
 
 ### Added
