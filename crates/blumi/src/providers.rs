@@ -24,7 +24,7 @@ pub fn suggested_models(provider: &str) -> Vec<String> {
         ],
         "deepseek" => &["deepseek-chat", "deepseek-reasoner"],
         "groq" => &["llama-3.3-70b-versatile", "llama-3.1-8b-instant"],
-        "minimax" => &["MiniMax-Text-01"],
+        "minimax" => &["MiniMax-M3", "MiniMax-M2", "MiniMax-Text-01"],
         "ollama" => &["llama3.1", "qwen2.5-coder", "deepseek-r1"],
         "local-mlx" => &[
             "mlx-community/Qwen2.5-Coder-7B-Instruct-4bit",
