@@ -37,6 +37,16 @@ tracks its own Flutter version (`x.y.z+build`).
   O(N²) all-pairs cosine on an established gateway.
 - `busy_timeout` (5s) on the persistence + knowledge SQLite pools to ride out
   brief writer contention.
+- A content-keyed embedding cache wraps the embedder, so a repeated embed (re-run
+  search, recurring recall query, duplicate grid text) skips the model and its
+  process-global lock.
+- `Message.content` is an `Arc<[ContentPart]>`, so cloning a message (the agent
+  clones the whole context window every step) is a refcount bump rather than a
+  deep copy — across the agent loop, persistence, the grid, and rendering. JSON
+  format unchanged.
+- Retrospection state is mtime-cached (the per-tick `due`/`pending` no longer
+  re-read + parse the JSON until it changes), and code ingest offloads file reads
+  to a blocking pool so a large-repo ingest doesn't stall the runtime.
 
 ## [0.6.0] — 2026-06-09
 
