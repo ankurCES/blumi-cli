@@ -9,7 +9,9 @@ use std::path::Path;
 pub fn suggested_models(provider: &str) -> Vec<String> {
     let m: &[&str] = match provider {
         "anthropic" | "azure-foundry" => &[
-            "claude-sonnet-4-5",
+            "claude-opus-4-8",
+            "claude-sonnet-4-6",
+            "claude-haiku-4-5-20251001",
             "claude-opus-4-1",
             "claude-3-5-haiku-latest",
         ],
@@ -30,6 +32,9 @@ pub fn suggested_models(provider: &str) -> Vec<String> {
             "mlx-community/bge-small-en-v1.5",
         ],
         "local-cuda" => &["Qwen2.5-Coder-7B-Instruct", "llama3.1", "nomic-embed-text"],
+        // Unknown/local provider: no fixed catalog — the user names the model
+        // (`/model <id>`). (Keeping this empty is load-bearing: persist_provider
+        // uses the first entry as the default model on a provider switch.)
         _ => &[],
     };
     m.iter().map(|s| s.to_string()).collect()

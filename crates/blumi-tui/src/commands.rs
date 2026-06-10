@@ -672,10 +672,24 @@ pub async fn run(model: &mut Model, session: &SessionHandle, line: &str) {
         "/yolo" => toggle_yolo(model, session).await,
         "/brain" => {
             if arg.is_empty() {
-                model.entries.push(Entry::Notice(format!(
-                    "🧠 brain {} — a local LLM reviews tool approvals. usage: /brain off|advisory|auto",
-                    model.brain_mode
-                )));
+                let cur = model.brain_mode.clone();
+                let item = |name: &str, hint: &str| {
+                    let label = if name == cur.as_str() {
+                        format!("● {name}")
+                    } else {
+                        name.to_string()
+                    };
+                    (label, hint.to_string(), format!("/brain {name}"))
+                };
+                let items = vec![
+                    item("off", "approvals ask you as usual"),
+                    item("advisory", "it recommends; you still confirm"),
+                    item("auto", "it approves/denies (dangerous still ask)"),
+                ];
+                model.dialog = Some(crate::dialog::Picker::menu(
+                    "Brain (local-LLM approvals)",
+                    items,
+                ));
             } else if let Some(m) = blumi_core::BrainMode::parse(&arg) {
                 model.brain_mode = m.label().to_string();
                 let _ = session
@@ -769,17 +783,27 @@ pub async fn run(model: &mut Model, session: &SessionHandle, line: &str) {
         "/remote" => {
             let a = arg.trim();
             if a.is_empty() {
-                let mut s = String::from("remote instances:");
                 if model.remotes.is_empty() {
-                    s.push_str("\n  (none configured — add under [remote] in settings.json)");
+                    model.entries.push(Entry::Notice(
+                        "no remotes configured — add under [remote] in settings.json".into(),
+                    ));
                 } else {
+                    let mut items: Vec<(String, String, String)> = vec![(
+                        "local".to_string(),
+                        "this machine".to_string(),
+                        "/remote local".to_string(),
+                    )];
                     for n in &model.remotes {
                         let open = model.tabs.iter().any(|(t, r)| *r && t == n);
-                        s.push_str(&format!("\n  - {n}{}", if open { "  (open)" } else { "" }));
+                        let hint = if open {
+                            "open".to_string()
+                        } else {
+                            String::new()
+                        };
+                        items.push((n.clone(), hint, format!("/remote {n}")));
                     }
+                    model.dialog = Some(crate::dialog::Picker::menu("Remote instance", items));
                 }
-                s.push_str("\n  usage: /remote <name> · /remote local · /remote next");
-                model.entries.push(Entry::Notice(s));
             } else if a.eq_ignore_ascii_case("local") {
                 model.request_tab(0);
             } else if a.eq_ignore_ascii_case("next") {
@@ -799,16 +823,19 @@ pub async fn run(model: &mut Model, session: &SessionHandle, line: &str) {
                         .entries
                         .push(Entry::Notice("no personas configured".into()));
                 } else {
-                    let mut s = String::from("personas:");
-                    for (n, d) in &model.personas {
-                        let marker = if *n == model.persona {
-                            "  ← active"
-                        } else {
-                            ""
-                        };
-                        s.push_str(&format!("\n- {n}: {d}{marker}"));
-                    }
-                    model.entries.push(Entry::Notice(s));
+                    let items = model
+                        .personas
+                        .iter()
+                        .map(|(n, d)| {
+                            let label = if *n == model.persona {
+                                format!("● {n}")
+                            } else {
+                                n.clone()
+                            };
+                            (label, d.clone(), format!("/persona {n}"))
+                        })
+                        .collect();
+                    model.dialog = Some(crate::dialog::Picker::menu("Persona", items));
                 }
             } else if model.personas.iter().any(|(n, _)| n == &arg) {
                 model.persona = arg.clone();
@@ -925,7 +952,20 @@ pub async fn run(model: &mut Model, session: &SessionHandle, line: &str) {
         }
         "/theme" => {
             if arg.is_empty() {
-                model.cycle_theme();
+                let current = model.theme.name;
+                let items = crate::theme::THEMES
+                    .iter()
+                    .map(|f| {
+                        let t = f();
+                        let label = if t.name == current {
+                            format!("● {}", t.name)
+                        } else {
+                            t.name.to_string()
+                        };
+                        (label, String::new(), format!("/theme {}", t.name))
+                    })
+                    .collect();
+                model.dialog = Some(crate::dialog::Picker::menu("Theme", items));
             } else if model.set_theme(&arg) {
                 model.entries.push(Entry::Notice(format!("theme: {arg}")));
             } else {
@@ -936,33 +976,46 @@ pub async fn run(model: &mut Model, session: &SessionHandle, line: &str) {
         }
         "/motion" => {
             use crate::motion::MotionLevel;
-            let level = match arg.as_str() {
-                "off" => Some(MotionLevel::Off),
-                "reduced" | "low" => Some(MotionLevel::Reduced),
-                "full" | "on" => Some(MotionLevel::Full),
-                "" => Some(if model.motion.level() == MotionLevel::Off {
-                    MotionLevel::Full
-                } else {
-                    MotionLevel::Off
-                }),
-                _ => None,
-            };
-            match level {
-                Some(l) => {
-                    model.motion.set_level(l);
-                    if l != MotionLevel::Off {
-                        model.motion.scene_in();
-                    }
-                    let name = match l {
-                        MotionLevel::Full => "full",
-                        MotionLevel::Reduced => "reduced",
-                        MotionLevel::Off => "off",
+            if arg.is_empty() {
+                let cur = model.motion.level();
+                let item = |l: MotionLevel, name: &str, hint: &str| {
+                    let label = if l == cur {
+                        format!("● {name}")
+                    } else {
+                        name.to_string()
                     };
-                    model.entries.push(Entry::Notice(format!("motion: {name}")));
+                    (label, hint.to_string(), format!("/motion {name}"))
+                };
+                let items = vec![
+                    item(MotionLevel::Full, "full", "all effects"),
+                    item(MotionLevel::Reduced, "reduced", "minimal effects"),
+                    item(MotionLevel::Off, "off", "no effects"),
+                ];
+                model.dialog = Some(crate::dialog::Picker::menu("Motion effects", items));
+            } else {
+                let level = match arg.as_str() {
+                    "off" => Some(MotionLevel::Off),
+                    "reduced" | "low" => Some(MotionLevel::Reduced),
+                    "full" | "on" => Some(MotionLevel::Full),
+                    _ => None,
+                };
+                match level {
+                    Some(l) => {
+                        model.motion.set_level(l);
+                        if l != MotionLevel::Off {
+                            model.motion.scene_in();
+                        }
+                        let name = match l {
+                            MotionLevel::Full => "full",
+                            MotionLevel::Reduced => "reduced",
+                            MotionLevel::Off => "off",
+                        };
+                        model.entries.push(Entry::Notice(format!("motion: {name}")));
+                    }
+                    None => model
+                        .entries
+                        .push(Entry::Notice("usage: /motion [full|reduced|off]".into())),
                 }
-                None => model
-                    .entries
-                    .push(Entry::Notice("usage: /motion [full|reduced|off]".into())),
             }
         }
         "/status" => model.entries.push(Entry::Notice(status_text(model))),

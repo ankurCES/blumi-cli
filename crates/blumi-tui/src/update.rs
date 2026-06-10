@@ -1144,6 +1144,7 @@ async fn perform_action(model: &mut Model, action: Action, session: &SessionHand
                 model.start_key_prompt(name);
             }
         }
+        Action::RunCommand(line) => commands::run(model, session, &line).await,
     }
 }
 

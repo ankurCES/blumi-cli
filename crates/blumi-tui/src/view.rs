@@ -1085,12 +1085,18 @@ fn render_slash_popup(model: &Model, f: &mut Frame, editor: Rect, theme: &Theme)
     f.render_widget(block, popup);
 
     let sel = model.slash_sel.min(matches.len().saturating_sub(1));
+    // Window the visible rows around the selection so arrowing past the last
+    // visible row scrolls the list instead of moving the highlight off-screen.
+    let start = sel
+        .saturating_sub(shown.saturating_sub(1))
+        .min(matches.len().saturating_sub(shown));
     let rows: Vec<Line> = matches
         .iter()
+        .skip(start)
         .take(shown)
         .enumerate()
         .map(|(i, c)| {
-            let selected = i == sel;
+            let selected = start + i == sel;
             let marker = if selected { "❯ " } else { "  " };
             let name_style = if selected {
                 theme.bold_primary()

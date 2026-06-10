@@ -21,6 +21,9 @@ pub enum Action {
     OpenModels,
     OpenProviders,
     ToggleYolo,
+    /// Re-run a slash-command line — used by the generated choice menus
+    /// (`/theme`, `/persona`, `/brain`, `/motion`, `/remote`, …).
+    RunCommand(String),
 }
 
 pub struct PickerItem {
@@ -84,6 +87,29 @@ impl Picker {
         ];
         let mut p = Picker {
             title: "Commands".into(),
+            items,
+            filter: String::new(),
+            filtered: Vec::new(),
+            selected: 0,
+        };
+        p.refilter();
+        p
+    }
+
+    /// A simple choice menu: each item re-runs a slash-command `line` when
+    /// picked. Used to turn enumerable commands (`/theme`, `/persona`, `/brain`,
+    /// `/motion`, `/remote`) into pickers. `items` is `(label, hint, line)`.
+    pub fn menu(title: &str, items: Vec<(String, String, String)>) -> Self {
+        let items = items
+            .into_iter()
+            .map(|(label, hint, line)| PickerItem {
+                label,
+                hint,
+                action: Action::RunCommand(line),
+            })
+            .collect();
+        let mut p = Picker {
+            title: title.to_string(),
             items,
             filter: String::new(),
             filtered: Vec::new(),
