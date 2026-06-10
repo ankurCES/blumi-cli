@@ -305,7 +305,10 @@ pub async fn build_session(
         .await
         {
             Ok(ks) => {
-                let ks = Arc::new(ks.with_graph_mode(crate::knowledge::graph_mode(config)));
+                let ks = Arc::new(
+                    ks.with_graph_mode(crate::knowledge::graph_mode(config))
+                        .with_edge_cap(config.knowledge.graph.max_edges_per_symbol),
+                );
                 registry.register(Arc::new(blumi_core::Typed(blumi_tools::CodeSearch::new(
                     ks.clone(),
                 ))));

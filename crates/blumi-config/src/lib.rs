@@ -608,9 +608,7 @@ pub enum GraphMode {
 pub struct KnowledgeGraphConfig {
     /// How edges are built. Default `lite` (today's behavior).
     pub mode: GraphMode,
-    /// Resolve `import`/`use` statements when building structural edges.
-    pub resolve_imports: bool,
-    /// Cap outgoing edges per symbol (noise control). 0 = uncapped.
+    /// Cap outgoing reference edges per symbol (noise control). 0 = uncapped.
     pub max_edges_per_symbol: u32,
     /// Feed a symbol's caller fan-in into the RPL blast radius.
     pub rpl_impact: bool,
@@ -620,7 +618,6 @@ impl Default for KnowledgeGraphConfig {
     fn default() -> Self {
         KnowledgeGraphConfig {
             mode: GraphMode::Lite,
-            resolve_imports: true,
             max_edges_per_symbol: 64,
             rpl_impact: true,
         }

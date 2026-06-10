@@ -128,6 +128,10 @@ pub struct KnowledgeStore {
     pool: SqlitePool,
     embedder: Option<Arc<dyn EmbeddingClient>>,
     graph_mode: GraphMode,
+    /// Max outgoing reference edges per symbol (0 = uncapped). Read only by the
+    /// structural graph builder, so it's dead when `code-graph` is compiled out.
+    #[cfg_attr(not(feature = "code-graph"), allow(dead_code))]
+    edge_cap: usize,
 }
 
 impl KnowledgeStore {
@@ -154,6 +158,7 @@ impl KnowledgeStore {
             pool,
             embedder,
             graph_mode: GraphMode::default(),
+            edge_cap: 64,
         })
     }
 
@@ -171,12 +176,20 @@ impl KnowledgeStore {
             pool,
             embedder,
             graph_mode: GraphMode::default(),
+            edge_cap: 64,
         })
     }
 
     /// Set how the reference graph is built (default [`GraphMode::Lite`]).
     pub fn with_graph_mode(mut self, mode: GraphMode) -> Self {
         self.graph_mode = mode;
+        self
+    }
+
+    /// Cap the distinct outgoing reference edges per source symbol when building
+    /// the structural graph (0 = uncapped). Noise control for hub call-sites.
+    pub fn with_edge_cap(mut self, cap: u32) -> Self {
+        self.edge_cap = cap as usize;
         self
     }
 
@@ -500,17 +513,33 @@ impl KnowledgeStore {
     }
 
     /// All symbols with a vector, scored by cosine against `qvec` (≥ floor).
+    ///
+    /// There is no ANN index, so this is an O(N) scan — load + decode every code
+    /// vector and cosine in Rust. It's bounded by `MAX_VEC_SCAN` (most-recently
+    /// ingested symbols first) so a huge monorepo can't blow up per-search
+    /// latency; a repo below the cap is scanned in full and behaves exactly as
+    /// before. (A `sqlite-vec` ANN index is the proper fix at very large scale.)
     async fn vector_candidates(&self, qvec: &[f32]) -> Vec<CodeHit> {
+        const MAX_VEC_SCAN: i64 = 20_000;
         let rows = sqlx::query(
             "SELECT f.path AS path, s.name AS name, s.kind AS kind,
                     s.start_line AS sl, s.end_line AS el, s.snippet AS snippet, v.vec AS vec
              FROM code_vec v
              JOIN code_symbols s ON s.id = v.symbol_id
-             JOIN code_files f ON f.id = s.file_id",
+             JOIN code_files f ON f.id = s.file_id
+             ORDER BY v.symbol_id DESC
+             LIMIT ?",
         )
+        .bind(MAX_VEC_SCAN)
         .fetch_all(&self.pool)
         .await
         .unwrap_or_default();
+        if rows.len() as i64 >= MAX_VEC_SCAN {
+            tracing::debug!(
+                "code vector search capped at {MAX_VEC_SCAN} symbols (repo larger); \
+                 semantic results may be partial — consider an ANN index"
+            );
+        }
         rows.iter()
             .filter_map(|r| {
                 let blob: Vec<u8> = r.get("vec");
@@ -727,11 +756,18 @@ impl KnowledgeStore {
             count += 1;
         }
 
-        // Reference sites → resolved typed edges.
+        // Reference sites → resolved typed edges. `edge_cap` bounds the distinct
+        // outgoing reference edges per source symbol (noise control for hub
+        // call-sites); the `contains` edges above are never capped.
+        let cap = self.edge_cap;
+        let mut per_src: std::collections::HashMap<i64, usize> = std::collections::HashMap::new();
         for s in sites {
             let Some(&from_id) = fq_to_id.get(&s.from) else {
                 continue;
             };
+            if cap > 0 && per_src.get(&from_id).copied().unwrap_or(0) >= cap {
+                continue;
+            }
             // Build the (target, resolved) candidates: a qualified name resolves
             // via the fqname table; a bare name via a unique symbol name, else
             // ambiguous (link all candidates, marked unresolved).
@@ -751,6 +787,9 @@ impl KnowledgeStore {
                 if dst == from_id {
                     continue;
                 }
+                if cap > 0 && per_src.get(&from_id).copied().unwrap_or(0) >= cap {
+                    break;
+                }
                 sqlx::query(edge_sql)
                     .bind(from_id)
                     .bind(dst)
@@ -759,6 +798,7 @@ impl KnowledgeStore {
                     .execute(&mut *tx)
                     .await?;
                 count += 1;
+                *per_src.entry(from_id).or_default() += 1;
             }
         }
 
