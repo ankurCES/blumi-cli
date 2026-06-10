@@ -8,6 +8,7 @@
 
 pub mod accel;
 mod anthropic;
+mod embed_cache;
 mod embeddings_grid;
 mod embeddings_openai;
 mod gemini;
@@ -21,6 +22,7 @@ mod embeddings_local;
 
 pub use accel::{detect as detect_accelerator, Accelerator};
 pub use anthropic::AnthropicClient;
+pub use embed_cache::CachingEmbeddingClient;
 pub use embeddings_grid::GridEmbeddingClient;
 pub use embeddings_openai::OpenAiEmbeddingClient;
 pub use gemini::GeminiClient;

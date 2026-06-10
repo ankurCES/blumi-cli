@@ -21,7 +21,15 @@ static EMBEDDER: OnceLock<Option<Arc<dyn blumi_core::EmbeddingClient>>> = OnceLo
 
 pub fn shared_embedder(config: &BlumiConfig) -> Option<Arc<dyn blumi_core::EmbeddingClient>> {
     EMBEDDER
-        .get_or_init(|| blumi_llm::build_embeddings_client(config))
+        .get_or_init(|| {
+            // Wrap the backend in a content cache so repeated embeds (a re-run
+            // code search, duplicate texts from grid peers, the same text seen by
+            // a sweep) skip the model and its process-global lock.
+            blumi_llm::build_embeddings_client(config).map(|inner| {
+                Arc::new(blumi_llm::CachingEmbeddingClient::new(inner))
+                    as Arc<dyn blumi_core::EmbeddingClient>
+            })
+        })
         .clone()
 }
 
