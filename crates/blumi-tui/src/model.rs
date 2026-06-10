@@ -218,6 +218,8 @@ pub enum Msg {
     Tick,
     /// A background job (`/bg`) finished — its result, posted from a detached task.
     Bg(BgUpdate),
+    /// The provider's live model catalog arrived (from a background fetch).
+    Models(Vec<String>),
 }
 
 /// A finished background job, sent from its detached task back to the UI loop.

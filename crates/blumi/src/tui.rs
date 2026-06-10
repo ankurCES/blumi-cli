@@ -191,6 +191,10 @@ impl blumi_tui::SessionFactory for TuiSessionFactory {
         }
     }
 
+    async fn fetch_models(&self) -> Option<Vec<String>> {
+        crate::providers::fetch_models(&self.fresh_config()).await
+    }
+
     async fn set_provider(&self, provider: &str, api_key: Option<String>) -> anyhow::Result<()> {
         if !self.fresh_config().providers.contains_key(provider) {
             anyhow::bail!("unknown provider '{provider}'");

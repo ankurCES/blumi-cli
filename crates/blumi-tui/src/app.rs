@@ -84,6 +84,12 @@ pub trait SessionFactory: Send + Sync {
     async fn save(&self, handle: &SessionHandle);
     /// Active provider/model + suggestions + selectable providers (read live).
     fn model_options(&self) -> ModelOptions;
+    /// Fetch the provider's live model catalog using the authenticated key
+    /// (best-effort; `None` if unsupported / the call fails). Lets `/model` show
+    /// the real models for providers without a static catalog.
+    async fn fetch_models(&self) -> Option<Vec<String>> {
+        None
+    }
     /// Persist a provider switch (+ an optional API key) to settings.json. The
     /// app loop then reloads the session to apply it.
     async fn set_provider(&self, provider: &str, api_key: Option<String>) -> anyhow::Result<()>;
@@ -255,6 +261,19 @@ async fn run_loop(
     // Background jobs (`/bg`) run on detached tasks and report completion here.
     let (bg_tx, mut bg_rx) = tokio::sync::mpsc::unbounded_channel::<BgUpdate>();
 
+    // Live model catalog: fetch the provider's real model list off the hot path
+    // (authenticated) and merge it into the `/model` picker when it arrives.
+    let (models_tx, mut models_rx) = tokio::sync::mpsc::unbounded_channel::<Vec<String>>();
+    {
+        let factory = factory.clone();
+        let tx = models_tx.clone();
+        tokio::spawn(async move {
+            if let Some(m) = factory.fetch_models().await {
+                let _ = tx.send(m);
+            }
+        });
+    }
+
     terminal.draw(|f| view::render(&mut model, f))?;
 
     loop {
@@ -273,6 +292,7 @@ async fn run_loop(
                 Err(_) => None, // lagged or closed; keep going
             },
             Some(u) = bg_rx.recv() => Some(Msg::Bg(u)),
+            Some(m) = models_rx.recv() => Some(Msg::Models(m)),
             _ = tick.tick() => Some(Msg::Tick),
         };
 
@@ -499,6 +519,16 @@ async fn run_loop(
                                 events = session.subscribe();
                                 model.model_options = factory.model_options();
                                 model.model_name = model.model_options.model.clone();
+                                // Re-fetch the new provider's live model catalog.
+                                {
+                                    let factory = factory.clone();
+                                    let tx = models_tx.clone();
+                                    tokio::spawn(async move {
+                                        if let Some(m) = factory.fetch_models().await {
+                                            let _ = tx.send(m);
+                                        }
+                                    });
+                                }
                                 model
                                     .entries
                                     .push(Entry::Notice(format!("✿ provider → {provider}")));

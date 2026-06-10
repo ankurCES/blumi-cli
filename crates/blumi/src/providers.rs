@@ -40,6 +40,105 @@ pub fn suggested_models(provider: &str) -> Vec<String> {
     m.iter().map(|s| s.to_string()).collect()
 }
 
+/// Fetch the active provider's live model catalog using its configured key
+/// (best-effort). Returns chat-capable model ids, or `None` when the provider
+/// doesn't support a models listing / the call fails — callers then fall back to
+/// [`suggested_models`]. Handles Anthropic (`/v1/models`), Gemini
+/// (`/v1beta/models`), and the OpenAI-compatible `{base_url}/models` shape that
+/// every other provider (openai, openrouter, deepseek, groq, minimax, ollama,
+/// local, …) speaks. Azure Foundry uses deployments, not a catalog, so it stays
+/// on the static list.
+pub async fn fetch_models(c: &BlumiConfig) -> Option<Vec<String>> {
+    let provider = c.llm.provider.clone();
+    if provider.is_empty() || provider == "mock" || provider == "azure-foundry" {
+        return None;
+    }
+    let pc = c.providers.get(&provider)?;
+    let key = pc.resolve_api_key();
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(6))
+        .build()
+        .ok()?;
+
+    let resp = match provider.as_str() {
+        "anthropic" => {
+            client
+                .get("https://api.anthropic.com/v1/models?limit=1000")
+                .header("x-api-key", key?)
+                .header("anthropic-version", "2023-06-01")
+                .send()
+                .await
+        }
+        "gemini" => {
+            client
+                .get(format!(
+                    "https://generativelanguage.googleapis.com/v1beta/models?pageSize=1000&key={}",
+                    key?
+                ))
+                .send()
+                .await
+        }
+        _ => {
+            // OpenAI + every OpenAI-compatible provider: `{base_url}/models`.
+            let base = pc.base_url.clone()?;
+            let mut req = client.get(format!("{}/models", base.trim_end_matches('/')));
+            if let Some(k) = key {
+                req = req.bearer_auth(k);
+            }
+            req.send().await
+        }
+    };
+
+    let v: Value = resp.ok()?.json().await.ok()?;
+    let mut out: Vec<String> = Vec::new();
+    // OpenAI / Anthropic shape: `{ "data": [ { "id": "…" } ] }`.
+    if let Some(arr) = v.get("data").and_then(Value::as_array) {
+        for id in arr
+            .iter()
+            .filter_map(|it| it.get("id").and_then(Value::as_str))
+        {
+            out.push(id.to_string());
+        }
+    } else if let Some(arr) = v.get("models").and_then(Value::as_array) {
+        // Gemini shape: `{ "models": [ { "name": "models/…", … } ] }`.
+        for it in arr {
+            let chat = it
+                .get("supportedGenerationMethods")
+                .and_then(Value::as_array)
+                .map(|m| m.iter().any(|s| s.as_str() == Some("generateContent")))
+                .unwrap_or(true);
+            if let Some(name) = it.get("name").and_then(Value::as_str) {
+                if chat {
+                    out.push(name.trim_start_matches("models/").to_string());
+                }
+            }
+        }
+    }
+
+    // Drop obvious non-chat models (embeddings / audio / image / moderation) and
+    // cap the list so the picker stays manageable; the picker is fuzzy-filterable.
+    out.retain(|m| is_chat_model(m));
+    out.truncate(60);
+    (!out.is_empty()).then_some(out)
+}
+
+/// Heuristic: keep chat/completion models, drop embedding/audio/image/etc.
+fn is_chat_model(id: &str) -> bool {
+    let l = id.to_ascii_lowercase();
+    ![
+        "embed",
+        "whisper",
+        "tts",
+        "dall-e",
+        "dalle",
+        "moderation",
+        "rerank",
+        "audio",
+    ]
+    .iter()
+    .any(|bad| l.contains(bad))
+}
+
 /// Human label for a provider name.
 pub fn provider_label(name: &str) -> String {
     match name {

@@ -53,6 +53,23 @@ pub async fn update(model: &mut Model, msg: Msg, session: &SessionHandle) {
                 .push(Entry::Notice(format!("⬢ [{}] {head}\n{body}", u.id)));
             model.mark_dirty();
         }
+        Msg::Models(fetched) => {
+            // Merge the provider's live catalog into the `/model` picker source:
+            // active model first, then the fetched ids, then the static
+            // suggestions as a fallback — deduped, order preserved.
+            if !fetched.is_empty() {
+                let cur = model.model_options.model.clone();
+                let statics = std::mem::take(&mut model.model_options.models);
+                let mut merged: Vec<String> = Vec::with_capacity(fetched.len() + statics.len() + 1);
+                for m in std::iter::once(cur).chain(fetched).chain(statics) {
+                    if !m.is_empty() && !merged.contains(&m) {
+                        merged.push(m);
+                    }
+                }
+                model.model_options.models = merged;
+                model.mark_dirty();
+            }
+        }
     }
 }
 
